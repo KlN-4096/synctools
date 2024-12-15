@@ -94,7 +94,7 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 						},
 						Children: []declarative.Widget{
 							declarative.Label{
-								Text:      "说明: 每行一个文件名或通配符，这些文件将在同步时被忽略",
+								Text:      "说明: 每行一个规则，支持通配符 * 和 ? (* 匹配任意字符，? 匹配单个字符)",
 								TextColor: walk.RGB(128, 128, 128),
 							},
 							declarative.TextEdit{
@@ -118,7 +118,7 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 								},
 							},
 							declarative.Label{
-								Text:      "示例: .DS_Store, thumbs.db, *.tmp",
+								Text:      "示例: *.tmp (所有.tmp文件), config?.ini (如config1.ini), .git/* (git目录下所有文件)",
 								TextColor: walk.RGB(128, 128, 128),
 							},
 						},

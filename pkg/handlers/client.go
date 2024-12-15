@@ -4,7 +4,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"synctools/pkg/common"
 )
@@ -82,7 +81,9 @@ func getFilesInfo(baseDir string, ignoreList []string, logger common.Logger) (ma
 
 			// 检查忽略列表
 			for _, ignore := range ignoreList {
-				if strings.Contains(relPath, ignore) {
+				matched, err := filepath.Match(ignore, relPath)
+				if err == nil && matched {
+					logger.DebugLog("忽略文件: %s (匹配规则: %s)", relPath, ignore)
 					return nil
 				}
 			}
