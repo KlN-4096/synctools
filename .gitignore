@@ -1,2 +1,29 @@
-synctools/server.exe
-synctools/server.exe~
+# Binaries and executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Log files
+logs/
+*.log
+
+# OS specific files
+.DS_Store
+Thumbs.db
