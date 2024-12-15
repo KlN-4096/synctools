@@ -45,6 +45,8 @@ type SyncStatus struct {
 // Logger 定义日志接口
 type Logger interface {
 	AppendText(text string)
+	Log(format string, v ...interface{})
+	DebugLog(format string, v ...interface{})
 }
 
 // GUILogger GUI日志记录器
