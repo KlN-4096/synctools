@@ -14,18 +14,19 @@ import (
 )
 
 type SyncServer struct {
-	Config            common.SyncConfig
-	ConfigFile        string
-	ValidFolders      map[string]bool
-	Running           bool
-	Status            *walk.StatusBarItem
-	Logger            common.Logger
-	InvalidLabel      *walk.TextEdit
-	RedirectComposite *walk.Composite
-	VersionEdit       *walk.LineEdit
-	FolderTable       *walk.TableView
-	FolderModel       *FolderTableModel
-	Listener          net.Listener
+	Config        common.SyncConfig
+	ConfigFile    string
+	ValidFolders  map[string]bool
+	Running       bool
+	Status        *walk.StatusBarItem
+	Logger        common.Logger
+	InvalidLabel  *walk.TextEdit
+	RedirectTable *walk.TableView
+	RedirectModel *RedirectTableModel
+	VersionEdit   *walk.LineEdit
+	FolderTable   *walk.TableView
+	FolderModel   *FolderTableModel
+	Listener      net.Listener
 }
 
 type FolderTableModel struct {
@@ -52,16 +53,39 @@ func (m *FolderTableModel) PublishRowsReset() {
 	m.TableModelBase.PublishRowsReset()
 }
 
+type RedirectTableModel struct {
+	walk.TableModelBase
+	server *SyncServer
+}
+
+func (m *RedirectTableModel) RowCount() int {
+	return len(m.server.Config.FolderRedirects)
+}
+
+func (m *RedirectTableModel) Value(row, col int) interface{} {
+	redirect := m.server.Config.FolderRedirects[row]
+	switch col {
+	case 0:
+		return redirect.ServerPath
+	case 1:
+		return redirect.ClientPath
+	}
+	return nil
+}
+
+func (m *RedirectTableModel) PublishRowsReset() {
+	m.TableModelBase.PublishRowsReset()
+}
+
 func NewSyncServer() *SyncServer {
 	// 设置配置文件路径
 	configDir := filepath.Join(os.Getenv("APPDATA"), "SyncTools")
-	configFile := filepath.Join(configDir, "server_config.json")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		fmt.Printf("创建配置目录失败: %v\n", err)
+	}
 
-	// 加载配置
-	config, err := common.LoadConfig(configFile)
-	if err != nil {
-		fmt.Printf("加载配置失败: %v\n", err)
-		config = &common.SyncConfig{
+	server := &SyncServer{
+		Config: common.SyncConfig{
 			Host:       "0.0.0.0",
 			Port:       6666,
 			SyncDir:    "",
@@ -69,20 +93,26 @@ func NewSyncServer() *SyncServer {
 			FolderRedirects: []common.FolderRedirect{
 				{ServerPath: "clientmods", ClientPath: "mods"},
 			},
+		},
+		ConfigFile:   filepath.Join(configDir, "server_config.json"),
+		ValidFolders: make(map[string]bool),
+	}
+
+	// 初始化表格模型
+	server.FolderModel = &FolderTableModel{server: server}
+	server.RedirectModel = &RedirectTableModel{server: server}
+
+	// 尝试加载配置文件
+	if config, err := common.LoadConfig(server.ConfigFile); err == nil {
+		server.Config = *config
+		// 确保配置加载后刷新表格模型
+		if server.RedirectModel != nil {
+			server.RedirectModel.PublishRowsReset()
+		}
+		if server.FolderModel != nil {
+			server.FolderModel.PublishRowsReset()
 		}
 	}
-
-	server := &SyncServer{
-		Config:       *config,
-		ConfigFile:   configFile,
-		ValidFolders: make(map[string]bool),
-		Running:      false,
-	}
-
-	server.FolderModel = &FolderTableModel{server: server}
-
-	// 初始验证文件夹
-	server.ValidateFolders()
 
 	return server
 }
@@ -199,34 +229,6 @@ func (s *SyncServer) StopServer() {
 }
 
 func (s *SyncServer) UpdateRedirectConfig() {
-	// 清空所有重定向配置
-	s.Config.FolderRedirects = nil
-
-	// 遍历所有重定向配置组件
-	for i := 0; i < s.RedirectComposite.Children().Len(); i++ {
-		composite := s.RedirectComposite.Children().At(i).(*walk.Composite)
-		if composite.Children().Len() < 5 { // 需要至少5个组件：2个标签、2个输入框和1个删除按钮
-			continue
-		}
-
-		// 尝试获取输入框（索引1是服务器输入框，索引3是客户端输入框）
-		serverEdit, ok1 := composite.Children().At(1).(*walk.LineEdit)
-		clientEdit, ok2 := composite.Children().At(3).(*walk.LineEdit)
-
-		// 确保类型转换成功
-		if !ok1 || !ok2 {
-			if s.Logger != nil {
-				s.Logger.DebugLog("类型转换失败: ok1=%v, ok2=%v", ok1, ok2)
-			}
-			continue
-		}
-
-		s.Config.FolderRedirects = append(s.Config.FolderRedirects, common.FolderRedirect{
-			ServerPath: serverEdit.Text(),
-			ClientPath: clientEdit.Text(),
-		})
-	}
-
 	if s.Logger != nil {
 		s.Logger.DebugLog("重定向配置已更新: %v", s.Config.FolderRedirects)
 	}

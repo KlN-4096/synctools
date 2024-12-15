@@ -5,8 +5,8 @@ import (
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
-	"github.com/lxn/win"
 
+	"synctools/pkg/common"
 	"synctools/pkg/server"
 )
 
@@ -84,24 +84,101 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 							},
 							// 重定向列表
 							declarative.Label{Text: "重定向列表:"},
-							declarative.Composite{
-								AssignTo: &server.RedirectComposite,
-								Layout: declarative.VBox{
-									MarginsZero: true,
-									SpacingZero: true,
+							declarative.TableView{
+								AssignTo:         &server.RedirectTable,
+								MinSize:          declarative.Size{Height: 150},
+								AlternatingRowBG: true,
+								Columns: []declarative.TableViewColumn{
+									{Title: "服务器路径", Width: 0, Alignment: declarative.AlignNear},
+									{Title: "客户端路径", Width: 120, Alignment: declarative.AlignCenter},
 								},
-								MinSize: declarative.Size{Height: 100},
+								Model: server.RedirectModel,
+								OnBoundsChanged: func() {
+									if parent := server.RedirectTable.Parent(); parent != nil {
+										parentWidth := parent.ClientBounds().Width
+										server.RedirectTable.Columns().At(0).SetWidth(parentWidth - 200)
+										server.RedirectTable.Columns().At(1).SetWidth(200)
+									}
+								},
+								OnItemActivated: func() {
+									if index := server.RedirectTable.CurrentIndex(); index >= 0 {
+										redirect := &server.Config.FolderRedirects[index]
+										if dlg, err := walk.NewDialog(server.RedirectTable.Form()); err == nil {
+											dlg.SetTitle("编辑重定向配置")
+											dlg.SetLayout(walk.NewVBoxLayout())
+
+											var serverEdit *walk.LineEdit
+											var clientEdit *walk.LineEdit
+
+											declarative.Composite{
+												Layout: declarative.Grid{Columns: 2},
+												Children: []declarative.Widget{
+													declarative.Label{Text: "服务器路径:"},
+													declarative.LineEdit{
+														AssignTo: &serverEdit,
+														Text:     redirect.ServerPath,
+													},
+													declarative.Label{Text: "客户端路径:"},
+													declarative.LineEdit{
+														AssignTo: &clientEdit,
+														Text:     redirect.ClientPath,
+													},
+												},
+											}.Create(declarative.NewBuilder(dlg))
+
+											declarative.Composite{
+												Layout: declarative.HBox{},
+												Children: []declarative.Widget{
+													declarative.HSpacer{},
+													declarative.PushButton{
+														Text: "确定",
+														OnClicked: func() {
+															redirect.ServerPath = serverEdit.Text()
+															redirect.ClientPath = clientEdit.Text()
+															server.RedirectModel.PublishRowsReset()
+															server.SaveConfig()
+															dlg.Accept()
+														},
+													},
+													declarative.PushButton{
+														Text: "取消",
+														OnClicked: func() {
+															dlg.Cancel()
+														},
+													},
+												},
+											}.Create(declarative.NewBuilder(dlg))
+
+											dlg.Run()
+										}
+									}
+								},
 							},
-							// 添加按钮
 							declarative.Composite{
 								Layout: declarative.HBox{},
 								Children: []declarative.Widget{
-									declarative.HSpacer{},
 									declarative.PushButton{
-										Text:    "添加重定向",
-										MinSize: declarative.Size{Width: 100},
+										Text: "添加重定向",
 										OnClicked: func() {
-											addRedirectConfig(server, "新服务器文件夹", "新客户端文件夹")
+											server.Config.FolderRedirects = append(server.Config.FolderRedirects, common.FolderRedirect{
+												ServerPath: "新服务器文件夹",
+												ClientPath: "新客户端文件夹",
+											})
+											server.RedirectModel.PublishRowsReset()
+											server.SaveConfig()
+										},
+									},
+									declarative.PushButton{
+										Text: "删除选中",
+										OnClicked: func() {
+											if index := server.RedirectTable.CurrentIndex(); index >= 0 {
+												server.Config.FolderRedirects = append(
+													server.Config.FolderRedirects[:index],
+													server.Config.FolderRedirects[index+1:]...,
+												)
+												server.RedirectModel.PublishRowsReset()
+												server.SaveConfig()
+											}
 										},
 									},
 								},
@@ -154,75 +231,4 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 			},
 		},
 	}
-}
-
-// 添加新函数用于创建重定向配置行
-func addRedirectConfig(server *server.SyncServer, initialServerPath, initialClientPath string) {
-	composite, err := walk.NewComposite(server.RedirectComposite)
-	if err != nil {
-		return
-	}
-
-	// 创建水平布局并设置边距
-	layout := walk.NewHBoxLayout()
-	if err := composite.SetLayout(layout); err != nil {
-		return
-	}
-
-	// 设置复合组件的样式以匹配 declarative 的设置
-	composite.SetMinMaxSize(walk.Size{Height: 22}, walk.Size{Height: 22})
-
-	// 服务器路径标签
-	serverLabel, err := walk.NewLabel(composite)
-	if err != nil {
-		return
-	}
-	serverLabel.SetText("服务器:")
-
-	// 服务器路径输入框
-	serverEdit, err := walk.NewLineEdit(composite)
-	if err != nil {
-		return
-	}
-	serverEdit.SetText(initialServerPath)
-	serverEdit.SetMinMaxSize(walk.Size{Width: 150, Height: 20}, walk.Size{Height: 20})
-
-	// 客户端路径标签
-	clientLabel, err := walk.NewLabel(composite)
-	if err != nil {
-		return
-	}
-	clientLabel.SetText("客户端:")
-
-	// 客户端路径输入框
-	clientEdit, err := walk.NewLineEdit(composite)
-	if err != nil {
-		return
-	}
-	clientEdit.SetText(initialClientPath)
-	clientEdit.SetMinMaxSize(walk.Size{Width: 150, Height: 20}, walk.Size{Height: 20})
-
-	// 删除按钮
-	deleteBtn, err := walk.NewPushButton(composite)
-	if err != nil {
-		return
-	}
-	deleteBtn.SetText("X")
-	deleteBtn.Clicked().Attach(func() {
-		composite.Dispose()
-		server.UpdateRedirectConfig()
-	})
-	// 设置按钮的最大高度
-	deleteBtn.SetMinMaxSize(walk.Size{Width: 30, Height: 20}, walk.Size{Height: 20})
-
-	// 添加文本更改事件
-	serverEdit.TextChanged().Attach(func() {
-		server.UpdateRedirectConfig()
-	})
-	clientEdit.TextChanged().Attach(func() {
-		server.UpdateRedirectConfig()
-	})
-
-	// 强制重新布局
-	server.RedirectComposite.SendMessage(win.WM_SIZE, 0, 0)
 }

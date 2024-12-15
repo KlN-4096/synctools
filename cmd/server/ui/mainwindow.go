@@ -28,9 +28,9 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		Size:     declarative.Size{Width: 800, Height: 600},
 		Layout:   declarative.VBox{},
 		OnSizeChanged: func() {
-			// 触发重定向配置的重新布局
-			if server.RedirectComposite != nil {
-				server.RedirectComposite.SendMessage(win.WM_SIZE, 0, 0)
+			// 触发重定向表格的重新布局
+			if server.RedirectTable != nil {
+				server.RedirectTable.SendMessage(win.WM_SIZE, 0, 0)
 			}
 		},
 		Children: []declarative.Widget{
@@ -71,28 +71,35 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		}
 
 		// 保存前更新配置
-		server.Config.Host = hostEdit.Text()
-		fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
-		server.Config.SyncDir = dirLabel.Text()
+		if hostEdit != nil {
+			server.Config.Host = hostEdit.Text()
+		}
+		if portEdit != nil {
+			fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
+		}
+		if dirLabel != nil {
+			server.Config.SyncDir = dirLabel.Text()
+		}
 
 		// 更新忽略列表
-		text := ignoreListEdit.Text()
-		items := strings.Split(text, "\r\n")
-		var ignoreList []string
-		for _, item := range items {
-			if item = strings.TrimSpace(item); item != "" {
-				ignoreList = append(ignoreList, item)
+		if ignoreListEdit != nil {
+			text := ignoreListEdit.Text()
+			items := strings.Split(text, "\r\n")
+			var ignoreList []string
+			for _, item := range items {
+				if item = strings.TrimSpace(item); item != "" {
+					ignoreList = append(ignoreList, item)
+				}
 			}
+			server.Config.IgnoreList = ignoreList
 		}
-		server.Config.IgnoreList = ignoreList
-
-		// 更新重定向配置
-		server.UpdateRedirectConfig()
 
 		// 保存配置
 		if err := server.SaveConfig(); err != nil {
-			server.Logger.Log("关闭前保存配置失败: %v", err)
-		} else {
+			if server.Logger != nil {
+				server.Logger.Log("关闭前保存配置失败: %v", err)
+			}
+		} else if server.Logger != nil {
 			server.Logger.Log("程序关闭前配置已保存")
 		}
 
@@ -121,31 +128,43 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			// 保存前更新配置
-			server.Config.Host = hostEdit.Text()
-			fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
-			server.Config.SyncDir = dirLabel.Text()
+			// 使用 Synchronize 确保在UI线程中执行
+			mainWindow.Synchronize(func() {
+				if mainWindow.Visible() {
+					// 保存前更新配置
+					if hostEdit != nil {
+						server.Config.Host = hostEdit.Text()
+					}
+					if portEdit != nil {
+						fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
+					}
+					if dirLabel != nil {
+						server.Config.SyncDir = dirLabel.Text()
+					}
 
-			// 更新忽略列表
-			text := ignoreListEdit.Text()
-			items := strings.Split(text, "\r\n")
-			var ignoreList []string
-			for _, item := range items {
-				if item = strings.TrimSpace(item); item != "" {
-					ignoreList = append(ignoreList, item)
+					// 更新忽略列表
+					if ignoreListEdit != nil {
+						text := ignoreListEdit.Text()
+						items := strings.Split(text, "\r\n")
+						var ignoreList []string
+						for _, item := range items {
+							if item = strings.TrimSpace(item); item != "" {
+								ignoreList = append(ignoreList, item)
+							}
+						}
+						server.Config.IgnoreList = ignoreList
+					}
+
+					// 保存配置
+					if err := server.SaveConfig(); err != nil {
+						if server.Logger != nil {
+							server.Logger.Log("自动保存配置失败: %v", err)
+						}
+					} else if server.Logger != nil {
+						server.Logger.DebugLog("配置已自动保存")
+					}
 				}
-			}
-			server.Config.IgnoreList = ignoreList
-
-			// 更新重定向配置
-			server.UpdateRedirectConfig()
-
-			// 保存配置
-			if err := server.SaveConfig(); err != nil {
-				server.Logger.Log("自动保存配置失败: %v", err)
-			} else {
-				server.Logger.DebugLog("配置已自动保存")
-			}
+			})
 		}
 	}()
 
