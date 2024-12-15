@@ -15,18 +15,19 @@ import (
 )
 
 type SyncServer struct {
-	config       common.SyncConfig
-	syncFolders  []string
-	validFolders map[string]bool
-	logger       *common.GUILogger
-	folderEdit   *walk.TextEdit
-	status       *walk.StatusBarItem
-	running      bool
-	listener     net.Listener
-	invalidLabel *walk.TextEdit
-	serverPath   *walk.LineEdit
-	clientPath   *walk.LineEdit
-	configFile   string // 配置文件路径
+	config            common.SyncConfig
+	syncFolders       []string
+	validFolders      map[string]bool
+	logger            *common.GUILogger
+	folderEdit        *walk.TextEdit
+	status            *walk.StatusBarItem
+	running           bool
+	listener          net.Listener
+	invalidLabel      *walk.TextEdit
+	serverPath        *walk.LineEdit
+	clientPath        *walk.LineEdit
+	configFile        string          // 配置文件路径
+	redirectComposite *walk.Composite // 用于存放重定向配置的容器
 }
 
 func NewSyncServer() *SyncServer {
@@ -248,6 +249,37 @@ func (s *SyncServer) stopServer() {
 		}
 		s.status.SetText("状态: 已停止")
 		s.logger.Log("服务器已停止")
+	}
+}
+
+func (s *SyncServer) updateRedirectConfig() {
+	// 清空当前配置
+	s.config.FolderRedirects = nil
+
+	// 添加固定的重定向配置
+	s.config.FolderRedirects = append(s.config.FolderRedirects, common.FolderRedirect{
+		ServerPath: s.serverPath.Text(),
+		ClientPath: s.clientPath.Text(),
+	})
+
+	// 遍历所有动态重定向配置组件
+	for i := 0; i < s.redirectComposite.Children().Len(); i++ {
+		composite := s.redirectComposite.Children().At(i).(*walk.Composite)
+		if composite.Children().Len() < 2 {
+			continue
+		}
+
+		serverEdit := composite.Children().At(0).(*walk.LineEdit)
+		clientEdit := composite.Children().At(1).(*walk.LineEdit)
+
+		s.config.FolderRedirects = append(s.config.FolderRedirects, common.FolderRedirect{
+			ServerPath: serverEdit.Text(),
+			ClientPath: clientEdit.Text(),
+		})
+	}
+
+	if s.logger != nil {
+		s.logger.DebugLog("重定向配置已更新: %v", s.config.FolderRedirects)
 	}
 }
 
@@ -488,13 +520,60 @@ func main() {
 											},
 										},
 									},
+									declarative.Label{Text: "额外的重定向配置:"},
+									declarative.Composite{
+										AssignTo: &server.redirectComposite,
+										Layout:   declarative.VBox{},
+									},
 									declarative.PushButton{
 										Text: "+",
 										OnClicked: func() {
+											composite, err := walk.NewComposite(server.redirectComposite)
+											if err != nil {
+												return
+											}
+
+											if err := composite.SetLayout(walk.NewGridLayout()); err != nil {
+												return
+											}
+
+											// 服务器路径标签
+											if label, err := walk.NewLabel(composite); err == nil {
+												label.SetText("服务器文件夹:")
+											}
+
+											// 客户端路径标签
+											if label, err := walk.NewLabel(composite); err == nil {
+												label.SetText("客户端文件夹:")
+											}
+
+											// 服务器路径输入框
+											var serverEdit *walk.LineEdit
+											if serverEdit, err = walk.NewLineEdit(composite); err == nil {
+												serverEdit.SetText("新服务器文件夹")
+											}
+
+											// 客户端路径输入框
+											var clientEdit *walk.LineEdit
+											if clientEdit, err = walk.NewLineEdit(composite); err == nil {
+												clientEdit.SetText("新客户端文件夹")
+											}
+
+											// 删除按钮
+											if deleteBtn, err := walk.NewPushButton(composite); err == nil {
+												deleteBtn.SetText("X")
+												deleteBtn.Clicked().Attach(func() {
+													composite.Dispose()
+													server.updateRedirectConfig()
+												})
+											}
+
+											// 添加新的重定向配置
 											server.config.FolderRedirects = append(server.config.FolderRedirects, common.FolderRedirect{
 												ServerPath: "新服务器文件夹",
 												ClientPath: "新客户端文件夹",
 											})
+
 											if server.logger != nil {
 												server.logger.Log("已添加新的重定向配置")
 											}
@@ -581,6 +660,49 @@ func main() {
 	}
 	server.logger = logger
 	defer server.logger.Close()
+
+	// 初始化重定向配置显示
+	for _, redirect := range server.config.FolderRedirects {
+		composite, err := walk.NewComposite(server.redirectComposite)
+		if err != nil {
+			continue
+		}
+
+		if err := composite.SetLayout(walk.NewGridLayout()); err != nil {
+			continue
+		}
+
+		// 服务器路径标签
+		if label, err := walk.NewLabel(composite); err == nil {
+			label.SetText("服务器文件夹:")
+		}
+
+		// 客户端路径标签
+		if label, err := walk.NewLabel(composite); err == nil {
+			label.SetText("客户端文件夹:")
+		}
+
+		// 服务器路径输入框
+		var serverEdit *walk.LineEdit
+		if serverEdit, err = walk.NewLineEdit(composite); err == nil {
+			serverEdit.SetText(redirect.ServerPath)
+		}
+
+		// 客户端路径输入框
+		var clientEdit *walk.LineEdit
+		if clientEdit, err = walk.NewLineEdit(composite); err == nil {
+			clientEdit.SetText(redirect.ClientPath)
+		}
+
+		// 删除按钮
+		if deleteBtn, err := walk.NewPushButton(composite); err == nil {
+			deleteBtn.SetText("X")
+			deleteBtn.Clicked().Attach(func() {
+				composite.Dispose()
+				server.updateRedirectConfig()
+			})
+		}
+	}
 
 	// 设置初始文本
 	server.folderEdit.SetText(strings.Join(server.syncFolders, "\r\n"))
