@@ -42,8 +42,8 @@ cd synctools
 
 3. 编译服务端和客户端
 ```bash
-go build -o server.exe cmd/server/main.go
-go build -o client.exe cmd/client/main.go
+go build ./cmd/server
+go build ./cmd/client
 ```
 
 ### 使用预编译版本
