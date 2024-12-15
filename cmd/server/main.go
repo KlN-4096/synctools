@@ -25,35 +25,77 @@ type SyncServer struct {
 	status       *walk.StatusBarItem
 	running      bool
 	listener     net.Listener
+	invalidLabel *walk.TextEdit // 用于显示无效文件夹列表
+	debugMode    bool
 }
 
 func NewSyncServer() *SyncServer {
-	return &SyncServer{
-		host:         "0.0.0.0",
-		port:         6666,
+	server := &SyncServer{
+		host: "0.0.0.0",
+		port: 6666,
+
 		syncDir:      "",
-		syncFolders:  make([]string, 0),
+		syncFolders:  []string{"aaa", "bbb", "ccc", "ddd"},
 		validFolders: make(map[string]bool),
 		ignoreList:   []string{".clientconfig", ".DS_Store", "thumbs.db"},
 		running:      false,
 	}
+
+	// 在窗口创建后设置初始文本
+	defer func() {
+		if server.folderEdit != nil {
+			server.folderEdit.SetText(strings.Join(server.syncFolders, "\r\n"))
+		}
+	}()
+
+	return server
 }
 
 func (s *SyncServer) log(format string, v ...interface{}) {
 	common.WriteLog(s.logBox, format, v...)
 }
 
+func (s *SyncServer) debugLog(format string, v ...interface{}) {
+	if !s.debugMode {
+		return
+	}
+	s.log("[DEBUG] "+format, v...)
+}
+
 func (s *SyncServer) validateFolders() {
 	s.validFolders = make(map[string]bool)
+	var invalidFolders []string
+
+	s.debugLog("开始验证文件夹列表...")
+	s.debugLog("当前根目录: %s", s.syncDir)
+	s.debugLog("待验证文件夹数: %d", len(s.syncFolders))
+
 	for _, folder := range s.syncFolders {
 		path := filepath.Join(s.syncDir, folder)
 		valid := common.IsPathExists(path) && common.IsDir(path)
 		s.validFolders[folder] = valid
 		if valid {
-			s.log("有效的同步文件夹: %s", folder)
+			s.debugLog("有效的同步文件夹: %s", folder)
 		} else {
-			s.log("无效的同步文件夹: %s", folder)
+			s.debugLog(">>> 无效的同步文件夹: %s <<<", folder)
+			invalidFolders = append(invalidFolders, folder)
 		}
+	}
+
+	// 更新无效文件夹文本框
+	if len(invalidFolders) > 0 {
+		s.invalidLabel.SetText(strings.Join(invalidFolders, "\r\n"))
+		if s.debugMode {
+			s.log("----------------------------------------")
+			s.log("发现 %d 个无效文件夹:", len(invalidFolders))
+			for i, folder := range invalidFolders {
+				s.log("%d. %s", i+1, folder)
+			}
+			s.log("----------------------------------------")
+		}
+	} else {
+		s.invalidLabel.SetText("")
+		s.debugLog("所有文件夹都有效")
 	}
 }
 
@@ -189,105 +231,139 @@ func main() {
 		Layout:   declarative.VBox{},
 		Children: []declarative.Widget{
 			declarative.Composite{
-				Layout: declarative.Grid{Columns: 2},
-				Children: []declarative.Widget{
-					declarative.Label{Text: "主机:"},
-					declarative.LineEdit{
-						AssignTo: &hostEdit,
-						Text:     server.host,
-						OnTextChanged: func() {
-							server.host = hostEdit.Text()
-						},
-					},
-					declarative.Label{Text: "端口:"},
-					declarative.LineEdit{
-						AssignTo: &portEdit,
-						Text:     fmt.Sprintf("%d", server.port),
-						OnTextChanged: func() {
-							fmt.Sscanf(portEdit.Text(), "%d", &server.port)
-						},
-					},
-					declarative.Label{Text: "同步目录:"},
-					declarative.Label{
-						AssignTo: &dirLabel,
-						Text:     server.syncDir,
-					},
-				},
-			},
-			declarative.Composite{
 				Layout: declarative.HBox{},
 				Children: []declarative.Widget{
-					declarative.PushButton{
-						Text: "选择目录",
-						OnClicked: func() {
-							dlg := new(walk.FileDialog)
-							dlg.Title = "选择同步目录"
+					declarative.Composite{
+						Layout: declarative.VBox{},
+						Children: []declarative.Widget{
+							declarative.GroupBox{
+								Title:  "基本设置",
+								Layout: declarative.Grid{Columns: 2},
+								Children: []declarative.Widget{
+									declarative.Label{Text: "主机:"},
+									declarative.LineEdit{
+										AssignTo: &hostEdit,
+										Text:     server.host,
+										OnTextChanged: func() {
+											server.host = hostEdit.Text()
+										},
+									},
+									declarative.Label{Text: "端口:"},
+									declarative.LineEdit{
+										AssignTo: &portEdit,
+										Text:     fmt.Sprintf("%d", server.port),
+										OnTextChanged: func() {
+											fmt.Sscanf(portEdit.Text(), "%d", &server.port)
+										},
+									},
+									declarative.Label{Text: "同步目录:"},
+									declarative.Label{
+										AssignTo: &dirLabel,
+										Text:     server.syncDir,
+									},
+								},
+							},
+							declarative.Composite{
+								Layout: declarative.HBox{},
+								Children: []declarative.Widget{
+									declarative.PushButton{
+										Text: "选择目录",
+										OnClicked: func() {
+											dlg := new(walk.FileDialog)
+											dlg.Title = "选择同步目录"
 
-							if ok, err := dlg.ShowBrowseFolder(mainWindow); err != nil {
-								walk.MsgBox(mainWindow, "错误",
-									"选择目录时发生错误: "+err.Error(),
-									walk.MsgBoxIconError)
-								return
-							} else if !ok {
-								return
-							}
+											if ok, err := dlg.ShowBrowseFolder(mainWindow); err != nil {
+												walk.MsgBox(mainWindow, "错误",
+													"选择目录时发生错误: "+err.Error(),
+													walk.MsgBoxIconError)
+												return
+											} else if !ok {
+												return
+											}
 
-							if dlg.FilePath != "" {
-								server.syncDir = dlg.FilePath
-								dirLabel.SetText(dlg.FilePath)
-								server.log("同步目录已更改为: %s", dlg.FilePath)
-							}
+											if dlg.FilePath != "" {
+												server.syncDir = dlg.FilePath
+												dirLabel.SetText(dlg.FilePath)
+												server.log("同步目录已更改为: %s", dlg.FilePath)
+												server.validateFolders()
+											}
+										},
+									},
+									declarative.PushButton{
+										Text: "启动服务器",
+										OnClicked: func() {
+											if !server.running {
+												if err := server.startServer(); err != nil {
+													walk.MsgBox(mainWindow, "错误", err.Error(), walk.MsgBoxIconError)
+												}
+											}
+										},
+									},
+									declarative.PushButton{
+										Text: "停止服务器",
+										OnClicked: func() {
+											if server.running {
+												server.stopServer()
+											}
+										},
+									},
+									declarative.HSpacer{}, // 添加弹性空间
+									declarative.CheckBox{
+										Text: "调试模式",
+										OnCheckedChanged: func() {
+											server.debugMode = !server.debugMode
+											if server.debugMode {
+												server.log("调试模式已启用")
+											} else {
+												server.log("调试模式已关闭")
+											}
+										},
+									},
+								},
+							},
+							declarative.Composite{
+								Layout: declarative.VBox{},
+								Children: []declarative.Widget{
+									declarative.Label{Text: "同步文件夹列表 (每行一个):"},
+									declarative.TextEdit{
+										AssignTo: &server.folderEdit,
+										VScroll:  true,
+										MinSize:  declarative.Size{Height: 100},
+										OnTextChanged: func() {
+											text := server.folderEdit.Text()
+											folders := strings.Split(text, "\r\n")
+											var validFolders []string
+											for _, folder := range folders {
+												if strings.TrimSpace(folder) != "" {
+													validFolders = append(validFolders, folder)
+												}
+											}
+											server.syncFolders = validFolders
+											if server.syncDir != "" {
+												server.validateFolders()
+											}
+										},
+									},
+									declarative.TextEdit{
+										AssignTo:   &server.invalidLabel,
+										ReadOnly:   true,
+										VScroll:    true,
+										MinSize:    declarative.Size{Height: 60},
+										Background: declarative.SolidColorBrush{Color: walk.RGB(255, 240, 240)},
+									},
+								},
+							},
 						},
 					},
-					declarative.PushButton{
-						Text: "启动服务器",
-						OnClicked: func() {
-							if !server.running {
-								if err := server.startServer(); err != nil {
-									walk.MsgBox(mainWindow, "错误", err.Error(), walk.MsgBoxIconError)
-								}
-							}
-						},
-					},
-					declarative.PushButton{
-						Text: "停止服务器",
-						OnClicked: func() {
-							if server.running {
-								server.stopServer()
-							}
-						},
-					},
-				},
-			},
-			declarative.TextEdit{
-				AssignTo: &server.logBox,
-				ReadOnly: true,
-				VScroll:  true,
-			},
-			declarative.Composite{
-				Layout: declarative.VBox{},
-				Children: []declarative.Widget{
-					declarative.Label{Text: "同步文件夹列表 (每行一个):"},
-					declarative.TextEdit{
-						AssignTo: &server.folderEdit,
-						VScroll:  true,
-						MinSize:  declarative.Size{Height: 100},
-						OnTextChanged: func() {
-							// 将文本分割为文件夹列表
-							text := server.folderEdit.Text()
-							folders := strings.Split(text, "\r\n")
-							// 过滤空行
-							var validFolders []string
-							for _, folder := range folders {
-								if strings.TrimSpace(folder) != "" {
-									validFolders = append(validFolders, folder)
-								}
-							}
-							server.syncFolders = validFolders
-							// 验证文件夹
-							if server.syncDir != "" {
-								server.validateFolders()
-							}
+					declarative.GroupBox{
+						Title:  "运行日志",
+						Layout: declarative.VBox{},
+						Children: []declarative.Widget{
+							declarative.TextEdit{
+								AssignTo: &server.logBox,
+								ReadOnly: true,
+								VScroll:  true,
+							},
 						},
 					},
 				},
