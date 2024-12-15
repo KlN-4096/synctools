@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/lxn/walk"
 )
 
 // FileInfo 存储文件的基本信息
@@ -219,4 +221,71 @@ func (l *FileLogger) Close() error {
 		return l.logFile.Close()
 	}
 	return nil
+}
+
+// UIConfig 存储UI相关的配置
+type UIConfig struct {
+	Title     string
+	MinWidth  int
+	MinHeight int
+	Width     int
+	Height    int
+}
+
+// ServerConfig 存储服务器配置
+type ServerConfig struct {
+	Host       string
+	Port       int
+	SyncDir    string
+	IgnoreList []string
+}
+
+// LogWriter 定义日志写入接口
+type LogWriter interface {
+	Logger
+	SetText(text string)
+	Text() string
+}
+
+// ValidateResult 存储验证结果
+type ValidateResult struct {
+	Valid   bool
+	Message string
+}
+
+// UIHelper UI帮助方法
+func ShowErrorDialog(owner walk.Form, title, message string) {
+	walk.MsgBox(owner, title, message, walk.MsgBoxIconError)
+}
+
+// CreateLogBox 创建日志文本框
+func CreateLogBox(parent walk.Container) (*walk.TextEdit, error) {
+	logBox, err := walk.NewTextEdit(parent)
+	if err != nil {
+		return nil, err
+	}
+	logBox.SetReadOnly(true)
+	return logBox, nil
+}
+
+// CreateColoredLabel 创建带颜色的标签
+func CreateColoredLabel(text string, color walk.Color) *walk.Label {
+	label, _ := walk.NewLabel(nil)
+	label.SetText(text)
+	label.SetTextColor(color)
+	return label
+}
+
+// FormatBytes 格式化字节大小
+func FormatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

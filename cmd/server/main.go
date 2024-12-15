@@ -344,6 +344,10 @@ func main() {
 											}
 										},
 									},
+									declarative.Label{
+										Text:      "无效的文件夹列表:",
+										TextColor: walk.RGB(192, 0, 0), // 使用红色文字
+									},
 									declarative.TextEdit{
 										AssignTo:   &server.invalidLabel,
 										ReadOnly:   true,
