@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
@@ -20,19 +21,32 @@ type SyncClient struct {
 	status     *walk.StatusBarItem
 	connected  bool
 	conn       net.Conn
+	fileLogger *common.FileLogger
 }
 
 func NewSyncClient() *SyncClient {
+	logger, err := common.NewFileLogger("logs", "client")
+	if err != nil {
+		fmt.Printf("创建日志记录器失败: %v\n", err)
+	}
+
 	return &SyncClient{
 		serverHost: "localhost",
 		serverPort: 6666,
 		syncDir:    "",
 		connected:  false,
+		fileLogger: logger,
 	}
 }
 
 func (c *SyncClient) log(format string, v ...interface{}) {
-	common.WriteLog(c.logBox, format, v...)
+	msg := common.FormatLog(format, v...)
+	c.logBox.AppendText(msg)
+	if c.fileLogger != nil {
+		if err := c.fileLogger.WriteLog(msg); err != nil {
+			fmt.Printf("写入日志文件失败: %v\n", err)
+		}
+	}
 }
 
 func (c *SyncClient) getLocalFilesInfo() (map[string]common.FileInfo, error) {
@@ -155,6 +169,27 @@ func (c *SyncClient) disconnect() {
 }
 
 func main() {
+	// 设置 panic 处理
+	defer func() {
+		if r := recover(); r != nil {
+			// 创建应急日志文件
+			logFile, err := os.OpenFile(
+				filepath.Join("logs", fmt.Sprintf("client_crash_%s.log",
+					time.Now().Format("2006-01-02_15-04-05"))),
+				os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+				0644,
+			)
+			if err == nil {
+				fmt.Fprintf(logFile, "[%s] 程序崩溃: %v\n",
+					time.Now().Format("2006-01-02 15:04:05"), r)
+				if err := logFile.Close(); err != nil {
+					fmt.Printf("关闭崩溃日志文件失败: %v\n", err)
+				}
+			}
+			panic(r) // 重新抛出 panic
+		}
+	}()
+
 	client := NewSyncClient()
 
 	var mainWindow *walk.MainWindow

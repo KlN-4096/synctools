@@ -151,3 +151,72 @@ func IsDir(path string) bool {
 	}
 	return info.IsDir()
 }
+
+// FileLogger 文件日志记录器
+type FileLogger struct {
+	logFile    *os.File
+	currentDay string
+	logDir     string
+	prefix     string // "server" 或 "client"
+}
+
+// NewFileLogger 创建新的文件日志记录器
+func NewFileLogger(logDir, prefix string) (*FileLogger, error) {
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, err
+	}
+
+	logger := &FileLogger{
+		logDir: logDir,
+		prefix: prefix,
+	}
+
+	if err := logger.rotateLog(); err != nil {
+		return nil, err
+	}
+
+	return logger, nil
+}
+
+// rotateLog 根据日期切换日志文件
+func (l *FileLogger) rotateLog() error {
+	currentDay := time.Now().Format("2006-01-02")
+
+	// 如果日期变化或文件未打开，则创建新文件
+	if l.currentDay != currentDay || l.logFile == nil {
+		// 关闭旧文件
+		if l.logFile != nil {
+			l.logFile.Close()
+		}
+
+		// 创建新文件
+		filename := filepath.Join(l.logDir, fmt.Sprintf("%s_%s.log", l.prefix, currentDay))
+		file, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+
+		l.logFile = file
+		l.currentDay = currentDay
+	}
+
+	return nil
+}
+
+// WriteLog 写入日志
+func (l *FileLogger) WriteLog(msg string) error {
+	if err := l.rotateLog(); err != nil {
+		return err
+	}
+
+	_, err := l.logFile.WriteString(msg)
+	return err
+}
+
+// Close 关闭日志文件
+func (l *FileLogger) Close() error {
+	if l.logFile != nil {
+		return l.logFile.Close()
+	}
+	return nil
+}
