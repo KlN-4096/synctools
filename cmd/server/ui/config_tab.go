@@ -38,34 +38,16 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 						AssignTo:         &server.ConfigTable,
 						MinSize:          declarative.Size{Height: 150},
 						AlternatingRowBG: true,
+						CheckBoxes:       true,
+						MultiSelection:   false,
 						Columns: []declarative.TableViewColumn{
+							{Title: "选中", Width: 50},
 							{Title: "整合包名称", Width: 200},
 							{Title: "版本", Width: 100},
 							{Title: "UUID", Width: 300},
 						},
+
 						Model: server.ConfigListModel,
-						OnCurrentIndexChanged: func() {
-							if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-								config := server.ConfigList[index]
-
-								// 加载新配置
-								if err := server.LoadConfigByUUID(config.UUID); err != nil {
-									walk.MsgBox(server.ConfigTable.Form(),
-										"错误",
-										fmt.Sprintf("加载配置失败: %v", err),
-										walk.MsgBoxIconError)
-									return
-								}
-
-								// 更新所有UI元素
-								server.UpdateAllUI()
-
-								// 更新忽略列表（因为这个在server中无法访问）
-								if ignoreListEdit != nil && *ignoreListEdit != nil {
-									(*ignoreListEdit).SetText(strings.Join(config.IgnoreList, "\r\n"))
-								}
-							}
-						},
 					},
 					declarative.Composite{
 						Layout: declarative.HBox{},

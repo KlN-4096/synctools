@@ -36,6 +36,7 @@ type SyncServer struct {
 	HostEdit        *walk.LineEdit
 	PortEdit        *walk.LineEdit
 	DirLabel        *walk.Label
+	SelectedUUID    string
 }
 
 type FolderTableModel struct {
@@ -99,11 +100,60 @@ func (m *ConfigListModel) Value(row, col int) interface{} {
 	config := m.server.ConfigList[row]
 	switch col {
 	case 0:
-		return config.Name
+		return config.UUID == m.server.SelectedUUID
 	case 1:
-		return config.Version
+		return config.Name
 	case 2:
+		return config.Version
+	case 3:
 		return config.UUID
+	}
+	return nil
+}
+
+func (m *ConfigListModel) SetValue(row, col int, value interface{}) error {
+	if col == 0 {
+		if checked, ok := value.(bool); ok && checked {
+			// 取消其他选中项
+			oldUUID := m.server.SelectedUUID
+			m.server.SelectedUUID = m.server.ConfigList[row].UUID
+
+			// 如果是同一个配置，不需要重新加载
+			if oldUUID == m.server.SelectedUUID {
+				return nil
+			}
+
+			// 加载选中的配置
+			if err := m.server.LoadConfigByUUID(m.server.SelectedUUID); err != nil {
+				m.server.SelectedUUID = oldUUID // 恢复原来的选择
+				return err
+			}
+
+			// 立即保存选中的UUID到文件
+			selectedPath := filepath.Join(filepath.Dir(m.server.ConfigFile), "selected_uuid.txt")
+			if err := os.WriteFile(selectedPath, []byte(m.server.SelectedUUID), 0644); err != nil {
+				if m.server.Logger != nil {
+					m.server.Logger.Log("保存选中UUID失败: %v", err)
+				}
+			}
+
+			// 更新UI和日志
+			if m.server.Logger != nil {
+				m.server.Logger.DebugLog("已切换到配置: %s", m.server.Config.Name)
+			}
+			m.PublishRowsReset()
+		}
+	}
+	return nil
+}
+
+func (m *ConfigListModel) Checked(row int) bool {
+	return m.server.ConfigList[row].UUID == m.server.SelectedUUID
+}
+
+func (m *ConfigListModel) SetChecked(row int, checked bool) error {
+	if checked {
+		return m.SetValue(row, 0, true)
 	}
 	return nil
 }
@@ -144,6 +194,7 @@ func NewSyncServer() *SyncServer {
 		ConfigFile:   filepath.Join(configDir, "server_config.json"),
 		ValidFolders: make(map[string]bool),
 		ConfigList:   make([]common.SyncConfig, 0),
+		SelectedUUID: uuidStr, // 设置默认选中的UUID
 	}
 
 	// 初始化表格模型
@@ -170,6 +221,15 @@ func (s *SyncServer) LoadAllConfigs() error {
 		return fmt.Errorf("读取配置目录失败: %v", err)
 	}
 
+	// 尝试加载选中的UUID
+	selectedPath := filepath.Join(configDir, "selected_uuid.txt")
+	if data, err := os.ReadFile(selectedPath); err == nil {
+		s.SelectedUUID = strings.TrimSpace(string(data))
+		if s.Logger != nil {
+			s.Logger.DebugLog("已从文件加载选中的UUID: %s", s.SelectedUUID)
+		}
+	}
+
 	s.ConfigList = make([]common.SyncConfig, 0)
 	for _, file := range files {
 		if !file.IsDir() && strings.HasPrefix(file.Name(), "config_") && strings.HasSuffix(file.Name(), ".json") {
@@ -186,10 +246,28 @@ func (s *SyncServer) LoadAllConfigs() error {
 		configPath := filepath.Join(configDir, fmt.Sprintf("config_%s.json", s.Config.UUID))
 		if err := common.SaveConfig(&s.Config, configPath); err == nil {
 			s.ConfigList = append(s.ConfigList, s.Config)
+			s.SelectedUUID = s.Config.UUID
 		}
 	} else {
-		// 加载第一个配置
-		s.Config = s.ConfigList[0]
+		// 如果没有选中的UUID或者选中的UUID不存在于配置列表中，使用第一个配置
+		validUUID := false
+		if s.SelectedUUID != "" {
+			for _, config := range s.ConfigList {
+				if config.UUID == s.SelectedUUID {
+					validUUID = true
+					s.Config = config
+					break
+				}
+			}
+		}
+
+		if !validUUID {
+			s.SelectedUUID = s.ConfigList[0].UUID
+			s.Config = s.ConfigList[0]
+			if s.Logger != nil {
+				s.Logger.DebugLog("使用第一个配置作为默认配置: %s", s.Config.Name)
+			}
+		}
 	}
 
 	// 更新UI（如果已初始化）
@@ -324,6 +402,14 @@ func (s *SyncServer) SaveConfig() error {
 	// 如果在列表中没找到，说明是新配置，添加到列表中
 	if !found {
 		s.ConfigList = append(s.ConfigList, s.Config)
+	}
+
+	// 保存选中的UUID
+	selectedPath := filepath.Join(filepath.Dir(s.ConfigFile), "selected_uuid.txt")
+	if err := os.WriteFile(selectedPath, []byte(s.SelectedUUID), 0644); err != nil {
+		if s.Logger != nil {
+			s.Logger.Log("保存选中UUID失败: %v", err)
+		}
 	}
 
 	// 更新UI
