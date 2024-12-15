@@ -20,15 +20,92 @@ type FileInfo struct {
 	Size int64  `json:"size"`
 }
 
+// SyncConfig 同步配置
+type SyncConfig struct {
+	Host       string   `json:"host"`
+	Port       int      `json:"port"`
+	SyncDir    string   `json:"sync_dir"`
+	IgnoreList []string `json:"ignore_list"`
+}
+
+// SyncStatus 同步状态
+type SyncStatus struct {
+	Connected bool
+	Running   bool
+	Message   string
+}
+
 // Logger 定义日志接口
 type Logger interface {
 	AppendText(text string)
+}
+
+// GUILogger GUI日志记录器
+type GUILogger struct {
+	logBox     *walk.TextEdit
+	fileLogger *FileLogger
+	DebugMode  bool
+}
+
+// NewGUILogger 创建新的GUI日志记录器
+func NewGUILogger(logBox *walk.TextEdit, logDir, prefix string) (*GUILogger, error) {
+	fileLogger, err := NewFileLogger(logDir, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GUILogger{
+		logBox:     logBox,
+		fileLogger: fileLogger,
+		DebugMode:  false,
+	}, nil
+}
+
+// AppendText 实现Logger接口
+func (l *GUILogger) AppendText(text string) {
+	l.logBox.AppendText(text)
+}
+
+// Log 记录普通日志
+func (l *GUILogger) Log(format string, v ...interface{}) {
+	msg := FormatLog(format, v...)
+	l.AppendText(msg)
+	if l.fileLogger != nil {
+		if err := l.fileLogger.WriteLog(msg); err != nil {
+			fmt.Printf("写入日志文件失败: %v\n", err)
+		}
+	}
+}
+
+// DebugLog 记录调试日志
+func (l *GUILogger) DebugLog(format string, v ...interface{}) {
+	if !l.DebugMode {
+		return
+	}
+	l.Log("[DEBUG] "+format, v...)
+}
+
+// SetDebugMode 设置调试模式
+func (l *GUILogger) SetDebugMode(enabled bool) {
+	l.DebugMode = enabled
+	l.Log("调试模式已%s", map[bool]string{true: "启用", false: "关闭"}[enabled])
+}
+
+// Close 关闭日志记录器
+func (l *GUILogger) Close() error {
+	if l.fileLogger != nil {
+		return l.fileLogger.Close()
+	}
+	return nil
 }
 
 // 自定义错误
 var (
 	ErrConnectionClosed = errors.New("连接已关闭")
 	ErrInvalidSize      = errors.New("无效的文件大小")
+	ErrServerRunning    = errors.New("服务器已经在运行")
+	ErrNotConnected     = errors.New("未连接到服务器")
+	ErrNoSyncDir        = errors.New("请先选择同步目录")
 )
 
 // FormatLog 格式化日志消息
@@ -77,10 +154,12 @@ func GetFilesInfo(baseDir string, ignoreList []string, logger Logger) (map[strin
 				return err
 			}
 
-			// 简化忽略列表检查
-			for _, ignore := range ignoreList {
-				if strings.Contains(relPath, ignore) {
-					return nil
+			// 检查忽略列表
+			if ignoreList != nil {
+				for _, ignore := range ignoreList {
+					if strings.Contains(relPath, ignore) {
+						return nil
+					}
 				}
 			}
 
@@ -159,7 +238,7 @@ type FileLogger struct {
 	logFile    *os.File
 	currentDay string
 	logDir     string
-	prefix     string // "server" 或 "client"
+	prefix     string
 }
 
 // NewFileLogger 创建新的文件日志记录器
@@ -221,71 +300,4 @@ func (l *FileLogger) Close() error {
 		return l.logFile.Close()
 	}
 	return nil
-}
-
-// UIConfig 存储UI相关的配置
-type UIConfig struct {
-	Title     string
-	MinWidth  int
-	MinHeight int
-	Width     int
-	Height    int
-}
-
-// ServerConfig 存储服务器配置
-type ServerConfig struct {
-	Host       string
-	Port       int
-	SyncDir    string
-	IgnoreList []string
-}
-
-// LogWriter 定义日志写入接口
-type LogWriter interface {
-	Logger
-	SetText(text string)
-	Text() string
-}
-
-// ValidateResult 存储验证结果
-type ValidateResult struct {
-	Valid   bool
-	Message string
-}
-
-// UIHelper UI帮助方法
-func ShowErrorDialog(owner walk.Form, title, message string) {
-	walk.MsgBox(owner, title, message, walk.MsgBoxIconError)
-}
-
-// CreateLogBox 创建日志文本框
-func CreateLogBox(parent walk.Container) (*walk.TextEdit, error) {
-	logBox, err := walk.NewTextEdit(parent)
-	if err != nil {
-		return nil, err
-	}
-	logBox.SetReadOnly(true)
-	return logBox, nil
-}
-
-// CreateColoredLabel 创建带颜色的标签
-func CreateColoredLabel(text string, color walk.Color) *walk.Label {
-	label, _ := walk.NewLabel(nil)
-	label.SetText(text)
-	label.SetTextColor(color)
-	return label
-}
-
-// FormatBytes 格式化字节大小
-func FormatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
