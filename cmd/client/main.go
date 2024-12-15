@@ -19,6 +19,7 @@ type SyncClient struct {
 	status     *walk.StatusBarItem
 	conn       net.Conn
 	syncStatus common.SyncStatus
+	version    *walk.LineEdit
 }
 
 func NewSyncClient() *SyncClient {
@@ -50,12 +51,16 @@ func (c *SyncClient) syncWithServer() error {
 		return common.ErrNotConnected
 	}
 
-	c.logger.Log("开始接收服务器文件信息...")
-	var serverFiles map[string]common.FileInfo
-	if err := common.ReadJSON(c.conn, &serverFiles); err != nil {
-		return fmt.Errorf("接收服务器文件信息错误: %v", err)
+	// 发送同步路径
+	if err := common.WriteJSON(c.conn, ""); err != nil {
+		return fmt.Errorf("发送同步路径错误: %v", err)
 	}
-	c.logger.Log("服务器文件信息接收完成")
+
+	// 接收同步信息
+	var syncInfo common.SyncInfo
+	if err := common.ReadJSON(c.conn, &syncInfo); err != nil {
+		return fmt.Errorf("接收同步信息错误: %v", err)
+	}
 
 	c.logger.Log("开始获取本地文件信息...")
 	localFiles, err := c.getLocalFilesInfo()
@@ -65,11 +70,23 @@ func (c *SyncClient) syncWithServer() error {
 	c.logger.Log("本地文件信息获取完成")
 
 	c.logger.Log("开始比较文件...")
-	total := len(serverFiles)
+	total := len(syncInfo.Files)
 	current := 0
 	needUpdate := make(map[string]common.FileInfo)
 
-	for filename, serverInfo := range serverFiles {
+	// 如果版本不同，需要删除服务端没有的文件
+	if syncInfo.DeleteExtraFiles {
+		c.logger.Log("版本不同，将删除服务端没有的文件")
+		for filename := range localFiles {
+			if _, exists := syncInfo.Files[filename]; !exists {
+				filePath := filepath.Join(c.config.SyncDir, filename)
+				c.logger.Log("删除文件: %s", filename)
+				os.Remove(filePath)
+			}
+		}
+	}
+
+	for filename, serverInfo := range syncInfo.Files {
 		current++
 		c.logCompare("正在比较文件 (%d/%d): %s", current, total, filename)
 
@@ -137,10 +154,25 @@ func (c *SyncClient) connect() error {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
+	// 接收服务器版本
+	var serverVersion string
+	if err := common.ReadJSON(c.conn, &serverVersion); err != nil {
+		c.disconnect()
+		return fmt.Errorf("接收服务器版本错误: %v", err)
+	}
+
+	// 发送客户端版本
+	if err := common.WriteJSON(c.conn, serverVersion); err != nil {
+		c.disconnect()
+		return fmt.Errorf("发送客户端版本错误: %v", err)
+	}
+
+	c.version.SetText(serverVersion)
 	c.syncStatus.Connected = true
 	c.syncStatus.Message = "已连接"
 	c.status.SetText("状态: " + c.syncStatus.Message)
 	c.logger.Log("已连接到服务器 %s:%d", c.config.Host, c.config.Port)
+	c.logger.Log("服务器版本: %s", serverVersion)
 
 	return nil
 }
@@ -154,6 +186,7 @@ func (c *SyncClient) disconnect() {
 		}
 		c.syncStatus.Message = "未连接"
 		c.status.SetText("状态: " + c.syncStatus.Message)
+		c.version.SetText("未连接")
 		c.logger.Log("已断开连接")
 	}
 }
@@ -218,6 +251,12 @@ func main() {
 					declarative.Label{
 						AssignTo: &dirLabel,
 						Text:     client.config.SyncDir,
+					},
+					declarative.Label{Text: "整合包版本:"},
+					declarative.LineEdit{
+						AssignTo: &client.version,
+						ReadOnly: true,
+						Text:     "未连接",
 					},
 				},
 			},

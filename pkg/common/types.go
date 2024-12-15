@@ -34,6 +34,8 @@ type SyncFolder struct {
 
 // SyncConfig 同步配置
 type SyncConfig struct {
+	UUID            string           `json:"uuid"` // 配置文件唯一标识
+	Name            string           `json:"name"` // 整合包名称
 	Host            string           `json:"host"`
 	Port            int              `json:"port"`
 	SyncDir         string           `json:"sync_dir"`

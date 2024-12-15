@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -14,19 +16,27 @@ import (
 )
 
 type SyncServer struct {
-	Config        common.SyncConfig
-	ConfigFile    string
-	ValidFolders  map[string]bool
-	Running       bool
-	Status        *walk.StatusBarItem
-	Logger        common.Logger
-	InvalidLabel  *walk.TextEdit
-	RedirectTable *walk.TableView
-	RedirectModel *RedirectTableModel
-	VersionEdit   *walk.LineEdit
-	FolderTable   *walk.TableView
-	FolderModel   *FolderTableModel
-	Listener      net.Listener
+	Config          common.SyncConfig
+	ConfigFile      string
+	ConfigList      []common.SyncConfig
+	ConfigTable     *walk.TableView
+	ConfigListModel *ConfigListModel
+	ValidFolders    map[string]bool
+	Running         bool
+	Status          *walk.StatusBarItem
+	Logger          common.Logger
+	InvalidLabel    *walk.TextEdit
+	RedirectTable   *walk.TableView
+	RedirectModel   *RedirectTableModel
+	NameEdit        *walk.LineEdit
+	VersionEdit     *walk.LineEdit
+	FolderTable     *walk.TableView
+	FolderModel     *FolderTableModel
+	Listener        net.Listener
+	HostEdit        *walk.LineEdit
+	PortEdit        *walk.LineEdit
+	DirLabel        *walk.Label
+	AutoSave        bool
 }
 
 type FolderTableModel struct {
@@ -77,6 +87,32 @@ func (m *RedirectTableModel) PublishRowsReset() {
 	m.TableModelBase.PublishRowsReset()
 }
 
+type ConfigListModel struct {
+	walk.TableModelBase
+	server *SyncServer
+}
+
+func (m *ConfigListModel) RowCount() int {
+	return len(m.server.ConfigList)
+}
+
+func (m *ConfigListModel) Value(row, col int) interface{} {
+	config := m.server.ConfigList[row]
+	switch col {
+	case 0:
+		return config.Name
+	case 1:
+		return config.Version
+	case 2:
+		return config.UUID
+	}
+	return nil
+}
+
+func (m *ConfigListModel) PublishRowsReset() {
+	m.TableModelBase.PublishRowsReset()
+}
+
 func NewSyncServer() *SyncServer {
 	// 设置配置文件路径
 	configDir := filepath.Join(os.Getenv("APPDATA"), "SyncTools")
@@ -84,53 +120,183 @@ func NewSyncServer() *SyncServer {
 		fmt.Printf("创建配置目录失败: %v\n", err)
 	}
 
+	// 生成默认UUID
+	uuid := make([]byte, 16)
+	rand.Read(uuid)
+	uuidStr := hex.EncodeToString(uuid)
+
 	server := &SyncServer{
 		Config: common.SyncConfig{
-			Host:       "0.0.0.0",
-			Port:       6666,
-			SyncDir:    "",
-			IgnoreList: []string{".clientconfig", ".DS_Store", "thumbs.db"},
+			UUID:    uuidStr,
+			Name:    "默认整合包",
+			Version: "1.0.0",
+			Host:    "0.0.0.0",
+			Port:    6666,
+			SyncDir: "",
+			IgnoreList: []string{
+				".clientconfig",
+				".DS_Store",
+				"thumbs.db",
+			},
 			FolderRedirects: []common.FolderRedirect{
 				{ServerPath: "clientmods", ClientPath: "mods"},
 			},
 		},
 		ConfigFile:   filepath.Join(configDir, "server_config.json"),
 		ValidFolders: make(map[string]bool),
+		ConfigList:   make([]common.SyncConfig, 0),
 	}
 
 	// 初始化表格模型
 	server.FolderModel = &FolderTableModel{server: server}
 	server.RedirectModel = &RedirectTableModel{server: server}
+	server.ConfigListModel = &ConfigListModel{
+		TableModelBase: walk.TableModelBase{},
+		server:         server,
+	}
 
-	// 尝试加载配置文件
-	if config, err := common.LoadConfig(server.ConfigFile); err == nil {
-		server.Config = *config
-		// 确保配置加载后刷新表格模型
-		if server.RedirectModel != nil {
-			server.RedirectModel.PublishRowsReset()
-		}
-		if server.FolderModel != nil {
-			server.FolderModel.PublishRowsReset()
-		}
+	// 加载所有配置文件
+	if err := server.LoadAllConfigs(); err != nil {
+		fmt.Printf("加载配置文件失败: %v\n", err)
 	}
 
 	return server
 }
 
-// SaveConfig 保存配置到文件
-func (s *SyncServer) SaveConfig() error {
-	// 检查配置是否有变化
-	currentConfig, err := common.LoadConfig(s.ConfigFile)
-	if err == nil && s.Config.Equal(currentConfig) {
-		s.Logger.DebugLog("配置未发生变化，跳过保存")
-		return nil
+// LoadAllConfigs 加载所有配置文件
+func (s *SyncServer) LoadAllConfigs() error {
+	configDir := filepath.Dir(s.ConfigFile)
+	files, err := os.ReadDir(configDir)
+	if err != nil {
+		return fmt.Errorf("读取配置目录失败: %v", err)
 	}
 
-	if err := common.SaveConfig(&s.Config, s.ConfigFile); err != nil {
-		s.Logger.Log("保存配置失败: %v", err)
+	s.ConfigList = make([]common.SyncConfig, 0)
+	for _, file := range files {
+		if !file.IsDir() && strings.HasPrefix(file.Name(), "config_") && strings.HasSuffix(file.Name(), ".json") {
+			configPath := filepath.Join(configDir, file.Name())
+			if config, err := common.LoadConfig(configPath); err == nil {
+				s.ConfigList = append(s.ConfigList, *config)
+			}
+		}
+	}
+
+	// 如果没有配置文件，使用当前配置作为默认配置
+	if len(s.ConfigList) == 0 {
+		// 保存当前配置
+		configPath := filepath.Join(configDir, fmt.Sprintf("config_%s.json", s.Config.UUID))
+		if err := common.SaveConfig(&s.Config, configPath); err == nil {
+			s.ConfigList = append(s.ConfigList, s.Config)
+		}
+	} else {
+		// 加载第一个配置
+		s.Config = s.ConfigList[0]
+	}
+
+	// 更新UI（如果已初始化）
+	s.updateUI()
+
+	return nil
+}
+
+// updateUI 更新所有UI元素
+func (s *SyncServer) updateUI() {
+	if s.NameEdit != nil {
+		s.NameEdit.SetText(s.Config.Name)
+	}
+	if s.VersionEdit != nil {
+		s.VersionEdit.SetText(s.Config.Version)
+	}
+	if s.RedirectModel != nil {
+		s.RedirectModel.PublishRowsReset()
+	}
+	if s.FolderModel != nil {
+		s.FolderModel.PublishRowsReset()
+	}
+	if s.ConfigListModel != nil {
+		s.ConfigListModel.PublishRowsReset()
+	}
+	if s.ConfigTable != nil && len(s.ConfigList) > 0 {
+		s.ConfigTable.SetCurrentIndex(0)
+	}
+}
+
+// LoadConfigByUUID 根据UUID加载配置
+func (s *SyncServer) LoadConfigByUUID(uuid string) error {
+	// 先从内存中查找
+	for _, config := range s.ConfigList {
+		if config.UUID == uuid {
+			s.Config = config
+			s.updateUI()
+			s.ValidateFolders()
+			return nil
+		}
+	}
+
+	// 如果内存中没有，尝试从文件加载
+	configPath := filepath.Join(filepath.Dir(s.ConfigFile), fmt.Sprintf("config_%s.json", uuid))
+	if config, err := common.LoadConfig(configPath); err != nil {
+		return fmt.Errorf("加载配置失败: %v", err)
+	} else {
+		s.Config = *config
+		s.updateUI()
+		s.ValidateFolders()
+	}
+	return nil
+}
+
+// DeleteConfig 删除配置
+func (s *SyncServer) DeleteConfig(configPath string, index int) error {
+	if err := os.Remove(configPath); err != nil {
+		return fmt.Errorf("删除配置文件失败: %v", err)
+	}
+
+	// 从列表中移除
+	s.ConfigList = append(s.ConfigList[:index], s.ConfigList[index+1:]...)
+	s.ConfigListModel.PublishRowsReset()
+
+	// 如果删除的是当前配置，加载第一个配置
+	if len(s.ConfigList) > 0 {
+		s.LoadConfigByUUID(s.ConfigList[0].UUID)
+		s.ConfigTable.SetCurrentIndex(0)
+	}
+
+	return nil
+}
+
+// SaveConfig 保存配置到文件
+func (s *SyncServer) SaveConfig() error {
+	configPath := filepath.Join(filepath.Dir(s.ConfigFile), fmt.Sprintf("config_%s.json", s.Config.UUID))
+	if err := common.SaveConfig(&s.Config, configPath); err != nil {
+		if s.Logger != nil {
+			s.Logger.Log("保存配置失败: %v", err)
+		}
 		return err
 	}
-	s.Logger.Log("配置已保存到: %s", s.ConfigFile)
+
+	// 更新配置列表中的对应项
+	found := false
+	for i, config := range s.ConfigList {
+		if config.UUID == s.Config.UUID {
+			s.ConfigList[i] = s.Config
+			found = true
+			break
+		}
+	}
+
+	// 如果在列表中没找到，说明是新配置，添加到列表中
+	if !found {
+		s.ConfigList = append(s.ConfigList, s.Config)
+	}
+
+	// 更新UI
+	if s.ConfigListModel != nil {
+		s.ConfigListModel.PublishRowsReset()
+	}
+
+	if s.Logger != nil {
+		s.Logger.DebugLog("配置已保存到: %s", configPath)
+	}
 	return nil
 }
 
@@ -256,4 +422,9 @@ func (s *SyncServer) GetFolderConfig(path string) (*common.SyncFolder, bool) {
 		}
 	}
 	return nil, false
+}
+
+// UpdateAllUI 更新所有UI元素
+func (s *SyncServer) UpdateAllUI() {
+	s.updateUI()
 }
