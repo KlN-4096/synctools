@@ -20,6 +20,7 @@ type SyncClient struct {
 	conn       net.Conn
 	syncStatus common.SyncStatus
 	version    *walk.LineEdit
+	name       *walk.LineEdit
 }
 
 func NewSyncClient() *SyncClient {
@@ -154,25 +155,26 @@ func (c *SyncClient) connect() error {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
-	// 接收服务器版本
-	var serverVersion string
-	if err := common.ReadJSON(c.conn, &serverVersion); err != nil {
+	// 接收服务器信息
+	var serverConfig common.SyncConfig
+	if err := common.ReadJSON(c.conn, &serverConfig); err != nil {
 		c.disconnect()
-		return fmt.Errorf("接收服务器版本错误: %v", err)
+		return fmt.Errorf("接收服务器信息错误: %v", err)
 	}
 
 	// 发送客户端版本
-	if err := common.WriteJSON(c.conn, serverVersion); err != nil {
+	if err := common.WriteJSON(c.conn, serverConfig.Version); err != nil {
 		c.disconnect()
 		return fmt.Errorf("发送客户端版本错误: %v", err)
 	}
 
-	c.version.SetText(serverVersion)
+	c.version.SetText(serverConfig.Version)
+	c.name.SetText(serverConfig.Name)
 	c.syncStatus.Connected = true
 	c.syncStatus.Message = "已连接"
 	c.status.SetText("状态: " + c.syncStatus.Message)
 	c.logger.Log("已连接到服务器 %s:%d", c.config.Host, c.config.Port)
-	c.logger.Log("服务器版本: %s", serverVersion)
+	c.logger.Log("整合包: %s (版本: %s)", serverConfig.Name, serverConfig.Version)
 
 	return nil
 }
@@ -187,6 +189,7 @@ func (c *SyncClient) disconnect() {
 		c.syncStatus.Message = "未连接"
 		c.status.SetText("状态: " + c.syncStatus.Message)
 		c.version.SetText("未连接")
+		c.name.SetText("未连接")
 		c.logger.Log("已断开连接")
 	}
 }
@@ -235,7 +238,7 @@ func main() {
 					declarative.LineEdit{
 						AssignTo: &hostEdit,
 						Text:     client.config.Host,
-						OnTextChanged: func() {
+						OnEditingFinished: func() {
 							client.config.Host = hostEdit.Text()
 						},
 					},
@@ -243,14 +246,23 @@ func main() {
 					declarative.LineEdit{
 						AssignTo: &portEdit,
 						Text:     fmt.Sprintf("%d", client.config.Port),
-						OnTextChanged: func() {
-							fmt.Sscanf(portEdit.Text(), "%d", &client.config.Port)
+						OnEditingFinished: func() {
+							var port int
+							if _, err := fmt.Sscanf(portEdit.Text(), "%d", &port); err == nil {
+								client.config.Port = port
+							}
 						},
 					},
 					declarative.Label{Text: "同步目录:"},
 					declarative.Label{
 						AssignTo: &dirLabel,
 						Text:     client.config.SyncDir,
+					},
+					declarative.Label{Text: "整合包名称:"},
+					declarative.LineEdit{
+						AssignTo: &client.name,
+						ReadOnly: true,
+						Text:     "未连接",
 					},
 					declarative.Label{Text: "整合包版本:"},
 					declarative.LineEdit{

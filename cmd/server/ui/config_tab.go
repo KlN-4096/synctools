@@ -238,7 +238,7 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 									if server.Logger != nil {
 										server.Logger.DebugLog("整合包名称已更新: %s", server.Config.Name)
 									}
-									// 更新当前配置到配置列表并保存
+									// 更新当前配置到配置列表
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 										server.ConfigList[index] = server.Config
 										server.ConfigListModel.PublishRowsReset()
@@ -255,7 +255,7 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 									if server.Logger != nil {
 										server.Logger.DebugLog("版本已更新: %s", server.Config.Version)
 									}
-									// 更新当前配置到配置列表并保存
+									// 更新当前配置到配置列表
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 										server.ConfigList[index] = server.Config
 										server.ConfigListModel.PublishRowsReset()

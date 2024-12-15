@@ -11,7 +11,7 @@ import (
 )
 
 // createHomeTab 创建主页标签页
-func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit, dirLabel **walk.Label, logBox **walk.TextEdit) declarative.TabPage {
+func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarative.TabPage {
 	return declarative.TabPage{
 		Title:  "主页",
 		Layout: declarative.VBox{},
@@ -28,23 +28,46 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 								Children: []declarative.Widget{
 									declarative.Label{Text: "主机:"},
 									declarative.LineEdit{
-										AssignTo: hostEdit,
+										AssignTo: &server.HostEdit,
 										Text:     server.Config.Host,
-										OnTextChanged: func() {
-											server.Config.Host = (*hostEdit).Text()
+										OnEditingFinished: func() {
+											server.Config.Host = server.HostEdit.Text()
+											if index := server.ConfigTable.CurrentIndex(); index >= 0 {
+												server.ConfigList[index] = server.Config
+												server.ConfigListModel.PublishRowsReset()
+											}
+											server.SaveConfig()
 										},
 									},
 									declarative.Label{Text: "端口:"},
 									declarative.LineEdit{
-										AssignTo: portEdit,
+										AssignTo: &server.PortEdit,
 										Text:     fmt.Sprintf("%d", server.Config.Port),
-										OnTextChanged: func() {
-											fmt.Sscanf((*portEdit).Text(), "%d", &server.Config.Port)
+										OnEditingFinished: func() {
+
+											oldPort := server.Config.Port
+											if _, err := fmt.Sscanf(server.PortEdit.Text(), "%d", &server.Config.Port); err != nil {
+												server.Logger.Log("端口号解析失败: %v", err)
+												return
+											}
+
+											server.Logger.Log("端口号已更改: %d -> %d", oldPort, server.Config.Port)
+
+											if index := server.ConfigTable.CurrentIndex(); index >= 0 {
+												server.ConfigList[index] = server.Config
+												server.ConfigListModel.PublishRowsReset()
+											}
+
+											if err := server.SaveConfig(); err != nil {
+												server.Logger.Log("保存配置失败: %v", err)
+											} else {
+												server.Logger.Log("配置已保存")
+											}
 										},
 									},
 									declarative.Label{Text: "同步目录:"},
 									declarative.Label{
-										AssignTo: dirLabel,
+										AssignTo: &server.DirLabel,
 										Text:     server.Config.SyncDir,
 									},
 								},
@@ -69,9 +92,14 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 
 											if dlg.FilePath != "" {
 												server.Config.SyncDir = dlg.FilePath
-												(*dirLabel).SetText(dlg.FilePath)
+												server.DirLabel.SetText(dlg.FilePath)
 												server.Logger.Log("同步目录已更改为: %s", dlg.FilePath)
 												server.ValidateFolders()
+												if index := server.ConfigTable.CurrentIndex(); index >= 0 {
+													server.ConfigList[index] = server.Config
+													server.ConfigListModel.PublishRowsReset()
+												}
+												server.SaveConfig()
 											}
 										},
 									},
@@ -165,6 +193,7 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 																	folder.SyncMode = modeCombo.Text()
 																	server.FolderModel.PublishRowsReset()
 																	server.ValidateFolders()
+																	server.SaveConfig()
 																	dlg.Accept()
 																},
 															},
@@ -194,6 +223,7 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 													})
 													server.FolderModel.PublishRowsReset()
 													server.ValidateFolders()
+													server.SaveConfig()
 												},
 											},
 											declarative.PushButton{
@@ -206,6 +236,7 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 														)
 														server.FolderModel.PublishRowsReset()
 														server.ValidateFolders()
+														server.SaveConfig()
 													}
 												},
 											},

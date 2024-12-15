@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
@@ -16,8 +15,6 @@ import (
 // CreateMainWindow 创建主窗口
 func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 	var mainWindow *walk.MainWindow
-	var hostEdit, portEdit *walk.LineEdit
-	var dirLabel *walk.Label
 	var logBox *walk.TextEdit
 	var ignoreListEdit *walk.TextEdit
 
@@ -46,7 +43,7 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 				Children: []declarative.Widget{
 					declarative.TabWidget{
 						Pages: []declarative.TabPage{
-							createHomeTab(server, &hostEdit, &portEdit, &dirLabel, &logBox),
+							createHomeTab(server, &logBox),
 							createConfigTab(server, &ignoreListEdit),
 						},
 					},
@@ -71,14 +68,14 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		}
 
 		// 保存前更新配置
-		if hostEdit != nil {
-			server.Config.Host = hostEdit.Text()
+		if server.HostEdit != nil {
+			server.Config.Host = server.HostEdit.Text()
 		}
-		if portEdit != nil {
-			fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
+		if server.PortEdit != nil {
+			fmt.Sscanf(server.PortEdit.Text(), "%d", &server.Config.Port)
 		}
-		if dirLabel != nil {
-			server.Config.SyncDir = dirLabel.Text()
+		if server.DirLabel != nil {
+			server.Config.SyncDir = server.DirLabel.Text()
 		}
 
 		// 更新忽略列表
@@ -121,52 +118,6 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 
 	// UI初始化完成后进行文件夹验证
 	server.ValidateFolders()
-
-	// 启动自动保存定时器
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			// 使用 Synchronize 确保在UI线程中执行
-			mainWindow.Synchronize(func() {
-				if mainWindow.Visible() {
-					// 保存前更新配置
-					if hostEdit != nil {
-						server.Config.Host = hostEdit.Text()
-					}
-					if portEdit != nil {
-						fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
-					}
-					if dirLabel != nil {
-						server.Config.SyncDir = dirLabel.Text()
-					}
-
-					// 更新忽略列表
-					if ignoreListEdit != nil {
-						text := ignoreListEdit.Text()
-						items := strings.Split(text, "\r\n")
-						var ignoreList []string
-						for _, item := range items {
-							if item = strings.TrimSpace(item); item != "" {
-								ignoreList = append(ignoreList, item)
-							}
-						}
-						server.Config.IgnoreList = ignoreList
-					}
-
-					// 保存配置
-					if err := server.SaveConfig(); err != nil {
-						if server.Logger != nil {
-							server.Logger.Log("自动保存配置失败: %v", err)
-						}
-					} else if server.Logger != nil {
-						server.Logger.DebugLog("配置已自动保存")
-					}
-				}
-			})
-		}
-	}()
 
 	return mainWindow, nil
 }

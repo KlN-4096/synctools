@@ -36,7 +36,6 @@ type SyncServer struct {
 	HostEdit        *walk.LineEdit
 	PortEdit        *walk.LineEdit
 	DirLabel        *walk.Label
-	AutoSave        bool
 }
 
 type FolderTableModel struct {
@@ -201,12 +200,26 @@ func (s *SyncServer) LoadAllConfigs() error {
 
 // updateUI 更新所有UI元素
 func (s *SyncServer) updateUI() {
+	// 更新基本设置
+	if s.HostEdit != nil {
+		s.HostEdit.SetText(s.Config.Host)
+	}
+	if s.PortEdit != nil {
+		s.PortEdit.SetText(fmt.Sprintf("%d", s.Config.Port))
+	}
+	if s.DirLabel != nil {
+		s.DirLabel.SetText(s.Config.SyncDir)
+	}
+
+	// 更新整合包信息
 	if s.NameEdit != nil {
 		s.NameEdit.SetText(s.Config.Name)
 	}
 	if s.VersionEdit != nil {
 		s.VersionEdit.SetText(s.Config.Version)
 	}
+
+	// 更新表格模型
 	if s.RedirectModel != nil {
 		s.RedirectModel.PublishRowsReset()
 	}
@@ -216,6 +229,11 @@ func (s *SyncServer) updateUI() {
 	if s.ConfigListModel != nil {
 		s.ConfigListModel.PublishRowsReset()
 	}
+
+	// 验证文件夹
+	s.ValidateFolders()
+
+	// 更新配置表格选中项
 	if s.ConfigTable != nil && len(s.ConfigList) > 0 {
 		s.ConfigTable.SetCurrentIndex(0)
 	}
@@ -266,6 +284,25 @@ func (s *SyncServer) DeleteConfig(configPath string, index int) error {
 
 // SaveConfig 保存配置到文件
 func (s *SyncServer) SaveConfig() error {
+	if s.Logger != nil {
+		s.Logger.DebugLog("正在保存配置...")
+		s.Logger.DebugLog("UUID: %s", s.Config.UUID)
+		s.Logger.DebugLog("整合包名称: %s", s.Config.Name)
+		s.Logger.DebugLog("版本: %s", s.Config.Version)
+		s.Logger.DebugLog("主机: %s", s.Config.Host)
+		s.Logger.DebugLog("端口: %d", s.Config.Port)
+		s.Logger.DebugLog("同步目录: %s", s.Config.SyncDir)
+		s.Logger.DebugLog("忽略列表: %v", s.Config.IgnoreList)
+		s.Logger.DebugLog("重定向配置:")
+		for i, redirect := range s.Config.FolderRedirects {
+			s.Logger.DebugLog("  %d. %s -> %s", i+1, redirect.ServerPath, redirect.ClientPath)
+		}
+		s.Logger.DebugLog("同步文件夹:")
+		for i, folder := range s.Config.SyncFolders {
+			s.Logger.DebugLog("  %d. %s (%s)", i+1, folder.Path, folder.SyncMode)
+		}
+	}
+
 	configPath := filepath.Join(filepath.Dir(s.ConfigFile), fmt.Sprintf("config_%s.json", s.Config.UUID))
 	if err := common.SaveConfig(&s.Config, configPath); err != nil {
 		if s.Logger != nil {
@@ -410,7 +447,7 @@ func (s *SyncServer) handleClient(conn net.Conn) {
 			}
 		}
 		return path
-	}, s.Config.Version)
+	}, s.Config)
 }
 
 // GetFolderConfig 获取文件夹配置

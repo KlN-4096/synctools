@@ -28,14 +28,14 @@ func getFolderConfig(path string) (*common.SyncFolder, bool) {
 }
 
 // HandleClient 处理客户端连接
-func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger common.Logger, getRedirectedPath func(string) string, version string) {
+func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger common.Logger, getRedirectedPath func(string) string, config common.SyncConfig) {
 	defer conn.Close()
 	clientAddr := conn.RemoteAddr().String()
 	logger.Log("客户端连接: %s", clientAddr)
 
-	// 首先发送服务器版本
-	if err := common.WriteJSON(conn, version); err != nil {
-		logger.Log("发送版本信息错误 %s: %v", clientAddr, err)
+	// 首先发送服务器配置
+	if err := common.WriteJSON(conn, config); err != nil {
+		logger.Log("发送配置信息错误 %s: %v", clientAddr, err)
 		return
 	}
 
@@ -46,8 +46,8 @@ func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger com
 		return
 	}
 
-	logger.Log("客户端版本: %s, 服务器版本: %s", clientVersion, version)
-	isVersionDifferent := clientVersion != version
+	logger.Log("客户端版本: %s, 服务器版本: %s", clientVersion, config.Version)
+	isVersionDifferent := clientVersion != config.Version
 	if isVersionDifferent {
 		logger.Log("版本不同，将删除服务端没有的文件")
 	} else {
