@@ -40,7 +40,34 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 								Bottom: 5,
 							},
 						},
+						MinSize: declarative.Size{Width: 500},
 						Children: []declarative.Widget{
+							// 版本配置
+							declarative.Composite{
+								Layout: declarative.HBox{},
+								Children: []declarative.Widget{
+									declarative.Label{
+										Text:      "整合包版本:",
+										TextColor: walk.RGB(64, 64, 64),
+										MinSize:   declarative.Size{Width: 80},
+									},
+									declarative.LineEdit{
+										Text:    server.Config.Version,
+										MinSize: declarative.Size{Width: 120},
+										OnTextChanged: func() {
+											server.Config.Version = server.VersionEdit.Text()
+											if server.Logger != nil {
+												server.Logger.DebugLog("版本已更新: %s", server.Config.Version)
+											}
+										},
+										AssignTo: &server.VersionEdit,
+									},
+									declarative.Label{
+										Text:      "说明: 版本不同时会删除服务端没有的文件，版本相同时保留客户端文件",
+										TextColor: walk.RGB(128, 128, 128),
+									},
+								},
+							},
 							// 说明文本
 							declarative.Composite{
 								Layout: declarative.VBox{},

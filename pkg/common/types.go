@@ -34,6 +34,7 @@ type SyncConfig struct {
 	SyncFolders     []string         `json:"sync_folders"`
 	IgnoreList      []string         `json:"ignore_list"`
 	FolderRedirects []FolderRedirect `json:"folder_redirects"`
+	Version         string           `json:"version"` // 整合包版本
 }
 
 // SyncStatus 同步状态
@@ -397,4 +398,10 @@ func (c *SyncConfig) Equal(other *SyncConfig) bool {
 	}
 
 	return true
+}
+
+// SyncInfo 同步信息
+type SyncInfo struct {
+	Files            map[string]FileInfo `json:"files"`              // 文件信息
+	DeleteExtraFiles bool                `json:"delete_extra_files"` // 是否删除多余文件
 }

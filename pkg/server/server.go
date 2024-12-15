@@ -27,6 +27,7 @@ type SyncServer struct {
 	ClientPath        *walk.LineEdit
 	ConfigFile        string          // 配置文件路径
 	RedirectComposite *walk.Composite // 用于存放重定向配置的容器
+	VersionEdit       *walk.LineEdit  // 版本编辑控件
 }
 
 func NewSyncServer() *SyncServer {
@@ -193,5 +194,5 @@ func (s *SyncServer) handleClient(conn net.Conn) {
 			}
 		}
 		return path
-	})
+	}, s.Config.Version)
 }

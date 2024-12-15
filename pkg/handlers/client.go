@@ -9,10 +9,31 @@ import (
 )
 
 // HandleClient 处理客户端连接
-func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger common.Logger, getRedirectedPath func(string) string) {
+func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger common.Logger, getRedirectedPath func(string) string, version string) {
 	defer conn.Close()
 	clientAddr := conn.RemoteAddr().String()
 	logger.Log("客户端连接: %s", clientAddr)
+
+	// 首先发送服务器版本
+	if err := common.WriteJSON(conn, version); err != nil {
+		logger.Log("发送版本信息错误 %s: %v", clientAddr, err)
+		return
+	}
+
+	// 接收客户端版本
+	var clientVersion string
+	if err := common.ReadJSON(conn, &clientVersion); err != nil {
+		logger.Log("接收客户端版本错误 %s: %v", clientAddr, err)
+		return
+	}
+
+	logger.Log("客户端版本: %s, 服务器版本: %s", clientVersion, version)
+	isVersionDifferent := clientVersion != version
+	if isVersionDifferent {
+		logger.Log("版本不同，将删除服务端没有的文件")
+	} else {
+		logger.Log("版本相同，保留客户端文件")
+	}
 
 	filesInfo, err := getFilesInfo(syncDir, ignoreList, logger)
 	if err != nil {
@@ -20,8 +41,13 @@ func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger com
 		return
 	}
 
-	if err := common.WriteJSON(conn, filesInfo); err != nil {
-		logger.Log("发送文件信息错误 %s: %v", clientAddr, err)
+	// 发送文件信息和版本差异标志
+	syncInfo := common.SyncInfo{
+		Files:            filesInfo,
+		DeleteExtraFiles: isVersionDifferent,
+	}
+	if err := common.WriteJSON(conn, syncInfo); err != nil {
+		logger.Log("发送同步信息错误 %s: %v", clientAddr, err)
 		return
 	}
 
