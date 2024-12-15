@@ -49,13 +49,6 @@ func NewSyncServer() *SyncServer {
 		}
 	}
 
-	// 确保配置中至少有一个重定向配置
-	if len(config.FolderRedirects) == 0 {
-		config.FolderRedirects = []common.FolderRedirect{
-			{ServerPath: "clientmods", ClientPath: "mods"},
-		}
-	}
-
 	return &SyncServer{
 		Config:       *config,
 		ConfigFile:   configFile,
@@ -67,6 +60,9 @@ func NewSyncServer() *SyncServer {
 
 // SaveConfig 保存配置到文件
 func (s *SyncServer) SaveConfig() error {
+	// 更新配置
+	s.Config.SyncFolders = s.SyncFolders
+
 	if err := common.SaveConfig(&s.Config, s.ConfigFile); err != nil {
 		s.Logger.Log("保存配置失败: %v", err)
 		return err
@@ -155,10 +151,10 @@ func (s *SyncServer) StopServer() {
 }
 
 func (s *SyncServer) UpdateRedirectConfig() {
-	// 保留第一个固定的重定向配置
-	s.Config.FolderRedirects = s.Config.FolderRedirects[:1]
+	// 清空所有重定向配置
+	s.Config.FolderRedirects = nil
 
-	// 遍历所有动态重定向配置组件
+	// 遍历所有重定向配置组件
 	for i := 0; i < s.RedirectComposite.Children().Len(); i++ {
 		composite := s.RedirectComposite.Children().At(i).(*walk.Composite)
 		if composite.Children().Len() < 5 {

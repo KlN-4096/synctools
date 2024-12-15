@@ -31,6 +31,7 @@ type SyncConfig struct {
 	Host            string           `json:"host"`
 	Port            int              `json:"port"`
 	SyncDir         string           `json:"sync_dir"`
+	SyncFolders     []string         `json:"sync_folders"`
 	IgnoreList      []string         `json:"ignore_list"`
 	FolderRedirects []FolderRedirect `json:"folder_redirects"`
 }

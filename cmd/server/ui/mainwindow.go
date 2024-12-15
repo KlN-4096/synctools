@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
@@ -25,10 +27,22 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		Size:     declarative.Size{Width: 800, Height: 600},
 		Layout:   declarative.VBox{},
 		Children: []declarative.Widget{
-			declarative.TabWidget{
-				Pages: []declarative.TabPage{
-					createHomeTab(server, &hostEdit, &portEdit, &dirLabel, &logBox),
-					createConfigTab(server, &ignoreListEdit),
+			declarative.Composite{
+				Layout: declarative.HBox{
+					Margins: declarative.Margins{
+						Left:   5,
+						Top:    5,
+						Right:  5,
+						Bottom: 0,
+					},
+				},
+				Children: []declarative.Widget{
+					declarative.TabWidget{
+						Pages: []declarative.TabPage{
+							createHomeTab(server, &hostEdit, &portEdit, &dirLabel, &logBox),
+							createConfigTab(server, &ignoreListEdit),
+						},
+					},
 				},
 			},
 		},
@@ -53,10 +67,63 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 	// 设置初始文本
 	server.FolderEdit.SetText(strings.Join(server.SyncFolders, "\r\n"))
 
-	// 初始化重定向配置UI
+	// 初始化重定向配置UI前，先设置容器的布局
+	if layout := server.RedirectComposite.Layout(); layout != nil {
+		if boxLayout, ok := layout.(*walk.BoxLayout); ok {
+			boxLayout.SetMargins(walk.Margins{VNear: 2, VFar: 2})
+		}
+	}
+
+	// 清空默认的重定向配置
+	server.RedirectComposite.Children().Clear()
+	// 使用已有的方法重新创建所有重定向配置行
 	for _, redirect := range server.Config.FolderRedirects {
 		addRedirectConfig(server, redirect.ServerPath, redirect.ClientPath)
 	}
+
+	// 启动自动保存定时器
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			// 保存前更新配置
+			server.Config.Host = hostEdit.Text()
+			fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
+			server.Config.SyncDir = dirLabel.Text()
+
+			// 更新同步文件夹列表
+			folders := strings.Split(server.FolderEdit.Text(), "\r\n")
+			var validFolders []string
+			for _, folder := range folders {
+				if strings.TrimSpace(folder) != "" {
+					validFolders = append(validFolders, folder)
+				}
+			}
+			server.SyncFolders = validFolders
+
+			// 更新忽略列表
+			text := (*ignoreListEdit).Text()
+			items := strings.Split(text, "\r\n")
+			var ignoreList []string
+			for _, item := range items {
+				if item = strings.TrimSpace(item); item != "" {
+					ignoreList = append(ignoreList, item)
+				}
+			}
+			server.Config.IgnoreList = ignoreList
+
+			// 更新重定向配置
+			server.UpdateRedirectConfig()
+
+			// 保存配置
+			if err := server.SaveConfig(); err != nil {
+				server.Logger.Log("自动保存配置失败: %v", err)
+			} else {
+				server.Logger.DebugLog("配置已自动保存")
+			}
+		}
+	}()
 
 	return mainWindow, nil
 }

@@ -12,3 +12,28 @@
 [19:04:29] 已添加新的重定向配置
 [19:04:30] 已添加新的重定向配置
 [19:08:26] 已添加新的重定向配置
+[19:23:03] 调试模式已启用
+[19:23:10] [DEBUG] 重定向配置已更新: [{clientmodsa mods} {clientmodsa mods} {新服务器文件夹 新客户端文件夹} {新服务器文件夹 新客户端文件夹}]
+[19:23:10] [DEBUG] 重定向配置已更新: [{clientmodsa mods} {clientmodsa mods} {新服务器文件夹 新客户端文件夹}]
+[19:23:11] [DEBUG] 重定向配置已更新: [{clientmodsa mods} {clientmodsa mods}]
+[19:23:35] 服务器启动于 0.0.0.0:6666
+[19:23:35] 同步目录: G:\test\server
+[19:23:37] 服务器已停止
+[19:32:25] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:33:00] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:43:06] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:57:29] 调试模式已启用
+[19:57:38] [DEBUG] 重定向配置已更新: [{clientmodsa mods} {aaa abc}]
+[19:57:38] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:57:38] [DEBUG] 配置已自动保存
+[19:57:48] [DEBUG] 重定向配置已更新: [{clientmodsa mods} {aaa abc}]
+[19:57:48] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:57:48] [DEBUG] 配置已自动保存
+[19:57:58] [DEBUG] 重定向配置已更新: [{clientmodsa mods} {aaa abc}]
+[19:57:58] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:57:58] [DEBUG] 配置已自动保存
+[19:58:00] 调试模式已关闭
+[19:58:08] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:58:18] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:58:28] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
+[19:58:38] 配置已保存到: C:\Users\Administrator\AppData\Roaming\SyncTools\server_config.json
