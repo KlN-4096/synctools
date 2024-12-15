@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
@@ -15,66 +14,70 @@ import (
 )
 
 type SyncServer struct {
-	host       string
-	port       int
-	syncDir    string
-	ignoreList []string
-	logBox     *walk.TextEdit
-	status     *walk.StatusBarItem
-	running    bool
-	listener   net.Listener
+	host         string
+	port         int
+	syncDir      string
+	syncFolders  []string        // 需要同步的文件夹列表
+	validFolders map[string]bool // 标记文件夹是否有效
+	ignoreList   []string
+	logBox       *walk.TextEdit
+	folderEdit   *walk.TextEdit // 用于编辑同步文件夹列表
+	status       *walk.StatusBarItem
+	running      bool
+	listener     net.Listener
 }
 
 func NewSyncServer() *SyncServer {
 	return &SyncServer{
-		host:       "0.0.0.0",
-		port:       6666,
-		syncDir:    ".",
-		ignoreList: []string{".clientconfig", ".DS_Store", "thumbs.db"},
-		running:    false,
+		host:         "0.0.0.0",
+		port:         6666,
+		syncDir:      "",
+		syncFolders:  make([]string, 0),
+		validFolders: make(map[string]bool),
+		ignoreList:   []string{".clientconfig", ".DS_Store", "thumbs.db"},
+		running:      false,
 	}
 }
 
 func (s *SyncServer) log(format string, v ...interface{}) {
-	logMsg := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, v...))
-	s.logBox.AppendText(logMsg)
+	common.WriteLog(s.logBox, format, v...)
+}
+
+func (s *SyncServer) validateFolders() {
+	s.validFolders = make(map[string]bool)
+	for _, folder := range s.syncFolders {
+		path := filepath.Join(s.syncDir, folder)
+		valid := common.IsPathExists(path) && common.IsDir(path)
+		s.validFolders[folder] = valid
+		if valid {
+			s.log("有效的同步文件夹: %s", folder)
+		} else {
+			s.log("无效的同步文件夹: %s", folder)
+		}
+	}
 }
 
 func (s *SyncServer) getFilesInfo() (map[string]common.FileInfo, error) {
 	filesInfo := make(map[string]common.FileInfo)
 
-	err := filepath.Walk(s.syncDir, func(path string, info os.FileInfo, err error) error {
+	for folder, valid := range s.validFolders {
+		if !valid {
+			continue
+		}
+
+		folderPath := filepath.Join(s.syncDir, folder)
+		info, err := common.GetFilesInfo(folderPath, s.ignoreList, s.logBox)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("获取文件夹 %s 信息失败: %v", folder, err)
 		}
 
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(s.syncDir, path)
-			if err != nil {
-				return err
-			}
-
-			for _, ignore := range s.ignoreList {
-				if strings.Contains(relPath, ignore) {
-					return nil
-				}
-			}
-
-			hash, err := common.CalculateMD5(path)
-			if err != nil {
-				return err
-			}
-
-			filesInfo[relPath] = common.FileInfo{
-				Hash: hash,
-				Size: info.Size(),
-			}
-			s.log("添加文件: %s, 大小: %d bytes", relPath, info.Size())
+		// 将文件路径加上文件夹前缀
+		for file, fileInfo := range info {
+			filesInfo[filepath.Join(folder, file)] = fileInfo
 		}
-		return nil
-	})
+	}
 
-	return filesInfo, err
+	return filesInfo, nil
 }
 
 func (s *SyncServer) handleClient(conn net.Conn) {
@@ -260,6 +263,34 @@ func main() {
 				AssignTo: &server.logBox,
 				ReadOnly: true,
 				VScroll:  true,
+			},
+			declarative.Composite{
+				Layout: declarative.VBox{},
+				Children: []declarative.Widget{
+					declarative.Label{Text: "同步文件夹列表 (每行一个):"},
+					declarative.TextEdit{
+						AssignTo: &server.folderEdit,
+						VScroll:  true,
+						MinSize:  declarative.Size{Height: 100},
+						OnTextChanged: func() {
+							// 将文本分割为文件夹列表
+							text := server.folderEdit.Text()
+							folders := strings.Split(text, "\r\n")
+							// 过滤空行
+							var validFolders []string
+							for _, folder := range folders {
+								if strings.TrimSpace(folder) != "" {
+									validFolders = append(validFolders, folder)
+								}
+							}
+							server.syncFolders = validFolders
+							// 验证文件夹
+							if server.syncDir != "" {
+								server.validateFolders()
+							}
+						},
+					},
+				},
 			},
 		},
 		StatusBarItems: []declarative.StatusBarItem{

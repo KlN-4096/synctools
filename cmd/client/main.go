@@ -5,8 +5,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
@@ -28,48 +26,17 @@ func NewSyncClient() *SyncClient {
 	return &SyncClient{
 		serverHost: "localhost",
 		serverPort: 6666,
-		syncDir:    ".",
+		syncDir:    "",
 		connected:  false,
 	}
 }
 
 func (c *SyncClient) log(format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	if !strings.HasSuffix(msg, "\n") {
-		msg += "\n"
-	}
-	logMsg := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg)
-	c.logBox.AppendText(logMsg)
+	common.WriteLog(c.logBox, format, v...)
 }
 
 func (c *SyncClient) getLocalFilesInfo() (map[string]common.FileInfo, error) {
-	filesInfo := make(map[string]common.FileInfo)
-
-	err := filepath.Walk(c.syncDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(c.syncDir, path)
-			if err != nil {
-				return err
-			}
-
-			hash, err := common.CalculateMD5(path)
-			if err != nil {
-				return err
-			}
-
-			filesInfo[relPath] = common.FileInfo{
-				Hash: hash,
-				Size: info.Size(),
-			}
-		}
-		return nil
-	})
-
-	return filesInfo, err
+	return common.GetFilesInfo(c.syncDir, nil, c.logBox)
 }
 
 func (c *SyncClient) logCompare(format string, v ...interface{}) {
@@ -86,14 +53,14 @@ func (c *SyncClient) syncWithServer() error {
 	if err := common.ReadJSON(c.conn, &serverFiles); err != nil {
 		return fmt.Errorf("接收服务器文件信息错误: %v", err)
 	}
-	c.log("服务器文件信息接收完成\n")
+	c.log("服务器文件信息接收完成")
 
 	c.log("开始获取本地文件信息...")
 	localFiles, err := c.getLocalFilesInfo()
 	if err != nil {
 		return fmt.Errorf("获取本地文件信息错误: %v", err)
 	}
-	c.log("本地文件信息获取完成\n")
+	c.log("本地文件信息获取完成")
 
 	c.log("开始比较文件...")
 	total := len(serverFiles)
@@ -110,7 +77,7 @@ func (c *SyncClient) syncWithServer() error {
 		}
 	}
 	fmt.Println()
-	c.log("文件比较完成，需要更新 %d 个文件\n", len(needUpdate))
+	c.log("文件比较完成，需要更新 %d 个文件", len(needUpdate))
 
 	if len(needUpdate) > 0 {
 		current = 0
@@ -140,7 +107,7 @@ func (c *SyncClient) syncWithServer() error {
 				return fmt.Errorf("接收文件错误: %v", err)
 			}
 
-			c.log("文件更新完成: %s (%d bytes)\n", filename, bytesReceived)
+			c.log("文件更新完成: %s (%d bytes)", filename, bytesReceived)
 		}
 	}
 
@@ -148,7 +115,7 @@ func (c *SyncClient) syncWithServer() error {
 		return fmt.Errorf("发送完成信号错误: %v", err)
 	}
 
-	c.log("同步完成！\n")
+	c.log("同步完成！")
 	c.disconnect()
 	return nil
 }
@@ -156,6 +123,10 @@ func (c *SyncClient) syncWithServer() error {
 func (c *SyncClient) connect() error {
 	if c.connected {
 		return fmt.Errorf("已经连接到服务器")
+	}
+
+	if c.syncDir == "" {
+		return fmt.Errorf("请先选择同步目录")
 	}
 
 	var err error
