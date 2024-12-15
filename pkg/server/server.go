@@ -63,6 +63,13 @@ func (s *SyncServer) SaveConfig() error {
 	// 更新配置
 	s.Config.SyncFolders = s.SyncFolders
 
+	// 检查配置是否有变化
+	currentConfig, err := common.LoadConfig(s.ConfigFile)
+	if err == nil && s.Config.Equal(currentConfig) {
+		s.Logger.DebugLog("配置未发生变化，跳过保存")
+		return nil
+	}
+
 	if err := common.SaveConfig(&s.Config, s.ConfigFile); err != nil {
 		s.Logger.Log("保存配置失败: %v", err)
 		return err

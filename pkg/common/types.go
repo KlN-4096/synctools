@@ -353,3 +353,48 @@ func LoadConfig(filename string) (*SyncConfig, error) {
 
 	return &config, nil
 }
+
+// Equal 比较两个配置是否相同
+func (c *SyncConfig) Equal(other *SyncConfig) bool {
+	if c == nil || other == nil {
+		return c == other
+	}
+
+	// 比较基本字段
+	if c.Host != other.Host || c.Port != other.Port || c.SyncDir != other.SyncDir {
+		return false
+	}
+
+	// 比较同步文件夹列表
+	if len(c.SyncFolders) != len(other.SyncFolders) {
+		return false
+	}
+	for i, folder := range c.SyncFolders {
+		if folder != other.SyncFolders[i] {
+			return false
+		}
+	}
+
+	// 比较忽略列表
+	if len(c.IgnoreList) != len(other.IgnoreList) {
+		return false
+	}
+	for i, item := range c.IgnoreList {
+		if item != other.IgnoreList[i] {
+			return false
+		}
+	}
+
+	// 比较重定向配置
+	if len(c.FolderRedirects) != len(other.FolderRedirects) {
+		return false
+	}
+	for i, redirect := range c.FolderRedirects {
+		if redirect.ServerPath != other.FolderRedirects[i].ServerPath ||
+			redirect.ClientPath != other.FolderRedirects[i].ClientPath {
+			return false
+		}
+	}
+
+	return true
+}

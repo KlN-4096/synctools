@@ -7,6 +7,7 @@ import (
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 
 	"synctools/pkg/common"
 	"synctools/pkg/server"
@@ -26,6 +27,12 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		MinSize:  declarative.Size{Width: 40, Height: 30},
 		Size:     declarative.Size{Width: 800, Height: 600},
 		Layout:   declarative.VBox{},
+		OnSizeChanged: func() {
+			// 触发重定向配置的重新布局
+			if server.RedirectComposite != nil {
+				server.RedirectComposite.SendMessage(win.WM_SIZE, 0, 0)
+			}
+		},
 		Children: []declarative.Widget{
 			declarative.Composite{
 				Layout: declarative.HBox{
@@ -55,6 +62,55 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 	}.Create()); err != nil {
 		return nil, err
 	}
+
+	// 设置窗口关闭事件
+	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		// 如果服务器还在运行，先停止服务器
+		if server.Running {
+			server.StopServer()
+		}
+
+		// 保存前更新配置
+		server.Config.Host = hostEdit.Text()
+		fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
+		server.Config.SyncDir = dirLabel.Text()
+
+		// 更新同步文件夹列表
+		folders := strings.Split(server.FolderEdit.Text(), "\r\n")
+		var validFolders []string
+		for _, folder := range folders {
+			if strings.TrimSpace(folder) != "" {
+				validFolders = append(validFolders, folder)
+			}
+		}
+		server.SyncFolders = validFolders
+
+		// 更新忽略列表
+		text := (*ignoreListEdit).Text()
+		items := strings.Split(text, "\r\n")
+		var ignoreList []string
+		for _, item := range items {
+			if item = strings.TrimSpace(item); item != "" {
+				ignoreList = append(ignoreList, item)
+			}
+		}
+		server.Config.IgnoreList = ignoreList
+
+		// 更新重定向配置
+		server.UpdateRedirectConfig()
+
+		// 保存配置
+		if err := server.SaveConfig(); err != nil {
+			server.Logger.Log("关闭前保存配置失败: %v", err)
+		} else {
+			server.Logger.Log("程序关闭前配置已保存")
+		}
+
+		// 关闭日志记录器
+		if err := server.Logger.Close(); err != nil {
+			fmt.Printf("关闭日志记录器失败: %v\n", err)
+		}
+	})
 
 	// 初始化日志记录器
 	logger, err := common.NewGUILogger(logBox, "logs", "server")
