@@ -155,24 +155,19 @@ func (s *SyncServer) StopServer() {
 }
 
 func (s *SyncServer) UpdateRedirectConfig() {
-	// 清空当前配置
-	s.Config.FolderRedirects = nil
-
-	// 添加固定的重定向配置
-	s.Config.FolderRedirects = append(s.Config.FolderRedirects, common.FolderRedirect{
-		ServerPath: s.ServerPath.Text(),
-		ClientPath: s.ClientPath.Text(),
-	})
+	// 保留第一个固定的重定向配置
+	s.Config.FolderRedirects = s.Config.FolderRedirects[:1]
 
 	// 遍历所有动态重定向配置组件
 	for i := 0; i < s.RedirectComposite.Children().Len(); i++ {
 		composite := s.RedirectComposite.Children().At(i).(*walk.Composite)
-		if composite.Children().Len() < 2 {
+		if composite.Children().Len() < 5 {
 			continue
 		}
 
-		serverEdit := composite.Children().At(0).(*walk.LineEdit)
-		clientEdit := composite.Children().At(1).(*walk.LineEdit)
+		// 获取输入框（第2个和第4个子组件）
+		serverEdit := composite.Children().At(1).(*walk.LineEdit)
+		clientEdit := composite.Children().At(3).(*walk.LineEdit)
 
 		s.Config.FolderRedirects = append(s.Config.FolderRedirects, common.FolderRedirect{
 			ServerPath: serverEdit.Text(),

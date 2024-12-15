@@ -6,6 +6,7 @@ import (
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 
 	"synctools/pkg/common"
 	"synctools/pkg/server"
@@ -65,50 +66,77 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 								return
 							}
 
-							if err := composite.SetLayout(walk.NewGridLayout()); err != nil {
+							// 使用水平布局来代替网格布局
+							if err := composite.SetLayout(walk.NewHBoxLayout()); err != nil {
 								return
 							}
 
-							// 服务器路径标签
-							if label, err := walk.NewLabel(composite); err == nil {
-								label.SetText("服务器文件夹:")
+							// 创建一个容器用于标签和输入框
+							inputContainer, err := walk.NewComposite(composite)
+							if err != nil {
+								return
+							}
+							if err := inputContainer.SetLayout(walk.NewHBoxLayout()); err != nil {
+								return
 							}
 
-							// 客户端路径标签
-							if label, err := walk.NewLabel(composite); err == nil {
-								label.SetText("客户端文件夹:")
+							// 服务器路径标签和输入框
+							serverLabel, err := walk.NewLabel(inputContainer)
+							if err != nil {
+								return
 							}
+							serverLabel.SetText("服务器文件夹:")
 
-							// 服务器路径输入框
-							var serverEdit *walk.LineEdit
-							if serverEdit, err = walk.NewLineEdit(composite); err == nil {
-								serverEdit.SetText("新服务器文件夹")
+							serverEdit, err := walk.NewLineEdit(inputContainer)
+							if err != nil {
+								return
 							}
+							serverEdit.SetText("新服务器文件夹")
 
-							// 客户端路径输入框
-							var clientEdit *walk.LineEdit
-							if clientEdit, err = walk.NewLineEdit(composite); err == nil {
-								clientEdit.SetText("新客户端文件夹")
+							// 客户端路径标签和输入框
+							clientLabel, err := walk.NewLabel(inputContainer)
+							if err != nil {
+								return
 							}
+							clientLabel.SetText("客户端文件夹:")
+
+							clientEdit, err := walk.NewLineEdit(inputContainer)
+							if err != nil {
+								return
+							}
+							clientEdit.SetText("新客户端文件夹")
 
 							// 删除按钮
-							if deleteBtn, err := walk.NewPushButton(composite); err == nil {
-								deleteBtn.SetText("X")
-								deleteBtn.Clicked().Attach(func() {
-									composite.Dispose()
-									server.UpdateRedirectConfig()
-								})
+							deleteBtn, err := walk.NewPushButton(composite)
+							if err != nil {
+								return
 							}
+							deleteBtn.SetText("X")
+							deleteBtn.Clicked().Attach(func() {
+								composite.Dispose()
+								server.UpdateRedirectConfig()
+							})
+
+							// 添加文本更改事件
+							serverEdit.TextChanged().Attach(func() {
+								server.UpdateRedirectConfig()
+							})
+							clientEdit.TextChanged().Attach(func() {
+								server.UpdateRedirectConfig()
+							})
 
 							// 添加新的重定向配置
 							server.Config.FolderRedirects = append(server.Config.FolderRedirects, common.FolderRedirect{
-								ServerPath: "新服务器文件夹",
-								ClientPath: "新客户端文件夹",
+								ServerPath: serverEdit.Text(),
+								ClientPath: clientEdit.Text(),
 							})
 
 							if server.Logger != nil {
 								server.Logger.Log("已添加新的重定向配置")
 							}
+
+							// 强制重新布局
+							server.RedirectComposite.SendMessage(win.WM_SIZE, 0, 0)
 						},
 					},
 					declarative.Label{
