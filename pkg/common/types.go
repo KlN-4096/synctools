@@ -20,12 +20,19 @@ type FileInfo struct {
 	Size int64  `json:"size"`
 }
 
+// FolderRedirect 文件夹重定向配置
+type FolderRedirect struct {
+	ServerPath string `json:"server_path"` // 服务器端的文件夹名
+	ClientPath string `json:"client_path"` // 客户端的文件夹名
+}
+
 // SyncConfig 同步配置
 type SyncConfig struct {
-	Host       string   `json:"host"`
-	Port       int      `json:"port"`
-	SyncDir    string   `json:"sync_dir"`
-	IgnoreList []string `json:"ignore_list"`
+	Host            string           `json:"host"`
+	Port            int              `json:"port"`
+	SyncDir         string           `json:"sync_dir"`
+	IgnoreList      []string         `json:"ignore_list"`
+	FolderRedirects []FolderRedirect `json:"folder_redirects"`
 }
 
 // SyncStatus 同步状态
@@ -155,11 +162,9 @@ func GetFilesInfo(baseDir string, ignoreList []string, logger Logger) (map[strin
 			}
 
 			// 检查忽略列表
-			if ignoreList != nil {
-				for _, ignore := range ignoreList {
-					if strings.Contains(relPath, ignore) {
-						return nil
-					}
+			for _, ignore := range ignoreList {
+				if strings.Contains(relPath, ignore) {
+					return nil
 				}
 			}
 
@@ -300,4 +305,48 @@ func (l *FileLogger) Close() error {
 		return l.logFile.Close()
 	}
 	return nil
+}
+
+// SaveConfig 保存配置到文件
+func SaveConfig(config *SyncConfig, filename string) error {
+	data, err := json.MarshalIndent(config, "", "    ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		return fmt.Errorf("创建配置目录失败: %v", err)
+	}
+
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %v", err)
+	}
+
+	return nil
+}
+
+// LoadConfig 从文件加载配置
+func LoadConfig(filename string) (*SyncConfig, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 返回默认配置
+			return &SyncConfig{
+				Host:       "0.0.0.0",
+				Port:       6666,
+				IgnoreList: []string{".clientconfig", ".DS_Store", "thumbs.db"},
+				FolderRedirects: []FolderRedirect{
+					{ServerPath: "clientmods", ClientPath: "mods"},
+				},
+			}, nil
+		}
+		return nil, fmt.Errorf("读取配置文件失败: %v", err)
+	}
+
+	var config SyncConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败: %v", err)
+	}
+
+	return &config, nil
 }
