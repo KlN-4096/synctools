@@ -15,19 +15,41 @@ import (
 
 type SyncServer struct {
 	Config            common.SyncConfig
-	SyncFolders       []string
+	ConfigFile        string
 	ValidFolders      map[string]bool
-	Logger            *common.GUILogger
-	FolderEdit        *walk.TextEdit
-	Status            *walk.StatusBarItem
 	Running           bool
-	Listener          net.Listener
+	Status            *walk.StatusBarItem
+	Logger            common.Logger
 	InvalidLabel      *walk.TextEdit
-	ServerPath        *walk.LineEdit
-	ClientPath        *walk.LineEdit
-	ConfigFile        string          // 配置文件路径
-	RedirectComposite *walk.Composite // 用于存放重定向配置的容器
-	VersionEdit       *walk.LineEdit  // 版本编辑控件
+	RedirectComposite *walk.Composite
+	VersionEdit       *walk.LineEdit
+	FolderTable       *walk.TableView
+	FolderModel       *FolderTableModel
+	Listener          net.Listener
+}
+
+type FolderTableModel struct {
+	walk.TableModelBase
+	server *SyncServer
+}
+
+func (m *FolderTableModel) RowCount() int {
+	return len(m.server.Config.SyncFolders)
+}
+
+func (m *FolderTableModel) Value(row, col int) interface{} {
+	folder := m.server.Config.SyncFolders[row]
+	switch col {
+	case 0:
+		return folder.Path
+	case 1:
+		return folder.SyncMode
+	}
+	return nil
+}
+
+func (m *FolderTableModel) PublishRowsReset() {
+	m.TableModelBase.PublishRowsReset()
 }
 
 func NewSyncServer() *SyncServer {
@@ -50,20 +72,23 @@ func NewSyncServer() *SyncServer {
 		}
 	}
 
-	return &SyncServer{
+	server := &SyncServer{
 		Config:       *config,
 		ConfigFile:   configFile,
-		SyncFolders:  []string{},
 		ValidFolders: make(map[string]bool),
 		Running:      false,
 	}
+
+	server.FolderModel = &FolderTableModel{server: server}
+
+	// 初始验证文件夹
+	server.ValidateFolders()
+
+	return server
 }
 
 // SaveConfig 保存配置到文件
 func (s *SyncServer) SaveConfig() error {
-	// 更新配置
-	s.Config.SyncFolders = s.SyncFolders
-
 	// 检查配置是否有变化
 	currentConfig, err := common.LoadConfig(s.ConfigFile)
 	if err == nil && s.Config.Equal(currentConfig) {
@@ -83,34 +108,48 @@ func (s *SyncServer) ValidateFolders() {
 	s.ValidFolders = make(map[string]bool)
 	var invalidFolders []string
 
-	s.Logger.DebugLog("开始验证文件夹列表...")
-	s.Logger.DebugLog("当前根目录: %s", s.Config.SyncDir)
-	s.Logger.DebugLog("待验证文件夹数: %d", len(s.SyncFolders))
+	// 如果Logger已初始化，则输出调试信息
+	if s.Logger != nil {
+		s.Logger.DebugLog("开始验证文件夹列表...")
+		s.Logger.DebugLog("当前根目录: %s", s.Config.SyncDir)
+		s.Logger.DebugLog("待验证文件夹数: %d", len(s.Config.SyncFolders))
+	}
 
-	for _, folder := range s.SyncFolders {
-		path := filepath.Join(s.Config.SyncDir, folder)
+	for _, folder := range s.Config.SyncFolders {
+		path := filepath.Join(s.Config.SyncDir, folder.Path)
 		valid := common.IsPathExists(path) && common.IsDir(path)
-		s.ValidFolders[folder] = valid
-		if valid {
-			s.Logger.DebugLog("有效的同步文件夹: %s", folder)
-		} else {
-			s.Logger.DebugLog(">>> 无效的同步文件夹: %s <<<", folder)
-			invalidFolders = append(invalidFolders, folder)
+		s.ValidFolders[folder.Path] = valid
+
+		if s.Logger != nil {
+			if valid {
+				s.Logger.DebugLog("有效的同步文件夹: %s (%s)", folder.Path, folder.SyncMode)
+			} else {
+				s.Logger.DebugLog(">>> 无效的同步文件夹: %s (%s) <<<", folder.Path, folder.SyncMode)
+				invalidFolders = append(invalidFolders, folder.Path)
+			}
+		} else if !valid {
+			invalidFolders = append(invalidFolders, folder.Path)
 		}
 	}
 
-	// 更新无效文件夹文本框
-	if len(invalidFolders) > 0 {
-		s.InvalidLabel.SetText(strings.Join(invalidFolders, "\r\n"))
-		s.Logger.DebugLog("----------------------------------------")
-		s.Logger.DebugLog("发现 %d 个无效文件夹:", len(invalidFolders))
-		for i, folder := range invalidFolders {
-			s.Logger.DebugLog("%d. %s", i+1, folder)
+	// 更新无效文件夹文本框（如果已初始化）
+	if s.InvalidLabel != nil {
+		if len(invalidFolders) > 0 {
+			s.InvalidLabel.SetText(strings.Join(invalidFolders, "\r\n"))
+			if s.Logger != nil {
+				s.Logger.DebugLog("----------------------------------------")
+				s.Logger.DebugLog("发现 %d 个无效文件夹:", len(invalidFolders))
+				for i, folder := range invalidFolders {
+					s.Logger.DebugLog("%d. %s", i+1, folder)
+				}
+				s.Logger.DebugLog("----------------------------------------")
+			}
+		} else {
+			s.InvalidLabel.SetText("")
+			if s.Logger != nil {
+				s.Logger.DebugLog("所有文件夹都有效")
+			}
 		}
-		s.Logger.DebugLog("----------------------------------------")
-	} else {
-		s.InvalidLabel.SetText("")
-		s.Logger.DebugLog("所有文件夹都有效")
 	}
 }
 
@@ -125,6 +164,7 @@ func (s *SyncServer) StartServer() error {
 		return fmt.Errorf("启动服务器失败: %v", err)
 	}
 
+	handlers.SetServerInstance(s)
 	s.Running = true
 	s.Status.SetText("状态: 运行中")
 	s.Logger.Log("服务器启动于 %s:%d", s.Config.Host, s.Config.Port)
@@ -165,13 +205,21 @@ func (s *SyncServer) UpdateRedirectConfig() {
 	// 遍历所有重定向配置组件
 	for i := 0; i < s.RedirectComposite.Children().Len(); i++ {
 		composite := s.RedirectComposite.Children().At(i).(*walk.Composite)
-		if composite.Children().Len() < 5 {
+		if composite.Children().Len() < 5 { // 需要至少5个组件：2个标签、2个输入框和1个删除按钮
 			continue
 		}
 
-		// 获取输入框（第2个和第4个子组件）
-		serverEdit := composite.Children().At(1).(*walk.LineEdit)
-		clientEdit := composite.Children().At(3).(*walk.LineEdit)
+		// 尝试获取输入框（索引1是服务器输入框，索引3是客户端输入框）
+		serverEdit, ok1 := composite.Children().At(1).(*walk.LineEdit)
+		clientEdit, ok2 := composite.Children().At(3).(*walk.LineEdit)
+
+		// 确保类型转换成功
+		if !ok1 || !ok2 {
+			if s.Logger != nil {
+				s.Logger.DebugLog("类型转换失败: ok1=%v, ok2=%v", ok1, ok2)
+			}
+			continue
+		}
 
 		s.Config.FolderRedirects = append(s.Config.FolderRedirects, common.FolderRedirect{
 			ServerPath: serverEdit.Text(),
@@ -195,4 +243,15 @@ func (s *SyncServer) handleClient(conn net.Conn) {
 		}
 		return path
 	}, s.Config.Version)
+}
+
+// GetFolderConfig 获取文件夹配置
+func (s *SyncServer) GetFolderConfig(path string) (*common.SyncFolder, bool) {
+	for _, folder := range s.Config.SyncFolders {
+		if strings.HasPrefix(path, folder.Path) {
+			folderCopy := folder // 创建副本以避免返回切片元素的指针
+			return &folderCopy, true
+		}
+	}
+	return nil, false
 }

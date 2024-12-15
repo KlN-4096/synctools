@@ -26,12 +26,18 @@ type FolderRedirect struct {
 	ClientPath string `json:"client_path"` // 客户端的文件夹名
 }
 
+// SyncFolder 同步文件夹配置
+type SyncFolder struct {
+	Path     string `json:"path"`      // 文件夹路径
+	SyncMode string `json:"sync_mode"` // 同步模式: "mirror" 或 "push"
+}
+
 // SyncConfig 同步配置
 type SyncConfig struct {
 	Host            string           `json:"host"`
 	Port            int              `json:"port"`
 	SyncDir         string           `json:"sync_dir"`
-	SyncFolders     []string         `json:"sync_folders"`
+	SyncFolders     []SyncFolder     `json:"sync_folders"`
 	IgnoreList      []string         `json:"ignore_list"`
 	FolderRedirects []FolderRedirect `json:"folder_redirects"`
 	Version         string           `json:"version"` // 整合包版本
@@ -49,6 +55,9 @@ type Logger interface {
 	AppendText(text string)
 	Log(format string, v ...interface{})
 	DebugLog(format string, v ...interface{})
+	SetDebugMode(enabled bool)
+	GetDebugMode() bool
+	Close() error
 }
 
 // GUILogger GUI日志记录器
@@ -108,6 +117,11 @@ func (l *GUILogger) Close() error {
 		return l.fileLogger.Close()
 	}
 	return nil
+}
+
+// GetDebugMode 获取调试模式状态
+func (l *GUILogger) GetDebugMode() bool {
+	return l.DebugMode
 }
 
 // 自定义错误
@@ -371,7 +385,7 @@ func (c *SyncConfig) Equal(other *SyncConfig) bool {
 		return false
 	}
 	for i, folder := range c.SyncFolders {
-		if folder != other.SyncFolders[i] {
+		if folder.Path != other.SyncFolders[i].Path || folder.SyncMode != other.SyncFolders[i].SyncMode {
 			return false
 		}
 	}
@@ -404,4 +418,5 @@ func (c *SyncConfig) Equal(other *SyncConfig) bool {
 type SyncInfo struct {
 	Files            map[string]FileInfo `json:"files"`              // 文件信息
 	DeleteExtraFiles bool                `json:"delete_extra_files"` // 是否删除多余文件
+	SyncMode         string              `json:"sync_mode"`          // 同步模式
 }

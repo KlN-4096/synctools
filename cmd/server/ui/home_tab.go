@@ -2,11 +2,11 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
 
+	"synctools/pkg/common"
 	"synctools/pkg/server"
 )
 
@@ -97,7 +97,9 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 									declarative.CheckBox{
 										Text: "调试模式",
 										OnCheckedChanged: func() {
-											server.Logger.SetDebugMode(!server.Logger.DebugMode)
+											if server.Logger != nil {
+												server.Logger.SetDebugMode(!server.Logger.GetDebugMode())
+											}
 										},
 									},
 								},
@@ -105,24 +107,108 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 							declarative.Composite{
 								Layout: declarative.VBox{},
 								Children: []declarative.Widget{
-									declarative.Label{Text: "同步文件夹列表 (每行一个):"},
-									declarative.TextEdit{
-										AssignTo: &server.FolderEdit,
-										VScroll:  true,
-										MinSize:  declarative.Size{Height: 100},
-										OnTextChanged: func() {
-											text := server.FolderEdit.Text()
-											folders := strings.Split(text, "\r\n")
-											var validFolders []string
-											for _, folder := range folders {
-												if strings.TrimSpace(folder) != "" {
-													validFolders = append(validFolders, folder)
+									declarative.Label{Text: "同步文件夹列表:"},
+									declarative.TableView{
+										AssignTo:         &server.FolderTable,
+										MinSize:          declarative.Size{Height: 150},
+										AlternatingRowBG: true,
+										Columns: []declarative.TableViewColumn{
+											{Title: "文件夹路径", Width: 0, Alignment: declarative.AlignNear},
+											{Title: "同步模式", Width: 120, Alignment: declarative.AlignCenter},
+										},
+										Model: server.FolderModel,
+										OnBoundsChanged: func() {
+											// 获取父容器
+											if parent := server.FolderTable.Parent(); parent != nil {
+												// 获取父容器的客户区宽度
+												parentWidth := parent.ClientBounds().Width
+												// 第二列固定宽度120，第一列自动填充剩余空间
+												server.FolderTable.Columns().At(0).SetWidth(parentWidth - 120)
+												server.FolderTable.Columns().At(1).SetWidth(120)
+											}
+										},
+										OnItemActivated: func() {
+											if index := server.FolderTable.CurrentIndex(); index >= 0 {
+												folder := &server.Config.SyncFolders[index]
+												if dlg, err := walk.NewDialog(server.FolderTable.Form()); err == nil {
+													dlg.SetTitle("编辑同步文件夹")
+													dlg.SetLayout(walk.NewVBoxLayout())
+
+													var pathEdit *walk.LineEdit
+													var modeCombo *walk.ComboBox
+
+													declarative.Composite{
+														Layout: declarative.Grid{Columns: 2},
+														Children: []declarative.Widget{
+															declarative.Label{Text: "文件夹路径:"},
+															declarative.LineEdit{
+																AssignTo: &pathEdit,
+																Text:     folder.Path,
+															},
+															declarative.Label{Text: "同步模式:"},
+															declarative.ComboBox{
+																AssignTo: &modeCombo,
+																Model:    []string{"mirror", "push"},
+																Value:    folder.SyncMode,
+															},
+														},
+													}.Create(declarative.NewBuilder(dlg))
+
+													declarative.Composite{
+														Layout: declarative.HBox{},
+														Children: []declarative.Widget{
+															declarative.HSpacer{},
+															declarative.PushButton{
+																Text: "确定",
+																OnClicked: func() {
+																	folder.Path = pathEdit.Text()
+																	folder.SyncMode = modeCombo.Text()
+																	server.FolderModel.PublishRowsReset()
+																	server.ValidateFolders()
+																	dlg.Accept()
+																},
+															},
+															declarative.PushButton{
+																Text: "取消",
+																OnClicked: func() {
+																	dlg.Cancel()
+																},
+															},
+														},
+													}.Create(declarative.NewBuilder(dlg))
+
+													dlg.Run()
 												}
 											}
-											server.SyncFolders = validFolders
-											if server.Config.SyncDir != "" {
-												server.ValidateFolders()
-											}
+										},
+									},
+									declarative.Composite{
+										Layout: declarative.HBox{},
+										Children: []declarative.Widget{
+											declarative.PushButton{
+												Text: "添加文件夹",
+												OnClicked: func() {
+													server.Config.SyncFolders = append(server.Config.SyncFolders, common.SyncFolder{
+														Path:     "新文件夹",
+														SyncMode: "mirror",
+													})
+													server.FolderModel.PublishRowsReset()
+													server.ValidateFolders()
+												},
+											},
+											declarative.PushButton{
+												Text: "删除选中",
+												OnClicked: func() {
+													if index := server.FolderTable.CurrentIndex(); index >= 0 {
+														server.Config.SyncFolders = append(
+															server.Config.SyncFolders[:index],
+															server.Config.SyncFolders[index+1:]...,
+														)
+														server.FolderModel.PublishRowsReset()
+														server.ValidateFolders()
+													}
+												},
+											},
 										},
 									},
 									declarative.Label{
@@ -130,11 +216,10 @@ func createHomeTab(server *server.SyncServer, hostEdit, portEdit **walk.LineEdit
 										TextColor: walk.RGB(192, 0, 0),
 									},
 									declarative.TextEdit{
-										AssignTo:   &server.InvalidLabel,
-										ReadOnly:   true,
-										VScroll:    true,
-										MinSize:    declarative.Size{Height: 60},
-										Background: declarative.SolidColorBrush{Color: walk.RGB(255, 240, 240)},
+										AssignTo: &server.InvalidLabel,
+										ReadOnly: true,
+										VScroll:  true,
+										MinSize:  declarative.Size{Height: 60},
 									},
 								},
 							},

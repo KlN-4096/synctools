@@ -8,6 +8,25 @@ import (
 	"synctools/pkg/common"
 )
 
+// ServerInterface 定义服务器接口
+type ServerInterface interface {
+	GetFolderConfig(path string) (*common.SyncFolder, bool)
+}
+
+// getFolderConfig 获取文件夹配置
+var serverInstance ServerInterface
+
+func SetServerInstance(s ServerInterface) {
+	serverInstance = s
+}
+
+func getFolderConfig(path string) (*common.SyncFolder, bool) {
+	if serverInstance != nil {
+		return serverInstance.GetFolderConfig(path)
+	}
+	return nil, false
+}
+
 // HandleClient 处理客户端连接
 func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger common.Logger, getRedirectedPath func(string) string, version string) {
 	defer conn.Close()
@@ -35,17 +54,36 @@ func HandleClient(conn net.Conn, syncDir string, ignoreList []string, logger com
 		logger.Log("版本相同，保留客户端文件")
 	}
 
-	filesInfo, err := getFilesInfo(syncDir, ignoreList, logger)
+	// 接收客户端的同步路径
+	var clientPath string
+	if err := common.ReadJSON(conn, &clientPath); err != nil {
+		logger.Log("接收同步路径错误 %s: %v", clientAddr, err)
+		return
+	}
+
+	// 获取重定向后的路径
+	serverPath := getRedirectedPath(clientPath)
+	fullPath := filepath.Join(syncDir, serverPath)
+
+	filesInfo, err := getFilesInfo(fullPath, ignoreList, logger)
 	if err != nil {
 		logger.Log("获取文件信息错误: %v", err)
 		return
 	}
 
-	// 发送文件信息和版本差异标志
+	// 发送文件信息和同步信息
 	syncInfo := common.SyncInfo{
 		Files:            filesInfo,
 		DeleteExtraFiles: isVersionDifferent,
+		SyncMode:         "mirror", // 默认使用mirror模式
 	}
+
+	// 如果找到对应的文件夹配置，使用配置的同步模式
+	if folder, ok := getFolderConfig(serverPath); ok {
+		syncInfo.SyncMode = folder.SyncMode
+		logger.DebugLog("使用文件夹配置的同步模式: %s", folder.SyncMode)
+	}
+
 	if err := common.WriteJSON(conn, syncInfo); err != nil {
 		logger.Log("发送同步信息错误 %s: %v", clientAddr, err)
 		return

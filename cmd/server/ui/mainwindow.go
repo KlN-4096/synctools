@@ -75,18 +75,8 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
 		server.Config.SyncDir = dirLabel.Text()
 
-		// 更新同步文件夹列表
-		folders := strings.Split(server.FolderEdit.Text(), "\r\n")
-		var validFolders []string
-		for _, folder := range folders {
-			if strings.TrimSpace(folder) != "" {
-				validFolders = append(validFolders, folder)
-			}
-		}
-		server.SyncFolders = validFolders
-
 		// 更新忽略列表
-		text := (*ignoreListEdit).Text()
+		text := ignoreListEdit.Text()
 		items := strings.Split(text, "\r\n")
 		var ignoreList []string
 		for _, item := range items {
@@ -107,8 +97,10 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		}
 
 		// 关闭日志记录器
-		if err := server.Logger.Close(); err != nil {
-			fmt.Printf("关闭日志记录器失败: %v\n", err)
+		if logger, ok := server.Logger.(*common.GUILogger); ok {
+			if err := logger.Close(); err != nil {
+				fmt.Printf("关闭日志记录器失败: %v\n", err)
+			}
 		}
 	})
 
@@ -120,22 +112,8 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 	}
 	server.Logger = logger
 
-	// 设置初始文本
-	server.FolderEdit.SetText(strings.Join(server.SyncFolders, "\r\n"))
-
-	// 初始化重定向配置UI前，先设置容器的布局
-	if layout := server.RedirectComposite.Layout(); layout != nil {
-		if boxLayout, ok := layout.(*walk.BoxLayout); ok {
-			boxLayout.SetMargins(walk.Margins{VNear: 2, VFar: 2})
-		}
-	}
-
-	// 清空默认的重定向配置
-	server.RedirectComposite.Children().Clear()
-	// 使用已有的方法重新创建所有重定向配置行
-	for _, redirect := range server.Config.FolderRedirects {
-		addRedirectConfig(server, redirect.ServerPath, redirect.ClientPath)
-	}
+	// UI初始化完成后进行文件夹验证
+	server.ValidateFolders()
 
 	// 启动自动保存定时器
 	go func() {
@@ -148,18 +126,8 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 			fmt.Sscanf(portEdit.Text(), "%d", &server.Config.Port)
 			server.Config.SyncDir = dirLabel.Text()
 
-			// 更新同步文件夹列表
-			folders := strings.Split(server.FolderEdit.Text(), "\r\n")
-			var validFolders []string
-			for _, folder := range folders {
-				if strings.TrimSpace(folder) != "" {
-					validFolders = append(validFolders, folder)
-				}
-			}
-			server.SyncFolders = validFolders
-
 			// 更新忽略列表
-			text := (*ignoreListEdit).Text()
+			text := ignoreListEdit.Text()
 			items := strings.Split(text, "\r\n")
 			var ignoreList []string
 			for _, item := range items {

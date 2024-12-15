@@ -165,7 +165,6 @@ func addRedirectConfig(server *server.SyncServer, initialServerPath, initialClie
 
 	// 创建水平布局并设置边距
 	layout := walk.NewHBoxLayout()
-	// 使用与 declarative 相同的方式设置布局
 	if err := composite.SetLayout(layout); err != nil {
 		return
 	}
@@ -173,35 +172,35 @@ func addRedirectConfig(server *server.SyncServer, initialServerPath, initialClie
 	// 设置复合组件的样式以匹配 declarative 的设置
 	composite.SetMinMaxSize(walk.Size{Height: 22}, walk.Size{Height: 22})
 
-	// 服务器路径标签和输入框
+	// 服务器路径标签
 	serverLabel, err := walk.NewLabel(composite)
 	if err != nil {
 		return
 	}
-	serverLabel.SetText("服务器文件夹:")
+	serverLabel.SetText("服务器:")
 
+	// 服务器路径输入框
 	serverEdit, err := walk.NewLineEdit(composite)
 	if err != nil {
 		return
 	}
 	serverEdit.SetText(initialServerPath)
-	// 设置输入框的最大高度
-	serverEdit.SetMinMaxSize(walk.Size{Height: 20}, walk.Size{Height: 20})
+	serverEdit.SetMinMaxSize(walk.Size{Width: 150, Height: 20}, walk.Size{Height: 20})
 
-	// 客户端路径标签和输入框
+	// 客户端路径标签
 	clientLabel, err := walk.NewLabel(composite)
 	if err != nil {
 		return
 	}
-	clientLabel.SetText("客户端文件夹:")
+	clientLabel.SetText("客户端:")
 
+	// 客户端路径输入框
 	clientEdit, err := walk.NewLineEdit(composite)
 	if err != nil {
 		return
 	}
 	clientEdit.SetText(initialClientPath)
-	// 设置输入框的最大高度
-	clientEdit.SetMinMaxSize(walk.Size{Height: 20}, walk.Size{Height: 20})
+	clientEdit.SetMinMaxSize(walk.Size{Width: 150, Height: 20}, walk.Size{Height: 20})
 
 	// 删除按钮
 	deleteBtn, err := walk.NewPushButton(composite)
@@ -214,7 +213,7 @@ func addRedirectConfig(server *server.SyncServer, initialServerPath, initialClie
 		server.UpdateRedirectConfig()
 	})
 	// 设置按钮的最大高度
-	deleteBtn.SetMinMaxSize(walk.Size{Height: 20}, walk.Size{Height: 20})
+	deleteBtn.SetMinMaxSize(walk.Size{Width: 30, Height: 20}, walk.Size{Height: 20})
 
 	// 添加文本更改事件
 	serverEdit.TextChanged().Attach(func() {
