@@ -53,5 +53,10 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 	// 设置初始文本
 	server.FolderEdit.SetText(strings.Join(server.SyncFolders, "\r\n"))
 
+	// 初始化重定向配置UI
+	for _, redirect := range server.Config.FolderRedirects {
+		addRedirectConfig(server, redirect.ServerPath, redirect.ClientPath)
+	}
+
 	return mainWindow, nil
 }
