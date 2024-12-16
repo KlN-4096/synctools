@@ -52,16 +52,14 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 							if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 								// 先取消所有选中项
 								for i := 0; i < len(server.ConfigList); i++ {
-									server.ConfigListModel.SetValue(i, 0, false)
+									if server.ConfigList[i].UUID == server.SelectedUUID {
+										server.ConfigListModel.SetValue(i, 0, false)
+									}
 								}
 								// 设置新的选中项
 								server.ConfigListModel.SetValue(index, 0, true)
-								// 加载新配置
-								server.Config = server.ConfigList[index]
-								// 更新UI
-								server.NameEdit.SetText(server.Config.Name)
-								server.VersionEdit.SetText(server.Config.Version)
-								server.RedirectModel.PublishRowsReset()
+								// 立即刷新列表以更新所有复选框状态
+								server.ConfigListModel.PublishRowsReset()
 							}
 						},
 					},
