@@ -126,8 +126,13 @@ func (m *ConfigListModel) SetValue(row, col int, value interface{}) error {
 					if err := m.server.LoadConfigByUUID(newUUID); err != nil {
 						return err
 					}
+					// 更新忽略列表编辑框
+					if m.server.IgnoreListEdit != nil {
+						m.server.IgnoreListEdit.SetText(strings.Join(m.server.Config.IgnoreList, "\r\n"))
+					}
 					if m.server.Logger != nil {
 						m.server.Logger.DebugLog("已切换到配置: %s", m.server.Config.Name)
+						m.server.Logger.DebugLog("当前忽略列表: %v", m.server.Config.IgnoreList)
 					}
 				}
 			} else {
@@ -341,108 +346,103 @@ func (s *SyncServer) updateUI() {
 
 // LoadConfigByUUID 根据UUID加载配置
 func (s *SyncServer) LoadConfigByUUID(uuid string) error {
+	// 先准备一个新的配置，避免直接修改当前配置
+	var newConfig common.SyncConfig
+
 	// 先从内存中查找
-	for _, config := range s.ConfigList {
-		if config.UUID == uuid {
-			// 直接使用配置文件中的值，不使用默认值
-			s.Config = common.SyncConfig{
-				UUID:            config.UUID,
-				Name:            config.Name,
-				Host:            config.Host,
-				Port:            config.Port,
-				SyncDir:         config.SyncDir,
-				Version:         config.Version,
-				SyncFolders:     nil,
-				IgnoreList:      nil,
-				FolderRedirects: nil,
-			}
-
-			// 只有在源配置中存在时才复制这些字段
-			if config.SyncFolders != nil {
-				s.Config.SyncFolders = make([]common.SyncFolder, len(config.SyncFolders))
-				copy(s.Config.SyncFolders, config.SyncFolders)
-			}
-
-			if config.IgnoreList != nil {
-				s.Config.IgnoreList = make([]string, len(config.IgnoreList))
-				copy(s.Config.IgnoreList, config.IgnoreList)
-			}
-
-			if config.FolderRedirects != nil {
-				s.Config.FolderRedirects = make([]common.FolderRedirect, len(config.FolderRedirects))
-				copy(s.Config.FolderRedirects, config.FolderRedirects)
-			}
-
-			if s.Logger != nil {
-				s.Logger.DebugLog("已加载配置:")
-				s.Logger.DebugLog("- UUID: %s", s.Config.UUID)
-				s.Logger.DebugLog("- 名称: %s", s.Config.Name)
-				s.Logger.DebugLog("- 版本: %s", s.Config.Version)
-				s.Logger.DebugLog("- 主机: %s", s.Config.Host)
-				s.Logger.DebugLog("- 端口: %d", s.Config.Port)
-				s.Logger.DebugLog("- 同步目录: %s", s.Config.SyncDir)
-				s.Logger.DebugLog("- 忽略列表: %v", s.Config.IgnoreList)
-				s.Logger.DebugLog("- 同步文件夹: %v", s.Config.SyncFolders)
-				s.Logger.DebugLog("- 重定向配置: %v", s.Config.FolderRedirects)
-			}
-
-			s.updateUI()
-			s.ValidateFolders()
-			return nil
+	var sourceConfig *common.SyncConfig
+	for i := range s.ConfigList {
+		if s.ConfigList[i].UUID == uuid {
+			sourceConfig = &s.ConfigList[i]
+			break
 		}
 	}
 
 	// 如果内存中没有，尝试从文件加载
-	configPath := filepath.Join(filepath.Dir(s.ConfigFile), fmt.Sprintf("config_%s.json", uuid))
-	config, err := common.LoadConfig(configPath)
-	if err != nil {
-		return fmt.Errorf("加载配置失败: %v", err)
+	if sourceConfig == nil {
+		configPath := filepath.Join(filepath.Dir(s.ConfigFile), fmt.Sprintf("config_%s.json", uuid))
+		config, err := common.LoadConfig(configPath)
+		if err != nil {
+			return fmt.Errorf("加载配置失败: %v", err)
+		}
+		sourceConfig = config
 	}
 
-	// 直接使用配置文件中的值，不使用默认值
-	s.Config = common.SyncConfig{
-		UUID:            config.UUID,
-		Name:            config.Name,
-		Host:            config.Host,
-		Port:            config.Port,
-		SyncDir:         config.SyncDir,
-		Version:         config.Version,
-		SyncFolders:     nil,
-		IgnoreList:      nil,
-		FolderRedirects: nil,
+	if sourceConfig == nil {
+		return fmt.Errorf("找不到UUID为 %s 的配置", uuid)
 	}
 
-	// 只有在源配置中存在时才复制这些字段
-	if config.SyncFolders != nil {
-		s.Config.SyncFolders = make([]common.SyncFolder, len(config.SyncFolders))
-		copy(s.Config.SyncFolders, config.SyncFolders)
+	// 复制基本字段
+	newConfig.UUID = sourceConfig.UUID
+	newConfig.Name = sourceConfig.Name
+	newConfig.Host = sourceConfig.Host
+	newConfig.Port = sourceConfig.Port
+	newConfig.SyncDir = sourceConfig.SyncDir
+	newConfig.Version = sourceConfig.Version
+
+	// 初始化并复制切片字段
+	if sourceConfig.SyncFolders != nil {
+		newConfig.SyncFolders = make([]common.SyncFolder, len(sourceConfig.SyncFolders))
+		copy(newConfig.SyncFolders, sourceConfig.SyncFolders)
+	} else {
+		newConfig.SyncFolders = make([]common.SyncFolder, 0)
 	}
 
-	if config.IgnoreList != nil {
-		s.Config.IgnoreList = make([]string, len(config.IgnoreList))
-		copy(s.Config.IgnoreList, config.IgnoreList)
+	if sourceConfig.IgnoreList != nil {
+		newConfig.IgnoreList = make([]string, len(sourceConfig.IgnoreList))
+		copy(newConfig.IgnoreList, sourceConfig.IgnoreList)
+	} else {
+		newConfig.IgnoreList = make([]string, 0)
 	}
 
-	if config.FolderRedirects != nil {
-		s.Config.FolderRedirects = make([]common.FolderRedirect, len(config.FolderRedirects))
-		copy(s.Config.FolderRedirects, config.FolderRedirects)
+	if sourceConfig.FolderRedirects != nil {
+		newConfig.FolderRedirects = make([]common.FolderRedirect, len(sourceConfig.FolderRedirects))
+		copy(newConfig.FolderRedirects, sourceConfig.FolderRedirects)
+	} else {
+		newConfig.FolderRedirects = make([]common.FolderRedirect, 0)
+	}
+
+	// 验证新配置
+	if newConfig.UUID == "" {
+		return fmt.Errorf("配置缺少UUID")
+	}
+	if newConfig.Name == "" {
+		return fmt.Errorf("配置缺少名称")
+	}
+	if newConfig.Version == "" {
+		return fmt.Errorf("配置缺少版本号")
+	}
+	if newConfig.Host == "" {
+		newConfig.Host = "0.0.0.0" // 使用默认值
+	}
+	if newConfig.Port <= 0 || newConfig.Port > 65535 {
+		newConfig.Port = 6666 // 使用默认值
 	}
 
 	if s.Logger != nil {
-		s.Logger.DebugLog("已从文件加载配置:")
-		s.Logger.DebugLog("- UUID: %s", s.Config.UUID)
-		s.Logger.DebugLog("- 名称: %s", s.Config.Name)
-		s.Logger.DebugLog("- 版本: %s", s.Config.Version)
-		s.Logger.DebugLog("- 主机: %s", s.Config.Host)
-		s.Logger.DebugLog("- 端口: %d", s.Config.Port)
-		s.Logger.DebugLog("- 同步目录: %s", s.Config.SyncDir)
-		s.Logger.DebugLog("- 忽略列表: %v", s.Config.IgnoreList)
-		s.Logger.DebugLog("- 同步文件夹: %v", s.Config.SyncFolders)
-		s.Logger.DebugLog("- 重定向配置: %v", s.Config.FolderRedirects)
+		s.Logger.DebugLog("准备切换到新配置:")
+		s.Logger.DebugLog("- UUID: %s", newConfig.UUID)
+		s.Logger.DebugLog("- 名称: %s", newConfig.Name)
+		s.Logger.DebugLog("- 版本: %s", newConfig.Version)
+		s.Logger.DebugLog("- 主机: %s", newConfig.Host)
+		s.Logger.DebugLog("- 端口: %d", newConfig.Port)
+		s.Logger.DebugLog("- 同步目录: %s", newConfig.SyncDir)
+		s.Logger.DebugLog("- 忽略列表: %v", newConfig.IgnoreList)
+		s.Logger.DebugLog("- 同步文件夹: %v", newConfig.SyncFolders)
+		s.Logger.DebugLog("- 重定向配置: %v", newConfig.FolderRedirects)
 	}
 
+	// 所有检查都通过后，才更新当前配置
+	s.Config = newConfig
+
+	// 更新UI
 	s.updateUI()
 	s.ValidateFolders()
+
+	if s.Logger != nil {
+		s.Logger.DebugLog("配置切换完成")
+	}
+
 	return nil
 }
 
@@ -482,10 +482,67 @@ func (s *SyncServer) SaveConfig() error {
 
 	// 检查UUID是否与当前选中的UUID匹配
 	if s.SelectedUUID != "" && s.Config.UUID != s.SelectedUUID {
-		if s.Logger != nil {
-			s.Logger.DebugLog("UUID不匹配: 当前=%s, 选中=%s", s.Config.UUID, s.SelectedUUID)
+		// 如果是新配置，更新选中的UUID
+		found := false
+		for _, config := range s.ConfigList {
+			if config.UUID == s.Config.UUID {
+				found = true
+				break
+			}
 		}
-		return fmt.Errorf("配置UUID不匹配，无法保存")
+		if !found {
+			s.SelectedUUID = s.Config.UUID
+		} else {
+			if s.Logger != nil {
+				s.Logger.DebugLog("UUID不匹配: 当前=%s, 选中=%s", s.Config.UUID, s.SelectedUUID)
+			}
+			return fmt.Errorf("配置UUID不匹配，无法保存")
+		}
+	}
+
+	// 验证必要字段
+	if s.Config.Name == "" {
+		return fmt.Errorf("整合包名称不能为空")
+	}
+	if s.Config.Version == "" {
+		return fmt.Errorf("整合包版本不能为空")
+	}
+	if s.Config.Host == "" {
+		return fmt.Errorf("主机地址不能为空")
+	}
+	if s.Config.Port <= 0 || s.Config.Port > 65535 {
+		return fmt.Errorf("端口号无效 (1-65535)")
+	}
+
+	// 确保切片字段不为nil
+	if s.Config.SyncFolders == nil {
+		s.Config.SyncFolders = make([]common.SyncFolder, 0)
+	}
+	if s.Config.IgnoreList == nil {
+		s.Config.IgnoreList = make([]string, 0)
+	}
+	if s.Config.FolderRedirects == nil {
+		s.Config.FolderRedirects = make([]common.FolderRedirect, 0)
+	}
+
+	// 验证同步文件夹配置
+	for i, folder := range s.Config.SyncFolders {
+		if folder.Path == "" {
+			return fmt.Errorf("同步文件夹 #%d 的路径不能为空", i+1)
+		}
+		if folder.SyncMode != "mirror" && folder.SyncMode != "push" {
+			return fmt.Errorf("同步文件夹 #%d 的同步模式无效 (mirror/push)", i+1)
+		}
+	}
+
+	// 验证重定向配置
+	for i, redirect := range s.Config.FolderRedirects {
+		if redirect.ServerPath == "" {
+			return fmt.Errorf("重定向配置 #%d 的服务器路径不能为空", i+1)
+		}
+		if redirect.ClientPath == "" {
+			return fmt.Errorf("重定向配置 #%d 的客户端路径不能为空", i+1)
+		}
 	}
 
 	if s.Logger != nil {

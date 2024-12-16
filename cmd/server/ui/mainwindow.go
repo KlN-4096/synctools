@@ -16,7 +16,6 @@ import (
 func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 	var mainWindow *walk.MainWindow
 	var logBox *walk.TextEdit
-	var ignoreListEdit *walk.TextEdit
 
 	if err := (declarative.MainWindow{
 		AssignTo: &mainWindow,
@@ -44,7 +43,7 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 					declarative.TabWidget{
 						Pages: []declarative.TabPage{
 							createHomeTab(server, &logBox),
-							createConfigTab(server, &ignoreListEdit),
+							createConfigTab(server, nil),
 						},
 					},
 				},
@@ -79,8 +78,8 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		}
 
 		// 更新忽略列表
-		if ignoreListEdit != nil {
-			text := ignoreListEdit.Text()
+		if server.IgnoreListEdit != nil {
+			text := server.IgnoreListEdit.Text()
 			items := strings.Split(text, "\r\n")
 			var ignoreList []string
 			for _, item := range items {

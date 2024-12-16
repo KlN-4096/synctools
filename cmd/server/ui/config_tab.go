@@ -417,12 +417,12 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 								TextColor: walk.RGB(128, 128, 128),
 							},
 							declarative.TextEdit{
-								AssignTo: ignoreListEdit,
+								AssignTo: &server.IgnoreListEdit,
 								Text:     strings.Join(server.Config.IgnoreList, "\r\n"),
 								VScroll:  true,
 								MinSize:  declarative.Size{Height: 100},
 								OnTextChanged: func() {
-									text := (*ignoreListEdit).Text()
+									text := server.IgnoreListEdit.Text()
 									items := strings.Split(text, "\r\n")
 									var ignoreList []string
 									for _, item := range items {
@@ -434,7 +434,12 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 									if server.Logger != nil {
 										server.Logger.DebugLog("忽略列表已更新: %v", ignoreList)
 									}
-									server.SaveConfig()
+									// 更新当前配置到配置列表
+									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
+										server.ConfigList[index] = server.Config
+										server.ConfigListModel.PublishRowsReset()
+										server.SaveConfig()
+									}
 								},
 							},
 							declarative.Label{
