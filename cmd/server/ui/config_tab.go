@@ -15,7 +15,7 @@ import (
 )
 
 // createConfigTab 创建配置标签页
-func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) declarative.TabPage {
+func createConfigTab(server *server.SyncServer) declarative.TabPage {
 	return declarative.TabPage{
 		Title: "配置",
 		Layout: declarative.VBox{
@@ -186,6 +186,19 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 									server.Config.Name = server.NameEdit.Text()
 									server.Config.Version = server.VersionEdit.Text()
 
+									// 更新忽略列表
+									if server.IgnoreListEdit != nil {
+										text := server.IgnoreListEdit.Text()
+										items := strings.Split(text, "\r\n")
+										var ignoreList []string
+										for _, item := range items {
+											if item = strings.TrimSpace(item); item != "" {
+												ignoreList = append(ignoreList, item)
+											}
+										}
+										server.Config.IgnoreList = ignoreList
+									}
+
 									// 更新配置列表
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 										// 检查 UUID 是否匹配
@@ -247,7 +260,6 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 										server.ConfigList[index] = server.Config
 										server.ConfigListModel.PublishRowsReset()
-										server.SaveConfig()
 									}
 								},
 								AssignTo: &server.NameEdit,
@@ -264,7 +276,6 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 										server.ConfigList[index] = server.Config
 										server.ConfigListModel.PublishRowsReset()
-										server.SaveConfig()
 									}
 								},
 								AssignTo: &server.VersionEdit,
@@ -351,7 +362,6 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 															redirect.ServerPath = serverEdit.Text()
 															redirect.ClientPath = clientEdit.Text()
 															server.RedirectModel.PublishRowsReset()
-															server.SaveConfig()
 															dlg.Accept()
 														},
 													},
@@ -380,7 +390,6 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 												ClientPath: "新客户端文件夹",
 											})
 											server.RedirectModel.PublishRowsReset()
-											server.SaveConfig()
 										},
 									},
 									declarative.PushButton{
@@ -392,7 +401,6 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 													server.Config.FolderRedirects[index+1:]...,
 												)
 												server.RedirectModel.PublishRowsReset()
-												server.SaveConfig()
 											}
 										},
 									},
@@ -422,23 +430,8 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 								VScroll:  true,
 								MinSize:  declarative.Size{Height: 100},
 								OnTextChanged: func() {
-									text := server.IgnoreListEdit.Text()
-									items := strings.Split(text, "\r\n")
-									var ignoreList []string
-									for _, item := range items {
-										if item = strings.TrimSpace(item); item != "" {
-											ignoreList = append(ignoreList, item)
-										}
-									}
-									server.Config.IgnoreList = ignoreList
 									if server.Logger != nil {
-										server.Logger.DebugLog("忽略列表已更新: %v", ignoreList)
-									}
-									// 更新当前配置到配置列表
-									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-										server.ConfigList[index] = server.Config
-										server.ConfigListModel.PublishRowsReset()
-										server.SaveConfig()
+										server.Logger.DebugLog("忽略列表编辑框内容已更改")
 									}
 								},
 							},

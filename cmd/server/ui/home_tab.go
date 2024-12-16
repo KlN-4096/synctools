@@ -36,7 +36,6 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 												server.ConfigList[index] = server.Config
 												server.ConfigListModel.PublishRowsReset()
 											}
-											server.SaveConfig()
 										},
 									},
 									declarative.Label{Text: "端口:"},
@@ -56,12 +55,6 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 											if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 												server.ConfigList[index] = server.Config
 												server.ConfigListModel.PublishRowsReset()
-											}
-
-											if err := server.SaveConfig(); err != nil {
-												server.Logger.Log("保存配置失败: %v", err)
-											} else {
-												server.Logger.Log("配置已保存")
 											}
 										},
 									},
@@ -99,7 +92,6 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 													server.ConfigList[index] = server.Config
 													server.ConfigListModel.PublishRowsReset()
 												}
-												server.SaveConfig()
 											}
 										},
 									},
@@ -193,7 +185,6 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 																	folder.SyncMode = modeCombo.Text()
 																	server.FolderModel.PublishRowsReset()
 																	server.ValidateFolders()
-																	server.SaveConfig()
 																	dlg.Accept()
 																},
 															},
@@ -223,7 +214,6 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 													})
 													server.FolderModel.PublishRowsReset()
 													server.ValidateFolders()
-													server.SaveConfig()
 												},
 											},
 											declarative.PushButton{
@@ -236,7 +226,6 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 														)
 														server.FolderModel.PublishRowsReset()
 														server.ValidateFolders()
-														server.SaveConfig()
 													}
 												},
 											},

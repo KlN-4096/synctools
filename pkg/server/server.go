@@ -514,6 +514,22 @@ func (s *SyncServer) SaveConfig() error {
 		return fmt.Errorf("端口号无效 (1-65535)")
 	}
 
+	// 更新忽略列表
+	if s.IgnoreListEdit != nil {
+		text := s.IgnoreListEdit.Text()
+		items := strings.Split(text, "\r\n")
+		var ignoreList []string
+		for _, item := range items {
+			if item = strings.TrimSpace(item); item != "" {
+				ignoreList = append(ignoreList, item)
+			}
+		}
+		s.Config.IgnoreList = ignoreList
+		if s.Logger != nil {
+			s.Logger.DebugLog("从UI更新忽略列表: %v", ignoreList)
+		}
+	}
+
 	// 确保切片字段不为nil
 	if s.Config.SyncFolders == nil {
 		s.Config.SyncFolders = make([]common.SyncFolder, 0)

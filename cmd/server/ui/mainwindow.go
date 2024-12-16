@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
@@ -43,7 +42,7 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 					declarative.TabWidget{
 						Pages: []declarative.TabPage{
 							createHomeTab(server, &logBox),
-							createConfigTab(server, nil),
+							createConfigTab(server),
 						},
 					},
 				},
@@ -75,19 +74,6 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		}
 		if server.DirLabel != nil {
 			server.Config.SyncDir = server.DirLabel.Text()
-		}
-
-		// 更新忽略列表
-		if server.IgnoreListEdit != nil {
-			text := server.IgnoreListEdit.Text()
-			items := strings.Split(text, "\r\n")
-			var ignoreList []string
-			for _, item := range items {
-				if item = strings.TrimSpace(item); item != "" {
-					ignoreList = append(ignoreList, item)
-				}
-			}
-			server.Config.IgnoreList = ignoreList
 		}
 
 		// 保存配置
