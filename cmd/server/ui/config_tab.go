@@ -48,6 +48,22 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 						},
 
 						Model: server.ConfigListModel,
+						OnCurrentIndexChanged: func() {
+							if index := server.ConfigTable.CurrentIndex(); index >= 0 {
+								// 先取消所有选中项
+								for i := 0; i < len(server.ConfigList); i++ {
+									server.ConfigListModel.SetValue(i, 0, false)
+								}
+								// 设置新的选中项
+								server.ConfigListModel.SetValue(index, 0, true)
+								// 加载新配置
+								server.Config = server.ConfigList[index]
+								// 更新UI
+								server.NameEdit.SetText(server.Config.Name)
+								server.VersionEdit.SetText(server.Config.Version)
+								server.RedirectModel.PublishRowsReset()
+							}
+						},
 					},
 					declarative.Composite{
 						Layout: declarative.HBox{},
@@ -174,6 +190,15 @@ func createConfigTab(server *server.SyncServer, ignoreListEdit **walk.TextEdit) 
 
 									// 更新配置列表
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
+										// 检查 UUID 是否匹配
+										if server.Config.UUID != server.ConfigList[index].UUID {
+											walk.MsgBox(server.ConfigTable.Form(),
+												"错误",
+												"配置 UUID 不匹配，无法保存",
+												walk.MsgBoxIconError)
+											return
+										}
+
 										server.ConfigList[index] = server.Config
 										server.ConfigListModel.PublishRowsReset()
 									}

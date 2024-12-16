@@ -113,49 +113,37 @@ func (m *ConfigListModel) Value(row, col int) interface{} {
 
 func (m *ConfigListModel) SetValue(row, col int, value interface{}) error {
 	if col == 0 {
-		if checked, ok := value.(bool); ok && checked {
-			// 取消其他选中项
-			oldUUID := m.server.SelectedUUID
-			m.server.SelectedUUID = m.server.ConfigList[row].UUID
-
-			// 如果是同一个配置，不需要重新加载
-			if oldUUID == m.server.SelectedUUID {
-				return nil
-			}
-
-			// 加载选中的配置
-			if err := m.server.LoadConfigByUUID(m.server.SelectedUUID); err != nil {
-				m.server.SelectedUUID = oldUUID // 恢复原来的选择
-				return err
-			}
-
-			// 立即保存选中的UUID到文件
-			selectedPath := filepath.Join(filepath.Dir(m.server.ConfigFile), "selected_uuid.txt")
-			if err := os.WriteFile(selectedPath, []byte(m.server.SelectedUUID), 0644); err != nil {
-				if m.server.Logger != nil {
-					m.server.Logger.Log("保存选中UUID失败: %v", err)
+		if checked, ok := value.(bool); ok {
+			if checked {
+				// 设置新的选中项
+				newUUID := m.server.ConfigList[row].UUID
+				if newUUID != m.server.SelectedUUID {
+					m.server.SelectedUUID = newUUID
+					// 加载新配置
+					if err := m.server.LoadConfigByUUID(newUUID); err != nil {
+						return err
+					}
+					if m.server.Logger != nil {
+						m.server.Logger.DebugLog("已切换到配置: %s", m.server.Config.Name)
+					}
 				}
 			}
-
-			// 更新UI和日志
-			if m.server.Logger != nil {
-				m.server.Logger.DebugLog("已切换到配置: %s", m.server.Config.Name)
-			}
-			m.PublishRowsReset()
 		}
 	}
 	return nil
 }
 
+// 实现 walk.TableModel 接口
 func (m *ConfigListModel) Checked(row int) bool {
 	return m.server.ConfigList[row].UUID == m.server.SelectedUUID
 }
 
 func (m *ConfigListModel) SetChecked(row int, checked bool) error {
-	if checked {
-		return m.SetValue(row, 0, true)
-	}
-	return nil
+	return m.SetValue(row, 0, checked)
+}
+
+func (m *ConfigListModel) CheckedCount() int {
+	return 1 // 始终只有一个选中项
 }
 
 func (m *ConfigListModel) PublishRowsReset() {
