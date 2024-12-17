@@ -51,8 +51,8 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 						OnCurrentIndexChanged: func() {
 							if index := server.ConfigTable.CurrentIndex(); index >= 0 {
 								// 先取消所有选中项
-								for i := 0; i < len(server.ConfigList); i++ {
-									if server.ConfigList[i].UUID == server.SelectedUUID {
+								for i := 0; i < len(server.ConfigManager.ConfigList); i++ {
+									if server.ConfigManager.ConfigList[i].UUID == server.ConfigManager.SelectedUUID {
 										server.ConfigListModel.SetValue(i, 0, false)
 									}
 								}
@@ -123,7 +123,7 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 
 														// 保存新配置
 														configPath := filepath.Join(
-															filepath.Dir(server.ConfigFile),
+															server.ConfigManager.ConfigDir,
 															fmt.Sprintf("config_%s.json", uuidStr),
 														)
 														if err := common.SaveConfig(&newConfig, configPath); err != nil {
@@ -134,9 +134,9 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 														}
 
 														// 添加到列表并选中
-														server.ConfigList = append(server.ConfigList, newConfig)
-														server.ConfigListModel.PublishRowsReset()
-														server.ConfigTable.SetCurrentIndex(len(server.ConfigList) - 1)
+														server.ConfigManager.ConfigList = append(server.ConfigManager.ConfigList, newConfig)
+														server.ConfigManager.UpdateConfigListModel()
+														server.ConfigTable.SetCurrentIndex(len(server.ConfigManager.ConfigList) - 1)
 
 														dlg.Accept()
 													},
@@ -158,18 +158,13 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 								Text: "删除配置",
 								OnClicked: func() {
 									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-										config := server.ConfigList[index]
+										config := server.ConfigManager.ConfigList[index]
 										if walk.MsgBox(server.ConfigTable.Form(),
 											"确认删除",
 											fmt.Sprintf("确定要删除配置 '%s' 吗？", config.Name),
 											walk.MsgBoxYesNo) == walk.DlgCmdYes {
 
-											// 删除配置文件
-											configPath := filepath.Join(
-												filepath.Dir(server.ConfigFile),
-												fmt.Sprintf("config_%s.json", config.UUID),
-											)
-											if err := server.DeleteConfig(configPath, index); err != nil {
+											if err := server.ConfigManager.DeleteConfig(config.UUID); err != nil {
 												walk.MsgBox(server.ConfigTable.Form(),
 													"错误",
 													fmt.Sprintf("删除配置失败: %v", err),
@@ -182,9 +177,11 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 							declarative.PushButton{
 								Text: "保存配置",
 								OnClicked: func() {
+									config := server.ConfigManager.GetCurrentConfig()
+
 									// 确保当前编辑框的内容已更新到配置对象
-									server.Config.Name = server.NameEdit.Text()
-									server.Config.Version = server.VersionEdit.Text()
+									config.Name = server.NameEdit.Text()
+									config.Version = server.VersionEdit.Text()
 
 									// 更新忽略列表
 									if server.IgnoreListEdit != nil {
@@ -196,26 +193,11 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 												ignoreList = append(ignoreList, item)
 											}
 										}
-										server.Config.IgnoreList = ignoreList
+										config.IgnoreList = ignoreList
 									}
 
-									// 更新配置列表
-									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-										// 检查 UUID 是否匹配
-										if server.Config.UUID != server.ConfigList[index].UUID {
-											walk.MsgBox(server.ConfigTable.Form(),
-												"错误",
-												"配置 UUID 不匹配，无法保存",
-												walk.MsgBoxIconError)
-											return
-										}
-
-										server.ConfigList[index] = server.Config
-										server.ConfigListModel.PublishRowsReset()
-									}
-
-									// 保存到文件
-									if err := server.SaveConfig(); err != nil {
+									// 保存配置
+									if err := server.ConfigManager.SaveConfig(); err != nil {
 										walk.MsgBox(server.ConfigTable.Form(),
 											"错误",
 											fmt.Sprintf("保存配置失败: %v", err),
@@ -250,32 +232,24 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 						Children: []declarative.Widget{
 							declarative.Label{Text: "整合包名称:"},
 							declarative.LineEdit{
-								Text: server.Config.Name,
+								Text: server.ConfigManager.GetCurrentConfig().Name,
 								OnTextChanged: func() {
-									server.Config.Name = server.NameEdit.Text()
+									config := server.ConfigManager.GetCurrentConfig()
+									config.Name = server.NameEdit.Text()
 									if server.Logger != nil {
-										server.Logger.DebugLog("整合包名称已更新: %s", server.Config.Name)
-									}
-									// 更新当前配置到配置列表
-									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-										server.ConfigList[index] = server.Config
-										server.ConfigListModel.PublishRowsReset()
+										server.Logger.DebugLog("整合包名称已更新: %s", config.Name)
 									}
 								},
 								AssignTo: &server.NameEdit,
 							},
 							declarative.Label{Text: "整合包版本:"},
 							declarative.LineEdit{
-								Text: server.Config.Version,
+								Text: server.ConfigManager.GetCurrentConfig().Version,
 								OnTextChanged: func() {
-									server.Config.Version = server.VersionEdit.Text()
+									config := server.ConfigManager.GetCurrentConfig()
+									config.Version = server.VersionEdit.Text()
 									if server.Logger != nil {
-										server.Logger.DebugLog("版本已更新: %s", server.Config.Version)
-									}
-									// 更新当前配置到配置列表
-									if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-										server.ConfigList[index] = server.Config
-										server.ConfigListModel.PublishRowsReset()
+										server.Logger.DebugLog("版本已更新: %s", config.Version)
 									}
 								},
 								AssignTo: &server.VersionEdit,
@@ -328,7 +302,8 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 								},
 								OnItemActivated: func() {
 									if index := server.RedirectTable.CurrentIndex(); index >= 0 {
-										redirect := &server.Config.FolderRedirects[index]
+										config := server.ConfigManager.GetCurrentConfig()
+										redirect := &config.FolderRedirects[index]
 										if dlg, err := walk.NewDialog(server.RedirectTable.Form()); err == nil {
 											dlg.SetTitle("编辑重定向配置")
 											dlg.SetLayout(walk.NewVBoxLayout())
@@ -385,7 +360,8 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 									declarative.PushButton{
 										Text: "添加重定向",
 										OnClicked: func() {
-											server.Config.FolderRedirects = append(server.Config.FolderRedirects, common.FolderRedirect{
+											config := server.ConfigManager.GetCurrentConfig()
+											config.FolderRedirects = append(config.FolderRedirects, common.FolderRedirect{
 												ServerPath: "新服务器文件夹",
 												ClientPath: "新客户端文件夹",
 											})
@@ -396,9 +372,10 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 										Text: "删除选中",
 										OnClicked: func() {
 											if index := server.RedirectTable.CurrentIndex(); index >= 0 {
-												server.Config.FolderRedirects = append(
-													server.Config.FolderRedirects[:index],
-													server.Config.FolderRedirects[index+1:]...,
+												config := server.ConfigManager.GetCurrentConfig()
+												config.FolderRedirects = append(
+													config.FolderRedirects[:index],
+													config.FolderRedirects[index+1:]...,
 												)
 												server.RedirectModel.PublishRowsReset()
 											}
@@ -426,7 +403,7 @@ func createConfigTab(server *server.SyncServer) declarative.TabPage {
 							},
 							declarative.TextEdit{
 								AssignTo: &server.IgnoreListEdit,
-								Text:     strings.Join(server.Config.IgnoreList, "\r\n"),
+								Text:     strings.Join(server.ConfigManager.GetCurrentConfig().IgnoreList, "\r\n"),
 								VScroll:  true,
 								MinSize:  declarative.Size{Height: 100},
 								OnTextChanged: func() {

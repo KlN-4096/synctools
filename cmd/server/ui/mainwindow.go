@@ -66,18 +66,19 @@ func CreateMainWindow(server *server.SyncServer) (*walk.MainWindow, error) {
 		}
 
 		// 保存前更新配置
+		config := server.ConfigManager.GetCurrentConfig()
 		if server.HostEdit != nil {
-			server.Config.Host = server.HostEdit.Text()
+			config.Host = server.HostEdit.Text()
 		}
 		if server.PortEdit != nil {
-			fmt.Sscanf(server.PortEdit.Text(), "%d", &server.Config.Port)
+			fmt.Sscanf(server.PortEdit.Text(), "%d", &config.Port)
 		}
 		if server.DirLabel != nil {
-			server.Config.SyncDir = server.DirLabel.Text()
+			config.SyncDir = server.DirLabel.Text()
 		}
 
 		// 保存配置
-		if err := server.SaveConfig(); err != nil {
+		if err := server.ConfigManager.SaveConfig(); err != nil {
 			if server.Logger != nil {
 				server.Logger.Log("关闭前保存配置失败: %v", err)
 			}

@@ -29,39 +29,31 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 									declarative.Label{Text: "主机:"},
 									declarative.LineEdit{
 										AssignTo: &server.HostEdit,
-										Text:     server.Config.Host,
+										Text:     server.ConfigManager.GetCurrentConfig().Host,
 										OnEditingFinished: func() {
-											server.Config.Host = server.HostEdit.Text()
-											if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-												server.ConfigList[index] = server.Config
-												server.ConfigListModel.PublishRowsReset()
-											}
+											config := server.ConfigManager.GetCurrentConfig()
+											config.Host = server.HostEdit.Text()
 										},
 									},
 									declarative.Label{Text: "端口:"},
 									declarative.LineEdit{
 										AssignTo: &server.PortEdit,
-										Text:     fmt.Sprintf("%d", server.Config.Port),
+										Text:     fmt.Sprintf("%d", server.ConfigManager.GetCurrentConfig().Port),
 										OnEditingFinished: func() {
-
-											oldPort := server.Config.Port
-											if _, err := fmt.Sscanf(server.PortEdit.Text(), "%d", &server.Config.Port); err != nil {
+											config := server.ConfigManager.GetCurrentConfig()
+											oldPort := config.Port
+											if _, err := fmt.Sscanf(server.PortEdit.Text(), "%d", &config.Port); err != nil {
 												server.Logger.Log("端口号解析失败: %v", err)
 												return
 											}
 
-											server.Logger.Log("端口号已更改: %d -> %d", oldPort, server.Config.Port)
-
-											if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-												server.ConfigList[index] = server.Config
-												server.ConfigListModel.PublishRowsReset()
-											}
+											server.Logger.Log("端口号已更改: %d -> %d", oldPort, config.Port)
 										},
 									},
 									declarative.Label{Text: "同步目录:"},
 									declarative.Label{
 										AssignTo: &server.DirLabel,
-										Text:     server.Config.SyncDir,
+										Text:     server.ConfigManager.GetCurrentConfig().SyncDir,
 									},
 								},
 							},
@@ -84,14 +76,11 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 											}
 
 											if dlg.FilePath != "" {
-												server.Config.SyncDir = dlg.FilePath
+												config := server.ConfigManager.GetCurrentConfig()
+												config.SyncDir = dlg.FilePath
 												server.DirLabel.SetText(dlg.FilePath)
 												server.Logger.Log("同步目录已更改为: %s", dlg.FilePath)
 												server.ValidateFolders()
-												if index := server.ConfigTable.CurrentIndex(); index >= 0 {
-													server.ConfigList[index] = server.Config
-													server.ConfigListModel.PublishRowsReset()
-												}
 											}
 										},
 									},
@@ -149,7 +138,8 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 										},
 										OnItemActivated: func() {
 											if index := server.FolderTable.CurrentIndex(); index >= 0 {
-												folder := &server.Config.SyncFolders[index]
+												config := server.ConfigManager.GetCurrentConfig()
+												folder := &config.SyncFolders[index]
 												if dlg, err := walk.NewDialog(server.FolderTable.Form()); err == nil {
 													dlg.SetTitle("编辑同步文件夹")
 													dlg.SetLayout(walk.NewVBoxLayout())
@@ -208,7 +198,8 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 											declarative.PushButton{
 												Text: "添加文件夹",
 												OnClicked: func() {
-													server.Config.SyncFolders = append(server.Config.SyncFolders, common.SyncFolder{
+													config := server.ConfigManager.GetCurrentConfig()
+													config.SyncFolders = append(config.SyncFolders, common.SyncFolder{
 														Path:     "新文件夹",
 														SyncMode: "mirror",
 													})
@@ -220,9 +211,10 @@ func createHomeTab(server *server.SyncServer, logBox **walk.TextEdit) declarativ
 												Text: "删除选中",
 												OnClicked: func() {
 													if index := server.FolderTable.CurrentIndex(); index >= 0 {
-														server.Config.SyncFolders = append(
-															server.Config.SyncFolders[:index],
-															server.Config.SyncFolders[index+1:]...,
+														config := server.ConfigManager.GetCurrentConfig()
+														config.SyncFolders = append(
+															config.SyncFolders[:index],
+															config.SyncFolders[index+1:]...,
 														)
 														server.FolderModel.PublishRowsReset()
 														server.ValidateFolders()
