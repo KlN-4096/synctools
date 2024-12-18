@@ -1,9 +1,12 @@
 package model
 
 import (
+	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 )
 
 // Config 同步配置
@@ -17,6 +20,69 @@ type Config struct {
 	SyncFolders     []SyncFolder     `json:"sync_folders"`     // 同步文件夹列表
 	IgnoreList      []string         `json:"ignore_list"`      // 忽略文件列表
 	FolderRedirects []FolderRedirect `json:"folder_redirects"` // 文件夹重定向配置
+}
+
+// Validate 验证配置是否有效
+func (c *Config) Validate() error {
+	if c.Name == "" {
+		return fmt.Errorf("名称不能为空")
+	}
+	if c.Version == "" {
+		return fmt.Errorf("版本不能为空")
+	}
+	if c.Host == "" {
+		return fmt.Errorf("主机地址不能为空")
+	}
+	if c.Port <= 0 || c.Port > 65535 {
+		return fmt.Errorf("端口号无效: %d", c.Port)
+	}
+	if c.SyncDir == "" {
+		return fmt.Errorf("同步目录不能为空")
+	}
+
+	// 验证同步文件夹配置
+	for _, folder := range c.SyncFolders {
+		if folder.Path == "" {
+			return fmt.Errorf("同步文件夹路径不能为空")
+		}
+		if folder.SyncMode != "mirror" && folder.SyncMode != "push" {
+			return fmt.Errorf("无效的同步模式: %s", folder.SyncMode)
+		}
+	}
+
+	return nil
+}
+
+// Clone 创建配置的深度复制
+func (c *Config) Clone() *Config {
+	clone := &Config{
+		UUID:    c.UUID,
+		Name:    c.Name,
+		Version: c.Version,
+		Host:    c.Host,
+		Port:    c.Port,
+		SyncDir: c.SyncDir,
+	}
+
+	// 复制同步文件夹列表
+	if len(c.SyncFolders) > 0 {
+		clone.SyncFolders = make([]SyncFolder, len(c.SyncFolders))
+		copy(clone.SyncFolders, c.SyncFolders)
+	}
+
+	// 复制忽略列表
+	if len(c.IgnoreList) > 0 {
+		clone.IgnoreList = make([]string, len(c.IgnoreList))
+		copy(clone.IgnoreList, c.IgnoreList)
+	}
+
+	// 复制文件夹重定向配置
+	if len(c.FolderRedirects) > 0 {
+		clone.FolderRedirects = make([]FolderRedirect, len(c.FolderRedirects))
+		copy(clone.FolderRedirects, c.FolderRedirects)
+	}
+
+	return clone
 }
 
 // SyncFolder 同步文件夹配置
@@ -39,6 +105,33 @@ type FileInfo struct {
 	ModTime      int64  `json:"mod_time"`      // 修改时间
 	IsDirectory  bool   `json:"is_directory"`  // 是否是目录
 	RelativePath string `json:"relative_path"` // 相对路径
+}
+
+// Equal 比较两个文件信息是否相同
+func (f *FileInfo) Equal(other *FileInfo) bool {
+	if f == nil || other == nil {
+		return false
+	}
+	return f.Hash == other.Hash &&
+		f.Size == other.Size &&
+		f.ModTime == other.ModTime &&
+		f.IsDirectory == other.IsDirectory
+}
+
+// CalculateFileHash 计算文件的 MD5 哈希值
+func CalculateFileHash(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // SyncStatus 同步状态
