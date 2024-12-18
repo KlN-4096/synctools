@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"synctools/internal/model"
 	"synctools/internal/storage"
@@ -36,14 +37,44 @@ func (m *Manager) GetCurrentConfig() *model.Config {
 
 // LoadConfig 加载配置
 func (m *Manager) LoadConfig(uuid string) error {
-	var config model.Config
-	if err := m.storage.Load(uuid+".json", &config); err != nil {
+	m.logger.DebugLog("开始加载配置: UUID=%s", uuid)
+
+	config := &model.Config{}
+	if err := m.storage.Load(uuid+".json", config); err != nil {
+		m.logger.Error("加载配置失败", "error", err)
 		return fmt.Errorf("加载配置失败: %v", err)
 	}
+	m.logger.DebugLog("从存储加载配置成功: Name=%s", config.Name)
 
-	m.currentConfig = &config
+	// 确保 UUID 正确设置
+	if config.UUID == "" {
+		config.UUID = uuid
+		m.logger.DebugLog("设置空 UUID: %s", uuid)
+	}
+
+	// 创建新的配置对象以避免引用问题
+	m.currentConfig = &model.Config{
+		UUID:            config.UUID,
+		Name:            config.Name,
+		Version:         config.Version,
+		Host:            config.Host,
+		Port:            config.Port,
+		SyncDir:         config.SyncDir,
+		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		IgnoreList:      make([]string, len(config.IgnoreList)),
+		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+	}
+
+	// 复制切片内容
+	copy(m.currentConfig.SyncFolders, config.SyncFolders)
+	copy(m.currentConfig.IgnoreList, config.IgnoreList)
+	copy(m.currentConfig.FolderRedirects, config.FolderRedirects)
+
+	m.logger.DebugLog("当前配置已更新: UUID=%s, Name=%s", m.currentConfig.UUID, m.currentConfig.Name)
+
 	if m.onChanged != nil {
 		m.onChanged()
+		m.logger.DebugLog("触发配置变更回调")
 	}
 
 	return nil
@@ -83,13 +114,36 @@ func (m *Manager) ListConfigs() ([]*model.Config, error) {
 			continue
 		}
 
-		var config model.Config
-		if err := m.storage.Load(file, &config); err != nil {
+		config := &model.Config{}
+		if err := m.storage.Load(file, config); err != nil {
 			m.logger.Error("加载配置文件失败", "file", file, "error", err)
 			continue
 		}
 
-		configs = append(configs, &config)
+		// 确保 UUID 正确设置
+		if config.UUID == "" {
+			config.UUID = strings.TrimSuffix(file, ".json")
+		}
+
+		// 创建新的配置对象以避免引用问题
+		configCopy := &model.Config{
+			UUID:            config.UUID,
+			Name:            config.Name,
+			Version:         config.Version,
+			Host:            config.Host,
+			Port:            config.Port,
+			SyncDir:         config.SyncDir,
+			SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+			IgnoreList:      make([]string, len(config.IgnoreList)),
+			FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+		}
+
+		// 复制切片内容
+		copy(configCopy.SyncFolders, config.SyncFolders)
+		copy(configCopy.IgnoreList, config.IgnoreList)
+		copy(configCopy.FolderRedirects, config.FolderRedirects)
+
+		configs = append(configs, configCopy)
 	}
 
 	return configs, nil
@@ -133,12 +187,56 @@ func (m *Manager) ValidateConfig(config *model.Config) error {
 
 // Save 保存指定的配置
 func (m *Manager) Save(config *model.Config) error {
+	m.logger.DebugLog("开始保存配置: UUID=%s, Name=%s", config.UUID, config.Name)
+
 	if err := m.ValidateConfig(config); err != nil {
+		m.logger.Error("配置验证失败", "error", err)
 		return err
 	}
 
-	if err := m.storage.Save(config.UUID+".json", config); err != nil {
+	// 确保 UUID 正确设置
+	if config.UUID == "" {
+		uuid, err := model.NewUUID()
+		if err != nil {
+			m.logger.Error("生成UUID失败", "error", err)
+			return fmt.Errorf("生成UUID失败: %v", err)
+		}
+		config.UUID = uuid
+		m.logger.DebugLog("生成新的UUID: %s", uuid)
+	}
+
+	// 创建新的配置对象以避免引用问题
+	configToSave := &model.Config{
+		UUID:            config.UUID,
+		Name:            config.Name,
+		Version:         config.Version,
+		Host:            config.Host,
+		Port:            config.Port,
+		SyncDir:         config.SyncDir,
+		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		IgnoreList:      make([]string, len(config.IgnoreList)),
+		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+	}
+
+	// 复制切片内容
+	copy(configToSave.SyncFolders, config.SyncFolders)
+	copy(configToSave.IgnoreList, config.IgnoreList)
+	copy(configToSave.FolderRedirects, config.FolderRedirects)
+
+	if err := m.storage.Save(configToSave.UUID+".json", configToSave); err != nil {
+		m.logger.Error("保存配置失败", "error", err)
 		return fmt.Errorf("保存配置失败: %v", err)
+	}
+	m.logger.DebugLog("配置已保存到存储")
+
+	// 如果当前没有选中的配置，将这个配置设置为当前配置
+	if m.currentConfig == nil {
+		m.currentConfig = configToSave
+		m.logger.DebugLog("设置为当前配置: UUID=%s, Name=%s", configToSave.UUID, configToSave.Name)
+		if m.onChanged != nil {
+			m.onChanged()
+			m.logger.DebugLog("触发配置变更回调")
+		}
 	}
 
 	return nil
