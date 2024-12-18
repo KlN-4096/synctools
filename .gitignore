@@ -44,3 +44,5 @@ _testmain.go
 *.prof
 *.test
 *.out
+
+/configs

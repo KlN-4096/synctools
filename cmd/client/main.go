@@ -119,7 +119,7 @@ func (c *SyncClient) syncWithServer() error {
 				return fmt.Errorf("创建文件错误: %v", err)
 			}
 
-			bytesReceived, err := common.ReceiveFile(c.conn, file, serverInfo.Size)
+			bytesReceived, err := common.ReceiveFileToWriter(c.conn, file, serverInfo.Size)
 			file.Close()
 
 			if err != nil {
@@ -337,7 +337,7 @@ func main() {
 					declarative.CheckBox{
 						Text: "调试模式",
 						OnCheckedChanged: func() {
-							client.logger.SetDebugMode(!client.logger.DebugMode)
+							client.logger.SetDebugMode(!client.logger.GetDebugMode())
 						},
 					},
 				},
@@ -367,14 +367,17 @@ func main() {
 		return
 	}
 
-	// 初始化日志记录器
-	logger, err := common.NewGUILogger(logBox, "logs", "client")
-	if err != nil {
-		walk.MsgBox(mainWindow, "错误", "创建日志记录器失败: "+err.Error(), walk.MsgBoxIconError)
-		return
-	}
+	// 创建日志记录器
+	logger := common.NewGUILogger(func(msg string) {
+		logBox.AppendText(msg + "\n")
+	})
 	client.logger = logger
 	defer client.logger.Close()
+
+	// 检查调试模式
+	if client.logger.GetDebugMode() {
+		client.logger.DebugLog("调试模式已启用")
+	}
 
 	mainWindow.Run()
 }

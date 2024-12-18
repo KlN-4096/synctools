@@ -4,64 +4,97 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
-	"github.com/lxn/walk"
-
-	"synctools/cmd/server/ui"
-	"synctools/pkg/server"
+	"synctools/internal/config"
+	"synctools/internal/model"
+	"synctools/internal/service"
+	"synctools/internal/ui"
+	"synctools/internal/ui/viewmodels"
 )
 
 func main() {
-	fmt.Println("程序启动...")
+	// 获取程序所在目录
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Printf("获取程序路径失败: %v\n", err)
+		return
+	}
+	workDir := filepath.Dir(exePath)
+	os.Chdir(workDir)
+	fmt.Printf("工作目录: %s\n", workDir)
 
+	// 创建日志目录
+	logDir := "logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Printf("创建日志目录失败: %v\n", err)
+		return
+	}
+	fmt.Printf("日志目录: %s\n", logDir)
+
+	// 创建日志记录器
+	logger := &model.DefaultLogger{
+		DebugEnabled: true,
+	}
+	logger.Log("日志记录器初始化完成")
+
+	// 设置panic处理
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("捕获到错误:", r)
-			// 确保日志目录存在
-			if err := os.MkdirAll("logs", 0755); err == nil {
-				// 创建应急日志文件
-				logFile, err := os.OpenFile(
-					filepath.Join("logs", fmt.Sprintf("server_crash_%s.log",
-						time.Now().Format("2006-01-02_15-04-05"))),
-					os.O_CREATE|os.O_WRONLY|os.O_APPEND,
-					0644,
-				)
-				if err == nil {
-					fmt.Fprintf(logFile, "[%s] 程序崩溃: %v\n",
-						time.Now().Format("2006-01-02 15:04:05"), r)
-					logFile.Close()
-				}
+			logPath := filepath.Join(logDir, "crash.log")
+			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			if err == nil {
+				fmt.Fprintf(f, "[%s] 程序崩溃: %v\n堆栈信息:\n%s\n",
+					time.Now().Format("2006-01-02 15:04:05"),
+					r,
+					string(debug.Stack()))
+				f.Close()
 			}
-
-			// 显示错误对话框
-			errorMsg := fmt.Sprintf("程序发生致命错误:\n%v", r)
-			if _, err := os.Stat("logs"); err == nil {
-				errorMsg += "\n\n详细信息请查看logs目录下的日志文件"
-			}
-			walk.MsgBox(nil, "错误", errorMsg, walk.MsgBoxIconError)
-
-			// 给用户一些时间看错误信息
-			time.Sleep(time.Second * 5)
+			logger.Error("程序崩溃: %v", r)
+			debug.PrintStack()
 		}
 	}()
 
-	fmt.Println("创建日志目录...")
-
-	// 确保日志目录存在
-	if err := os.MkdirAll("logs", 0755); err != nil {
-		walk.MsgBox(nil, "错误",
-			fmt.Sprintf("创建日志目录失败: %v", err),
-			walk.MsgBoxIconError)
+	// 创建配置目录
+	configDir := "./configs"
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		logger.Error("创建配置目录失败: %v", err)
 		return
 	}
+	logger.Log("配置目录创建成功: %s", configDir)
 
-	server := server.NewSyncServer()
-	mainWindow, err := ui.CreateMainWindow(server)
+	// 创建配置管理器
+	logger.Log("正在创建配置管理器")
+	configManager, err := config.NewManager(configDir, logger)
 	if err != nil {
-		walk.MsgBox(nil, "错误", err.Error(), walk.MsgBoxIconError)
+		logger.Error("创建配置管理器失败: %v", err)
 		return
 	}
+	logger.Log("配置管理器创建成功")
 
-	mainWindow.Run()
+	// 创建同步服务
+	logger.Log("正在创建同步服务")
+	syncService := service.NewSyncService(configManager, logger)
+	if syncService == nil {
+		logger.Error("同步服务创建失败: %v", nil)
+		return
+	}
+	logger.Log("同步服务创建成功")
+
+	// 创建主视图模型
+	logger.Log("正在创建主视图模型")
+	mainViewModel := viewmodels.NewMainViewModel(configManager, syncService, logger)
+	if mainViewModel == nil {
+		logger.Error("主视图模型创建失败: %v", nil)
+		return
+	}
+	logger.Log("主视图模型创建成功")
+
+	// 创建并显示主窗口
+	logger.Log("正在创建主窗口")
+	if err := ui.CreateMainWindow(mainViewModel); err != nil {
+		logger.Error("创建主窗口失败: %v", err)
+		return
+	}
 }
