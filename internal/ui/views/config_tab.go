@@ -14,15 +14,16 @@ type ConfigTab struct {
 	*walk.TabPage
 
 	// UI 组件
-	configTable   *walk.TableView
-	redirectTable *walk.TableView
-	StatusBar     *walk.StatusBarItem
-	nameEdit      *walk.LineEdit
-	versionEdit   *walk.LineEdit
-	hostEdit      *walk.LineEdit
-	portEdit      *walk.NumberEdit
-	syncDirEdit   *walk.LineEdit
-	ignoreEdit    *walk.TextEdit
+	configTable     *walk.TableView
+	redirectTable   *walk.TableView
+	StatusBar       *walk.StatusBarItem
+	nameEdit        *walk.LineEdit
+	versionEdit     *walk.LineEdit
+	hostEdit        *walk.LineEdit
+	portEdit        *walk.LineEdit
+	syncDirEdit     *walk.LineEdit
+	ignoreEdit      *walk.TextEdit
+	syncFolderTable *walk.TableView
 
 	viewModel *viewmodels.ConfigViewModel
 }
@@ -84,7 +85,7 @@ func (t *ConfigTab) Setup() error {
 							Label{Text: "主机地址:"},
 							LineEdit{AssignTo: &t.hostEdit},
 							Label{Text: "端口:"},
-							NumberEdit{AssignTo: &t.portEdit},
+							LineEdit{AssignTo: &t.portEdit},
 							Label{Text: "同步目录:"},
 							Composite{
 								Layout: HBox{},
@@ -98,6 +99,33 @@ func (t *ConfigTab) Setup() error {
 							},
 							Label{Text: "忽略列表:"},
 							TextEdit{AssignTo: &t.ignoreEdit},
+							Label{Text: "同步文件夹:"},
+							Composite{
+								Layout: VBox{},
+								Children: []Widget{
+									TableView{
+										AssignTo:         &t.syncFolderTable,
+										ColumnsOrderable: true,
+										Columns: []TableViewColumn{
+											{Title: "文件夹名称", Width: 150},
+											{Title: "同步模式", Width: 100},
+										},
+									},
+									Composite{
+										Layout: HBox{},
+										Children: []Widget{
+											PushButton{
+												Text:      "添加",
+												OnClicked: t.onAddSyncFolder,
+											},
+											PushButton{
+												Text:      "删除",
+												OnClicked: t.onDeleteSyncFolder,
+											},
+										},
+									},
+								},
+							},
 						},
 					},
 				},
@@ -162,6 +190,7 @@ func (t *ConfigTab) Setup() error {
 		t.portEdit,
 		t.syncDirEdit,
 		t.ignoreEdit,
+		t.syncFolderTable,
 	)
 
 	return nil
@@ -379,5 +408,88 @@ func (t *ConfigTab) onStartServer() {
 func (t *ConfigTab) onStopServer() {
 	if err := t.viewModel.StopServer(); err != nil {
 		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+	}
+}
+
+// onAddSyncFolder 添加同步文件夹
+func (t *ConfigTab) onAddSyncFolder() {
+	dlg, err := walk.NewDialog(t.Form())
+	if err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+	defer dlg.Dispose()
+
+	dlg.SetTitle("添加同步文件夹")
+	dlg.SetLayout(walk.NewVBoxLayout())
+
+	var pathEdit *walk.LineEdit
+	var modeComboBox *walk.ComboBox
+
+	if err := (Composite{
+		Layout: Grid{Columns: 2},
+		Children: []Widget{
+			Label{Text: "文件夹路径:"},
+			LineEdit{AssignTo: &pathEdit},
+			Label{Text: "同步模式:"},
+			ComboBox{
+				AssignTo: &modeComboBox,
+				Model:    []string{"mirror", "push"},
+			},
+		},
+	}.Create(NewBuilder(dlg))); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+
+	if err := (Composite{
+		Layout: HBox{},
+		Children: []Widget{
+			HSpacer{},
+			PushButton{
+				Text: "确定",
+				OnClicked: func() {
+					if err := t.viewModel.AddSyncFolder(pathEdit.Text(), modeComboBox.Text()); err != nil {
+						walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
+						return
+					}
+					dlg.Accept()
+				},
+			},
+			PushButton{
+				Text:      "取消",
+				OnClicked: dlg.Cancel,
+			},
+		},
+	}.Create(NewBuilder(dlg))); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+
+	dlg.Run()
+}
+
+// onDeleteSyncFolder 删除同步文件夹
+func (t *ConfigTab) onDeleteSyncFolder() {
+	index := t.syncFolderTable.CurrentIndex()
+	if index < 0 {
+		return
+	}
+
+	config := t.viewModel.GetCurrentConfig()
+	if config == nil {
+		return
+	}
+
+	if walk.MsgBox(
+		t.Form(),
+		"确认删除",
+		fmt.Sprintf("确定要删除同步文件夹 '%s' 吗？", config.SyncFolders[index].Path),
+		walk.MsgBoxYesNo,
+	) == walk.DlgCmdYes {
+		if err := t.viewModel.DeleteSyncFolder(index); err != nil {
+			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+			return
+		}
 	}
 }

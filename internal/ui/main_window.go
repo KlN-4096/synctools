@@ -48,7 +48,8 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	if err := (declarative.MainWindow{
 		AssignTo: &mainWindow,
 		Title:    "同步工具",
-		MinSize:  declarative.Size{Width: 800, Height: 600},
+		MinSize:  declarative.Size{Width: 40, Height: 30},
+		Size:     declarative.Size{Width: 800, Height: 600},
 		Layout:   declarative.VBox{},
 		Children: []declarative.Widget{
 			declarative.TabWidget{

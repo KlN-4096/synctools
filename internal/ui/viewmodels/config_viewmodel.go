@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/lxn/walk"
@@ -20,19 +21,21 @@ type ConfigViewModel struct {
 	logger        Logger
 
 	// UI 组件
-	window        *walk.MainWindow
-	configTable   TableView
-	configList    *ConfigListModel
-	redirectTable TableView
-	redirectList  *RedirectListModel
-	statusBar     *walk.StatusBarItem
+	window          *walk.MainWindow
+	configTable     *walk.TableView
+	configList      *ConfigListModel
+	redirectTable   *walk.TableView
+	redirectList    *RedirectListModel
+	syncFolderTable *walk.TableView
+	syncFolderList  *SyncFolderListModel
+	statusBar       *walk.StatusBarItem
 
 	// 编辑字段
-	nameEdit    LineEdit
-	versionEdit LineEdit
-	hostEdit    LineEdit
-	portEdit    NumberEdit
-	syncDirEdit LineEdit
+	nameEdit    *walk.LineEdit
+	versionEdit *walk.LineEdit
+	hostEdit    *walk.LineEdit
+	portEdit    *walk.LineEdit
+	syncDirEdit *walk.LineEdit
 	ignoreEdit  *walk.TextEdit
 }
 
@@ -52,6 +55,7 @@ func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
 	// 初始化配置列表模型
 	vm.configList = NewConfigListModel(vm.configManager)
 	vm.redirectList = NewRedirectListModel(vm.configManager)
+	vm.syncFolderList = NewSyncFolderListModel(vm.configManager)
 
 	// 设置配置变更回调
 	vm.configManager.SetOnChanged(vm.onConfigChanged)
@@ -61,15 +65,16 @@ func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
 
 // SetupUI 设置UI组件
 func (vm *ConfigViewModel) SetupUI(
-	configTable TableView,
-	redirectTable TableView,
+	configTable *walk.TableView,
+	redirectTable *walk.TableView,
 	statusBar *walk.StatusBarItem,
-	nameEdit LineEdit,
-	versionEdit LineEdit,
-	hostEdit LineEdit,
-	portEdit NumberEdit,
-	syncDirEdit LineEdit,
+	nameEdit *walk.LineEdit,
+	versionEdit *walk.LineEdit,
+	hostEdit *walk.LineEdit,
+	portEdit *walk.LineEdit,
+	syncDirEdit *walk.LineEdit,
 	ignoreEdit *walk.TextEdit,
+	syncFolderTable *walk.TableView,
 ) {
 	// 检查必要的 UI 控件
 	if nameEdit == nil || versionEdit == nil || hostEdit == nil || portEdit == nil || syncDirEdit == nil {
@@ -78,6 +83,7 @@ func (vm *ConfigViewModel) SetupUI(
 
 	vm.configTable = configTable
 	vm.redirectTable = redirectTable
+	vm.syncFolderTable = syncFolderTable
 	vm.statusBar = statusBar
 	vm.nameEdit = nameEdit
 	vm.versionEdit = versionEdit
@@ -88,14 +94,17 @@ func (vm *ConfigViewModel) SetupUI(
 
 	// 设置默认值
 	hostEdit.SetText("0.0.0.0")
-	portEdit.SetValue(0)
+	portEdit.SetText("6666")
 
 	// 设置表格模型
 	if configTable != nil {
-		vm.configTable.SetModel(vm.configList)
+		configTable.SetModel(vm.configList)
 	}
 	if redirectTable != nil {
-		vm.redirectTable.SetModel(vm.redirectList)
+		redirectTable.SetModel(vm.redirectList)
+	}
+	if syncFolderTable != nil {
+		syncFolderTable.SetModel(vm.syncFolderList)
 	}
 
 	// 更新UI显示
@@ -115,7 +124,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 		vm.nameEdit.SetText("")
 		vm.versionEdit.SetText("")
 		vm.hostEdit.SetText("0.0.0.0")
-		vm.portEdit.SetValue(0)
+		vm.portEdit.SetText("6666")
 		vm.syncDirEdit.SetText("")
 		if vm.ignoreEdit != nil {
 			vm.ignoreEdit.SetText("")
@@ -127,7 +136,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 	vm.nameEdit.SetText(config.Name)
 	vm.versionEdit.SetText(config.Version)
 	vm.hostEdit.SetText(config.Host)
-	vm.portEdit.SetValue(float64(config.Port))
+	vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
 	vm.syncDirEdit.SetText(config.SyncDir)
 
 	// 更新忽略列表
@@ -141,6 +150,9 @@ func (vm *ConfigViewModel) UpdateUI() {
 	}
 	if vm.redirectList != nil {
 		vm.redirectList.PublishRowsReset()
+	}
+	if vm.syncFolderList != nil {
+		vm.syncFolderList.PublishRowsReset()
 	}
 
 	// 更新状态栏
@@ -164,7 +176,11 @@ func (vm *ConfigViewModel) SaveConfig() error {
 	config.Name = vm.nameEdit.Text()
 	config.Version = vm.versionEdit.Text()
 	config.Host = vm.hostEdit.Text()
-	config.Port = int(vm.portEdit.Value())
+	port, err := strconv.Atoi(vm.portEdit.Text())
+	if err != nil {
+		return fmt.Errorf("端口号无效: %v", err)
+	}
+	config.Port = port
 	config.SyncDir = vm.syncDirEdit.Text()
 	if vm.ignoreEdit != nil {
 		config.IgnoreList = strings.Split(vm.ignoreEdit.Text(), "\n")
@@ -490,12 +506,16 @@ func (vm *ConfigViewModel) GetHost() string {
 
 // SetPort 设置端口
 func (vm *ConfigViewModel) SetPort(port int) {
-	vm.portEdit.SetValue(float64(port))
+	vm.portEdit.SetText(fmt.Sprintf("%d", port))
 }
 
 // GetPort 获取端口
 func (vm *ConfigViewModel) GetPort() int {
-	return int(vm.portEdit.Value())
+	port, err := strconv.Atoi(vm.portEdit.Text())
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // SetSyncDir 设置同步目录
@@ -582,7 +602,7 @@ func (vm *ConfigViewModel) OnConfigSelected(index int) error {
 	vm.nameEdit.SetText(currentConfig.Name)
 	vm.versionEdit.SetText(currentConfig.Version)
 	vm.hostEdit.SetText(currentConfig.Host)
-	vm.portEdit.SetValue(float64(currentConfig.Port))
+	vm.portEdit.SetText(fmt.Sprintf("%d", currentConfig.Port))
 	vm.syncDirEdit.SetText(currentConfig.SyncDir)
 
 	// 更新UI显示
@@ -668,4 +688,103 @@ func (vm *ConfigViewModel) GetConfigListModel() *ConfigListModel {
 // GetRedirectListModel 获取重定向列表模型
 func (vm *ConfigViewModel) GetRedirectListModel() *RedirectListModel {
 	return vm.redirectList
+}
+
+// SyncFolderListModel 同步文件夹列表模型
+type SyncFolderListModel struct {
+	walk.TableModelBase
+	configManager *config.Manager
+}
+
+// NewSyncFolderListModel 创建新的同步文件夹列表模型
+func NewSyncFolderListModel(configManager *config.Manager) *SyncFolderListModel {
+	return &SyncFolderListModel{
+		configManager: configManager,
+	}
+}
+
+// RowCount 获取行数
+func (m *SyncFolderListModel) RowCount() int {
+	config := m.configManager.GetCurrentConfig()
+	if config == nil {
+		return 0
+	}
+	return len(config.SyncFolders)
+}
+
+// Value 获取单元格值
+func (m *SyncFolderListModel) Value(row, col int) interface{} {
+	config := m.configManager.GetCurrentConfig()
+	if config == nil || row < 0 || row >= len(config.SyncFolders) {
+		return nil
+	}
+
+	folder := config.SyncFolders[row]
+	switch col {
+	case 0:
+		return folder.Path
+	case 1:
+		return folder.SyncMode
+	}
+	return nil
+}
+
+// AddSyncFolder 添加同步文件夹
+func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
+	config := vm.configManager.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	// 检查路径是否已存在
+	for _, folder := range config.SyncFolders {
+		if folder.Path == path {
+			return fmt.Errorf("路径已存在")
+		}
+	}
+
+	// 添加新的同步文件夹
+	config.SyncFolders = append(config.SyncFolders, model.SyncFolder{
+		Path:     path,
+		SyncMode: mode,
+	})
+
+	// 保存配置
+	if err := vm.configManager.SaveCurrentConfig(); err != nil {
+		return err
+	}
+
+	vm.UpdateUI()
+	return nil
+}
+
+// DeleteSyncFolder 删除同步文件夹
+func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
+	config := vm.configManager.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	if index < 0 || index >= len(config.SyncFolders) {
+		return fmt.Errorf("无效的索引")
+	}
+
+	// 删除同步文件夹
+	config.SyncFolders = append(
+		config.SyncFolders[:index],
+		config.SyncFolders[index+1:]...,
+	)
+
+	// 保存配置
+	if err := vm.configManager.SaveCurrentConfig(); err != nil {
+		return err
+	}
+
+	vm.UpdateUI()
+	return nil
+}
+
+// GetSyncFolderListModel 获取同步文件夹列表模型
+func (vm *ConfigViewModel) GetSyncFolderListModel() *SyncFolderListModel {
+	return vm.syncFolderList
 }
