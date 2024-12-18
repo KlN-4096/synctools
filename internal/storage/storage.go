@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -36,30 +37,58 @@ func NewFileStorage(baseDir string) *FileStorage {
 // Save 保存数据到文件
 func (s *FileStorage) Save(key string, data interface{}) error {
 	// 确保目录存在
-	if err := os.MkdirAll(s.baseDir, 0755); err != nil {
+	filePath := filepath.Join(s.baseDir, key)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return err
 	}
 
-	// 序列化数据
-	content, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
+	// 根据数据类型选择保存方式
+	switch v := data.(type) {
+	case []byte:
+		// 二进制数据直接写入
+		return os.WriteFile(filePath, v, 0644)
+	case io.Reader:
+		// 从 Reader 读取数据
+		file, err := os.Create(filePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = io.Copy(file, v)
 		return err
+	default:
+		// 其他类型序列化为 JSON
+		content, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filePath, content, 0644)
 	}
-
-	// 写入文件
-	return os.WriteFile(filepath.Join(s.baseDir, key), content, 0644)
 }
 
 // Load 从文件加载数据
 func (s *FileStorage) Load(key string, data interface{}) error {
-	// 读取文件
-	content, err := os.ReadFile(filepath.Join(s.baseDir, key))
+	filePath := filepath.Join(s.baseDir, key)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 
-	// 反序列化数据
-	return json.Unmarshal(content, data)
+	// 根据数据类型选择加载方式
+	switch v := data.(type) {
+	case *[]byte:
+		// 二进制数据直接复制
+		*v = make([]byte, len(content))
+		copy(*v, content)
+		return nil
+	case io.Writer:
+		// 写入到 Writer
+		_, err = v.Write(content)
+		return err
+	default:
+		// 其他类型从 JSON 反序列化
+		return json.Unmarshal(content, data)
+	}
 }
 
 // Delete 删除文件
@@ -71,17 +100,31 @@ func (s *FileStorage) Delete(key string) error {
 func (s *FileStorage) List() ([]string, error) {
 	var files []string
 
-	// 读取目录
-	entries, err := os.ReadDir(s.baseDir)
+	// 遍历目录
+	err := filepath.Walk(s.baseDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// 跳过目录
+		if info.IsDir() {
+			return nil
+		}
+
+		// 获取相对路径
+		relPath, err := filepath.Rel(s.baseDir, path)
+		if err != nil {
+			return err
+		}
+
+		// 统一使用斜杠作为分隔符
+		relPath = filepath.ToSlash(relPath)
+		files = append(files, relPath)
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
-	}
-
-	// 收集文件名
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, entry.Name())
-		}
 	}
 
 	return files, nil

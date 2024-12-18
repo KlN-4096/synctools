@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 
@@ -15,6 +16,7 @@ type Server struct {
 	clients    map[string]*Client
 	clientsMux sync.RWMutex
 	logger     model.Logger
+	running    bool
 }
 
 // NewServer 创建新的网络服务器
@@ -28,6 +30,10 @@ func NewServer(config *model.Config, logger model.Logger) *Server {
 
 // Start 启动服务器
 func (s *Server) Start() error {
+	if s.running {
+		return fmt.Errorf("服务器已在运行中")
+	}
+
 	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -35,6 +41,7 @@ func (s *Server) Start() error {
 	}
 
 	s.listener = listener
+	s.running = true
 	s.logger.Info("服务器已启动", "addr", addr)
 
 	go s.acceptLoop()
@@ -43,6 +50,11 @@ func (s *Server) Start() error {
 
 // Stop 停止服务器
 func (s *Server) Stop() error {
+	if !s.running {
+		return nil
+	}
+	s.running = false
+
 	if s.listener != nil {
 		s.listener.Close()
 	}
@@ -55,21 +67,26 @@ func (s *Server) Stop() error {
 	}
 	s.clients = make(map[string]*Client)
 
+	s.logger.Info("服务器已停止")
 	return nil
 }
 
 // acceptLoop 接受新的客户端连接
 func (s *Server) acceptLoop() {
-	for {
+	for s.running {
 		conn, err := s.listener.Accept()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				s.logger.Info("临时接受连接错误", "error", err)
 				continue
+			}
+			if s.running {
+				s.logger.Error("接受连接失败", "error", err)
 			}
 			return
 		}
 
-		client := NewClient(conn)
+		client := NewClient(conn, s)
 		s.addClient(client)
 		go client.Start()
 	}
@@ -93,28 +110,38 @@ func (s *Server) removeClient(client *Client) {
 
 // Client 客户端连接
 type Client struct {
-	ID   string
-	conn net.Conn
+	ID     string
+	conn   net.Conn
+	server *Server
 }
 
 // NewClient 创建新的客户端
-func NewClient(conn net.Conn) *Client {
+func NewClient(conn net.Conn, server *Server) *Client {
 	return &Client{
-		ID:   fmt.Sprintf("client-%s", conn.RemoteAddr()),
-		conn: conn,
+		ID:     fmt.Sprintf("client-%s", conn.RemoteAddr()),
+		conn:   conn,
+		server: server,
 	}
 }
 
 // Start 开始处理客户端连接
 func (c *Client) Start() {
-	defer c.Close()
+	defer func() {
+		c.Close()
+		c.server.removeClient(c)
+	}()
 
 	buffer := make([]byte, 4096)
 	for {
-		_, err := c.conn.Read(buffer)
+		n, err := c.conn.Read(buffer)
 		if err != nil {
+			if err != io.EOF {
+				c.server.logger.Error("读取客户端数据失败", "error", err, "client", c.ID)
+			}
 			return
 		}
+
+		c.server.logger.DebugLog("收到客户端数据", "bytes", n, "client", c.ID)
 	}
 }
 
