@@ -76,22 +76,47 @@ func (t *ConfigTab) Setup() error {
 								Layout: HBox{},
 								Children: []Widget{
 									PushButton{
-										Text:      "新建",
+										Text:      "保存配置",
+										OnClicked: t.onSave,
+									},
+									PushButton{
+										Text:      "新建配置",
 										OnClicked: t.onNewConfig,
 									},
 									PushButton{
-										Text:      "删除",
+										Text:      "删除配置",
 										OnClicked: t.onDeleteConfig,
 									},
+								},
+							},
+							GroupBox{
+								Title:  "基础配置信息",
+								Layout: VBox{},
+								Children: []Widget{
+									Label{Text: "同步目录:"},
+									Composite{
+										Layout: HBox{},
+										Children: []Widget{
+											LineEdit{AssignTo: &t.syncDirEdit, ReadOnly: true},
+											PushButton{
+												Text:      "浏览",
+												OnClicked: t.onBrowseDir,
+											},
+										},
+									},
+									Label{Text: "整合包名称:"},
+									LineEdit{AssignTo: &t.nameEdit},
+									Label{Text: "整合包版本:"},
+									LineEdit{AssignTo: &t.versionEdit},
+									Label{Text: "主机地址:"},
+									LineEdit{AssignTo: &t.hostEdit},
+									Label{Text: "端口:"},
+									LineEdit{AssignTo: &t.portEdit},
 								},
 							},
 							Composite{
 								Layout: HBox{},
 								Children: []Widget{
-									PushButton{
-										Text:      "保存配置",
-										OnClicked: t.onSave,
-									},
 									PushButton{
 										Text:      "启动服务器",
 										OnClicked: t.onStartServer,
@@ -105,34 +130,20 @@ func (t *ConfigTab) Setup() error {
 						},
 					},
 					GroupBox{
-						Title:  "配置详情",
-						Layout: Grid{Columns: 2},
+						Title:  "文件配置",
+						Layout: Grid{Columns: 1},
 						Children: []Widget{
-							Label{Text: "整合包名称:"},
-							LineEdit{AssignTo: &t.nameEdit},
-							Label{Text: "整合包版本:"},
-							LineEdit{AssignTo: &t.versionEdit},
-							Label{Text: "主机地址:"},
-							LineEdit{AssignTo: &t.hostEdit},
-							Label{Text: "端口:"},
-							LineEdit{AssignTo: &t.portEdit},
-							Label{Text: "同步目录:"},
-							Composite{
-								Layout: HBox{},
-								Children: []Widget{
-									LineEdit{AssignTo: &t.syncDirEdit, ReadOnly: true},
-									PushButton{
-										Text:      "浏览",
-										OnClicked: t.onBrowseDir,
-									},
-								},
-							},
-							Label{Text: "忽略列表:"},
-							TextEdit{AssignTo: &t.ignoreEdit},
-							Label{Text: "同步文件夹"},
 							Composite{
 								Layout: VBox{},
 								Children: []Widget{
+									Label{Text: "忽略文件列表:"},
+									TextEdit{AssignTo: &t.ignoreEdit},
+								},
+							},
+							Composite{
+								Layout: VBox{},
+								Children: []Widget{
+									Label{Text: "同步文件夹:"},
 									TableView{
 										AssignTo:         &t.syncFolderTable,
 										ColumnsOrderable: true,
@@ -242,10 +253,10 @@ func (t *ConfigTab) Setup() error {
 									},
 								},
 							},
-							Label{Text: "文件夹重定向"},
 							Composite{
 								Layout: VBox{},
 								Children: []Widget{
+									Label{Text: "文件夹重定向:"},
 									TableView{
 										AssignTo:         &t.redirectTable,
 										ColumnsOrderable: true,

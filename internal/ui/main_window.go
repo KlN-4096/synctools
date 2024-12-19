@@ -49,7 +49,7 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 		AssignTo: &mainWindow,
 		Title:    "同步工具",
 		MinSize:  declarative.Size{Width: 40, Height: 30},
-		Size:     declarative.Size{Width: 920, Height: 690},
+		Size:     declarative.Size{Width: 950, Height: 940},
 		Layout:   declarative.VBox{},
 		Children: []declarative.Widget{
 			declarative.TabWidget{
