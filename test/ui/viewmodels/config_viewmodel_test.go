@@ -29,9 +29,28 @@ func (w *mockMainWindow) MsgBox(title, message string, style walk.MsgBoxStyle) i
 	return walk.DlgCmdOK
 }
 
+// LineEditIface 定义 LineEdit 接口
+type LineEditIface interface {
+	Text() string
+	SetText(text string) error
+}
+
+// TableViewIface 定义 TableView 接口
+type TableViewIface interface {
+	Model() interface{}
+	SetModel(model interface{}) error
+	CurrentIndex() int
+	Width() int
+	Columns() *walk.TableViewColumnList
+}
+
 // mockLineEdit 模拟文本输入框
 type mockLineEdit struct {
 	text string
+}
+
+func NewMockLineEdit() *mockLineEdit {
+	return &mockLineEdit{text: ""}
 }
 
 func (e *mockLineEdit) Text() string {
@@ -61,6 +80,15 @@ func (e *mockNumberEdit) SetValue(value float64) error {
 type mockTableView struct {
 	model      interface{}
 	currentRow int
+	width      int
+	columns    *walk.TableViewColumnList
+}
+
+func NewMockTableView() *mockTableView {
+	return &mockTableView{
+		width:   800,
+		columns: new(walk.TableViewColumnList),
+	}
 }
 
 func (v *mockTableView) Model() interface{} {
@@ -74,6 +102,14 @@ func (v *mockTableView) SetModel(model interface{}) error {
 
 func (v *mockTableView) CurrentIndex() int {
 	return v.currentRow
+}
+
+func (v *mockTableView) Width() int {
+	return v.width
+}
+
+func (v *mockTableView) Columns() *walk.TableViewColumnList {
+	return v.columns
 }
 
 // mockLogger 模拟日志记录器
@@ -158,17 +194,28 @@ func cleanupTest(tempDir string) {
 }
 
 // setupUIControls 设置 UI 控件
-func setupUIControls(viewModel *viewmodels.ConfigViewModel) (*mockLineEdit, *mockLineEdit, *mockLineEdit, *mockNumberEdit, *mockLineEdit, *mockTableView, *mockTableView) {
-	nameEdit := &mockLineEdit{}
-	versionEdit := &mockLineEdit{}
-	hostEdit := &mockLineEdit{}
-	portEdit := &mockNumberEdit{}
-	syncDirEdit := &mockLineEdit{}
-	configTable := &mockTableView{}
-	redirectTable := &mockTableView{}
+func setupUIControls(viewModel *viewmodels.ConfigViewModel) (LineEditIface, LineEditIface, LineEditIface, LineEditIface, LineEditIface, TableViewIface, TableViewIface) {
+	nameEdit := NewMockLineEdit()
+	versionEdit := NewMockLineEdit()
+	hostEdit := NewMockLineEdit()
+	portEdit := NewMockLineEdit()
+	syncDirEdit := NewMockLineEdit()
+	configTable := NewMockTableView()
+	redirectTable := NewMockTableView()
+	syncFolderTable := NewMockTableView()
 
-	viewModel.SetupUI(configTable, redirectTable, nil,
-		nameEdit, versionEdit, hostEdit, portEdit, syncDirEdit, nil)
+	viewModel.SetupUI(
+		configTable,
+		redirectTable,
+		nil, // StatusBar
+		nameEdit,
+		versionEdit,
+		hostEdit,
+		portEdit,
+		syncDirEdit,
+		nil, // ignoreEdit
+		syncFolderTable,
+	)
 
 	return nameEdit, versionEdit, hostEdit, portEdit, syncDirEdit, configTable, redirectTable
 }
@@ -192,8 +239,8 @@ func TestConfigViewModel_UIBinding(t *testing.T) {
 		if hostEdit.Text() != "0.0.0.0" {
 			t.Error("主机地址应为 0.0.0.0")
 		}
-		if portEdit.Value() != 0 {
-			t.Error("端口应为 0")
+		if portEdit.Text() != "6666" {
+			t.Error("端口应为 6666")
 		}
 	})
 

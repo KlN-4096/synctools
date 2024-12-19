@@ -14,6 +14,21 @@ import (
 	"synctools/internal/service"
 )
 
+// LineEditIface 定义 LineEdit 接口
+type LineEditIface interface {
+	Text() string
+	SetText(text string) error
+}
+
+// TableViewIface 定义 TableView 接口
+type TableViewIface interface {
+	Model() interface{}
+	SetModel(model interface{}) error
+	CurrentIndex() int
+	Width() int
+	Columns() *walk.TableViewColumnList
+}
+
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
 	configManager *config.Manager
@@ -22,20 +37,20 @@ type ConfigViewModel struct {
 
 	// UI 组件
 	window          *walk.MainWindow
-	configTable     *walk.TableView
+	configTable     TableViewIface
 	configList      *ConfigListModel
-	redirectTable   *walk.TableView
+	redirectTable   TableViewIface
 	redirectList    *RedirectListModel
-	syncFolderTable *walk.TableView
+	syncFolderTable TableViewIface
 	syncFolderList  *SyncFolderListModel
 	statusBar       *walk.StatusBarItem
 
 	// 编辑字段
-	nameEdit    *walk.LineEdit
-	versionEdit *walk.LineEdit
-	hostEdit    *walk.LineEdit
-	portEdit    *walk.LineEdit
-	syncDirEdit *walk.LineEdit
+	nameEdit    LineEditIface
+	versionEdit LineEditIface
+	hostEdit    LineEditIface
+	portEdit    LineEditIface
+	syncDirEdit LineEditIface
 	ignoreEdit  *walk.TextEdit
 }
 
@@ -65,16 +80,16 @@ func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
 
 // SetupUI 设置UI组件
 func (vm *ConfigViewModel) SetupUI(
-	configTable *walk.TableView,
-	redirectTable *walk.TableView,
+	configTable TableViewIface,
+	redirectTable TableViewIface,
 	statusBar *walk.StatusBarItem,
-	nameEdit *walk.LineEdit,
-	versionEdit *walk.LineEdit,
-	hostEdit *walk.LineEdit,
-	portEdit *walk.LineEdit,
-	syncDirEdit *walk.LineEdit,
+	nameEdit LineEditIface,
+	versionEdit LineEditIface,
+	hostEdit LineEditIface,
+	portEdit LineEditIface,
+	syncDirEdit LineEditIface,
 	ignoreEdit *walk.TextEdit,
-	syncFolderTable *walk.TableView,
+	syncFolderTable TableViewIface,
 ) {
 	// 检查必要的 UI 控件
 	if nameEdit == nil || versionEdit == nil || hostEdit == nil || portEdit == nil || syncDirEdit == nil {

@@ -57,7 +57,25 @@ func (t *ConfigTab) Setup() error {
 									{Title: "版本", Width: 100},
 									{Title: "同步目录", Width: 200},
 								},
-								OnItemActivated: t.onConfigActivated,
+								OnItemActivated: func() {
+									// 设置列宽
+									width := t.configTable.Width()
+									columns := t.configTable.Columns()
+									columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
+									columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
+									columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
+
+									// 处理配置选择
+									t.onConfigActivated()
+								},
+								OnSizeChanged: func() {
+									// 设置列宽
+									width := t.configTable.Width()
+									columns := t.configTable.Columns()
+									columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
+									columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
+									columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
+								},
 							},
 							Composite{
 								Layout: HBox{},
@@ -110,6 +128,18 @@ func (t *ConfigTab) Setup() error {
 											{Title: "文件夹名称", Width: 150},
 											{Title: "同步模式", Width: 100},
 										},
+										OnItemActivated: func() {
+											width := t.syncFolderTable.Width()
+											columns := t.syncFolderTable.Columns()
+											columns.At(0).SetWidth(int(float64(width) * 0.65)) // 路径列占70%
+											columns.At(1).SetWidth(int(float64(width) * 0.3))  // 模式列占30%
+										},
+										OnSizeChanged: func() {
+											width := t.syncFolderTable.Width()
+											columns := t.syncFolderTable.Columns()
+											columns.At(0).SetWidth(int(float64(width) * 0.65)) // 路径列占70%
+											columns.At(1).SetWidth(int(float64(width) * 0.3))  // 模式列占30%
+										},
 									},
 									Composite{
 										Layout: HBox{},
@@ -140,6 +170,18 @@ func (t *ConfigTab) Setup() error {
 						Columns: []TableViewColumn{
 							{Title: "服务器路径", Width: 200},
 							{Title: "客户端路径", Width: 200},
+						},
+						OnItemActivated: func() {
+							width := t.redirectTable.Width()
+							columns := t.redirectTable.Columns()
+							columns.At(0).SetWidth(int(float64(width) * 0.5))  // 服务器路径列占50%
+							columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占50%
+						},
+						OnSizeChanged: func() {
+							width := t.redirectTable.Width()
+							columns := t.redirectTable.Columns()
+							columns.At(0).SetWidth(int(float64(width) * 0.5))  // 服务器路径列占50%
+							columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占50%
 						},
 					},
 					Composite{
