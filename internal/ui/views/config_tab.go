@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -26,6 +27,9 @@ type ConfigTab struct {
 	syncFolderTable *walk.TableView
 
 	viewModel *viewmodels.ConfigViewModel
+
+	// 互斥锁，用于防止并发调整列宽
+	columnMutex sync.Mutex
 }
 
 // NewConfigTab 创建新的配置界面
@@ -58,32 +62,14 @@ func (t *ConfigTab) Setup() error {
 									{Title: "同步目录", Width: 200},
 								},
 								OnItemActivated: func() {
-									if t.configTable != nil {
-										width := t.configTable.Width()
-										if width > 0 {
-											columns := t.configTable.Columns()
-											if columns != nil && columns.Len() >= 3 {
-												columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
-												columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
-												columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
-											}
-										}
-									}
+									// 调整列宽
+									t.adjustTableColumns(t.configTable, []float64{0.3, 0.2, 0.45})
 									// 处理配置选择
 									t.onConfigActivated()
 								},
 								OnSizeChanged: func() {
-									if t.configTable != nil {
-										width := t.configTable.Width()
-										if width > 0 {
-											columns := t.configTable.Columns()
-											if columns != nil && columns.Len() >= 3 {
-												columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
-												columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
-												columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
-											}
-										}
-									}
+									// 调整列宽
+									t.adjustTableColumns(t.configTable, []float64{0.3, 0.2, 0.45})
 								},
 							},
 							Composite{
@@ -103,7 +89,7 @@ func (t *ConfigTab) Setup() error {
 								Layout: HBox{},
 								Children: []Widget{
 									PushButton{
-										Text:      "保存",
+										Text:      "保存配置",
 										OnClicked: t.onSave,
 									},
 									PushButton{
@@ -156,30 +142,89 @@ func (t *ConfigTab) Setup() error {
 											{Title: "是否有效", Width: 80},
 										},
 										OnItemActivated: func() {
+											// 调整列宽
+											t.adjustTableColumns(t.syncFolderTable, []float64{0.45, 0.25, 0.25})
+
+											// 处理双击编辑
 											if t.syncFolderTable != nil {
-												width := t.syncFolderTable.Width()
-												if width > 0 {
-													columns := t.syncFolderTable.Columns()
-													if columns != nil && columns.Len() >= 3 {
-														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占45%
-														columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
-														columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占25%
-													}
+												index := t.syncFolderTable.CurrentIndex()
+												if index < 0 {
+													return
 												}
+
+												config := t.viewModel.GetCurrentConfig()
+												if config == nil {
+													return
+												}
+
+												dlg, err := walk.NewDialog(t.Form())
+												if err != nil {
+													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+													return
+												}
+												defer dlg.Dispose()
+
+												dlg.SetTitle("编辑同步文件夹")
+												dlg.SetLayout(walk.NewVBoxLayout())
+
+												var pathEdit *walk.LineEdit
+												var modeComboBox *walk.ComboBox
+
+												if err := (Composite{
+													Layout: Grid{Columns: 2},
+													Children: []Widget{
+														Label{Text: "文件夹路径:"},
+														LineEdit{
+															AssignTo: &pathEdit,
+															Text:     config.SyncFolders[index].Path,
+														},
+														Label{Text: "同步模式:"},
+														ComboBox{
+															AssignTo: &modeComboBox,
+															Model:    []string{"mirror", "push"},
+															CurrentIndex: func() int {
+																if config.SyncFolders[index].SyncMode == "push" {
+																	return 1
+																}
+																return 0
+															}(),
+														},
+													},
+												}.Create(NewBuilder(dlg))); err != nil {
+													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+													return
+												}
+
+												if err := (Composite{
+													Layout: HBox{},
+													Children: []Widget{
+														HSpacer{},
+														PushButton{
+															Text: "确定",
+															OnClicked: func() {
+																if err := t.viewModel.UpdateSyncFolder(index, pathEdit.Text(), modeComboBox.Text()); err != nil {
+																	walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
+																	return
+																}
+																dlg.Accept()
+															},
+														},
+														PushButton{
+															Text:      "取消",
+															OnClicked: dlg.Cancel,
+														},
+													},
+												}.Create(NewBuilder(dlg))); err != nil {
+													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+													return
+												}
+
+												dlg.Run()
 											}
 										},
 										OnSizeChanged: func() {
-											if t.syncFolderTable != nil {
-												width := t.syncFolderTable.Width()
-												if width > 0 {
-													columns := t.syncFolderTable.Columns()
-													if columns != nil && columns.Len() >= 3 {
-														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占45%
-														columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
-														columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占25%
-													}
-												}
-											}
+											// 调整列宽
+											t.adjustTableColumns(t.syncFolderTable, []float64{0.45, 0.25, 0.25})
 										},
 									},
 									Composite{
@@ -209,28 +254,83 @@ func (t *ConfigTab) Setup() error {
 											{Title: "客户端路径", Width: 200},
 										},
 										OnItemActivated: func() {
+											// 调整列宽
+											t.adjustTableColumns(t.redirectTable, []float64{0.45, 0.45})
+
+											// 处理双击编辑
 											if t.redirectTable != nil {
-												width := t.redirectTable.Width()
-												if width > 0 {
-													columns := t.redirectTable.Columns()
-													if columns != nil && columns.Len() >= 2 {
-														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 服务器路径列占45%
-														columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占45%
-													}
+												index := t.redirectTable.CurrentIndex()
+												if index < 0 {
+													return
 												}
+
+												config := t.viewModel.GetCurrentConfig()
+												if config == nil {
+													return
+												}
+
+												dlg, err := walk.NewDialog(t.Form())
+												if err != nil {
+													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+													return
+												}
+												defer dlg.Dispose()
+
+												dlg.SetTitle("编辑文件夹重定向")
+												dlg.SetLayout(walk.NewVBoxLayout())
+
+												var serverEdit *walk.LineEdit
+												var clientEdit *walk.LineEdit
+
+												if err := (Composite{
+													Layout: Grid{Columns: 2},
+													Children: []Widget{
+														Label{Text: "服务器路径:"},
+														LineEdit{
+															AssignTo: &serverEdit,
+															Text:     config.FolderRedirects[index].ServerPath,
+														},
+														Label{Text: "客户端路径:"},
+														LineEdit{
+															AssignTo: &clientEdit,
+															Text:     config.FolderRedirects[index].ClientPath,
+														},
+													},
+												}.Create(NewBuilder(dlg))); err != nil {
+													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+													return
+												}
+
+												if err := (Composite{
+													Layout: HBox{},
+													Children: []Widget{
+														HSpacer{},
+														PushButton{
+															Text: "确定",
+															OnClicked: func() {
+																if err := t.viewModel.UpdateRedirect(index, serverEdit.Text(), clientEdit.Text()); err != nil {
+																	walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
+																	return
+																}
+																dlg.Accept()
+															},
+														},
+														PushButton{
+															Text:      "取消",
+															OnClicked: dlg.Cancel,
+														},
+													},
+												}.Create(NewBuilder(dlg))); err != nil {
+													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+													return
+												}
+
+												dlg.Run()
 											}
 										},
 										OnSizeChanged: func() {
-											if t.redirectTable != nil {
-												width := t.redirectTable.Width()
-												if width > 0 {
-													columns := t.redirectTable.Columns()
-													if columns != nil && columns.Len() >= 2 {
-														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 服务器路径列占45%
-														columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占45%
-													}
-												}
-											}
+											// 调整列宽
+											t.adjustTableColumns(t.redirectTable, []float64{0.45, 0.45})
 										},
 									},
 									Composite{
@@ -568,6 +668,45 @@ func (t *ConfigTab) onDeleteSyncFolder() {
 		if err := t.viewModel.DeleteSyncFolder(index); err != nil {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 			return
+		}
+	}
+}
+
+// adjustTableColumns 调整表格列宽
+func (t *ConfigTab) adjustTableColumns(table *walk.TableView, widthPercentages []float64) {
+	t.columnMutex.Lock()
+	defer t.columnMutex.Unlock()
+
+	if table == nil {
+		return
+	}
+
+	columns := table.Columns()
+	if columns == nil {
+		return
+	}
+
+	width := table.Width()
+	if width <= 0 {
+		return
+	}
+
+	// 使用 defer 来处理可能的异常
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Error adjusting column widths: %v\n", r)
+		}
+	}()
+
+	// 检查列数是否匹配
+	if columns.Len() != len(widthPercentages) {
+		return
+	}
+
+	// 设置每列的宽度
+	for i, percentage := range widthPercentages {
+		if i < columns.Len() {
+			columns.At(i).SetWidth(int(float64(width) * percentage))
 		}
 	}
 }

@@ -592,7 +592,7 @@ func (vm *ConfigViewModel) OnConfigSelected(index int) error {
 	}
 
 	if index < 0 || index >= len(configs) {
-		vm.logger.Error("无效的选��索引", "index", index, "total", len(configs))
+		vm.logger.Error("无效的选���索引", "index", index, "total", len(configs))
 		return fmt.Errorf("无效的选择索引")
 	}
 
@@ -815,4 +815,61 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 // GetSyncFolderListModel 获取同步文件夹列表模型
 func (vm *ConfigViewModel) GetSyncFolderListModel() *SyncFolderListModel {
 	return vm.syncFolderList
+}
+
+// UpdateSyncFolder 更新同步文件夹
+func (vm *ConfigViewModel) UpdateSyncFolder(index int, path, mode string) error {
+	config := vm.configManager.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	if index < 0 || index >= len(config.SyncFolders) {
+		return fmt.Errorf("无效的索引")
+	}
+
+	// 验证路径
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+
+	// 验证模式
+	if mode != "mirror" && mode != "push" {
+		return fmt.Errorf("无效的同步模式")
+	}
+
+	// 更新数据
+	config.SyncFolders[index].Path = path
+	config.SyncFolders[index].SyncMode = mode
+
+	// 刷新表格
+	vm.syncFolderList.PublishRowsReset()
+
+	return nil
+}
+
+// UpdateRedirect 更新文件夹重定向
+func (vm *ConfigViewModel) UpdateRedirect(index int, serverPath, clientPath string) error {
+	config := vm.configManager.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	if index < 0 || index >= len(config.FolderRedirects) {
+		return fmt.Errorf("无效的索引")
+	}
+
+	// 验证路径
+	if serverPath == "" || clientPath == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+
+	// 更新数据
+	config.FolderRedirects[index].ServerPath = serverPath
+	config.FolderRedirects[index].ClientPath = clientPath
+
+	// 刷新表格
+	vm.redirectList.PublishRowsReset()
+
+	return nil
 }
