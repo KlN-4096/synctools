@@ -816,11 +816,3 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 func (vm *ConfigViewModel) GetSyncFolderListModel() *SyncFolderListModel {
 	return vm.syncFolderList
 }
-
-// RefreshSyncFolders 刷新同步文件夹列表
-func (vm *ConfigViewModel) RefreshSyncFolders() error {
-	if vm.syncFolderList != nil {
-		vm.syncFolderList.PublishRowsReset()
-	}
-	return nil
-}

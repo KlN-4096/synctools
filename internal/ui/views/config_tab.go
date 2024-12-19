@@ -58,23 +58,32 @@ func (t *ConfigTab) Setup() error {
 									{Title: "同步目录", Width: 200},
 								},
 								OnItemActivated: func() {
-									// 设置列宽
-									width := t.configTable.Width()
-									columns := t.configTable.Columns()
-									columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
-									columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
-									columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
-
+									if t.configTable != nil {
+										width := t.configTable.Width()
+										if width > 0 {
+											columns := t.configTable.Columns()
+											if columns != nil && columns.Len() >= 3 {
+												columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
+												columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
+												columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
+											}
+										}
+									}
 									// 处理配置选择
 									t.onConfigActivated()
 								},
 								OnSizeChanged: func() {
-									// 设置列宽
-									width := t.configTable.Width()
-									columns := t.configTable.Columns()
-									columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
-									columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
-									columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
+									if t.configTable != nil {
+										width := t.configTable.Width()
+										if width > 0 {
+											columns := t.configTable.Columns()
+											if columns != nil && columns.Len() >= 3 {
+												columns.At(0).SetWidth(int(float64(width) * 0.3))  // 名称列占30%
+												columns.At(1).SetWidth(int(float64(width) * 0.2))  // 版本列占20%
+												columns.At(2).SetWidth(int(float64(width) * 0.45)) // 同步目录列占50%
+											}
+										}
+									}
 								},
 							},
 							Composite{
@@ -87,6 +96,23 @@ func (t *ConfigTab) Setup() error {
 									PushButton{
 										Text:      "删除",
 										OnClicked: t.onDeleteConfig,
+									},
+								},
+							},
+							Composite{
+								Layout: HBox{},
+								Children: []Widget{
+									PushButton{
+										Text:      "保存",
+										OnClicked: t.onSave,
+									},
+									PushButton{
+										Text:      "启动服务器",
+										OnClicked: t.onStartServer,
+									},
+									PushButton{
+										Text:      "停止服务器",
+										OnClicked: t.onStopServer,
 									},
 								},
 							},
@@ -130,18 +156,30 @@ func (t *ConfigTab) Setup() error {
 											{Title: "是否有效", Width: 80},
 										},
 										OnItemActivated: func() {
-											width := t.syncFolderTable.Width()
-											columns := t.syncFolderTable.Columns()
-											columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占55%
-											columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
-											columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占15%
+											if t.syncFolderTable != nil {
+												width := t.syncFolderTable.Width()
+												if width > 0 {
+													columns := t.syncFolderTable.Columns()
+													if columns != nil && columns.Len() >= 3 {
+														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占45%
+														columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
+														columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占25%
+													}
+												}
+											}
 										},
 										OnSizeChanged: func() {
-											width := t.syncFolderTable.Width()
-											columns := t.syncFolderTable.Columns()
-											columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占55%
-											columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
-											columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占15%
+											if t.syncFolderTable != nil {
+												width := t.syncFolderTable.Width()
+												if width > 0 {
+													columns := t.syncFolderTable.Columns()
+													if columns != nil && columns.Len() >= 3 {
+														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占45%
+														columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
+														columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占25%
+													}
+												}
+											}
 										},
 									},
 									Composite{
@@ -155,71 +193,62 @@ func (t *ConfigTab) Setup() error {
 												Text:      "删除",
 												OnClicked: t.onDeleteSyncFolder,
 											},
+										},
+									},
+								},
+							},
+							Label{Text: "文件夹重定向:"},
+							Composite{
+								Layout: VBox{},
+								Children: []Widget{
+									TableView{
+										AssignTo:         &t.redirectTable,
+										ColumnsOrderable: true,
+										Columns: []TableViewColumn{
+											{Title: "服务器路径", Width: 200},
+											{Title: "客户端路径", Width: 200},
+										},
+										OnItemActivated: func() {
+											if t.redirectTable != nil {
+												width := t.redirectTable.Width()
+												if width > 0 {
+													columns := t.redirectTable.Columns()
+													if columns != nil && columns.Len() >= 2 {
+														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 服务器路径列占45%
+														columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占45%
+													}
+												}
+											}
+										},
+										OnSizeChanged: func() {
+											if t.redirectTable != nil {
+												width := t.redirectTable.Width()
+												if width > 0 {
+													columns := t.redirectTable.Columns()
+													if columns != nil && columns.Len() >= 2 {
+														columns.At(0).SetWidth(int(float64(width) * 0.45)) // 服务器路径列占45%
+														columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占45%
+													}
+												}
+											}
+										},
+									},
+									Composite{
+										Layout: HBox{},
+										Children: []Widget{
 											PushButton{
-												Text:      "刷新",
-												OnClicked: t.onRefreshSyncFolders,
+												Text:      "添加",
+												OnClicked: t.onAddRedirect,
+											},
+											PushButton{
+												Text:      "删除",
+												OnClicked: t.onDeleteRedirect,
 											},
 										},
 									},
 								},
 							},
 						},
-					},
-				},
-			},
-			GroupBox{
-				Title:  "文件夹重定向",
-				Layout: VBox{},
-				Children: []Widget{
-					TableView{
-						AssignTo:         &t.redirectTable,
-						ColumnsOrderable: true,
-						Columns: []TableViewColumn{
-							{Title: "服务器路径", Width: 200},
-							{Title: "客户端路径", Width: 200},
-						},
-						OnItemActivated: func() {
-							width := t.redirectTable.Width()
-							columns := t.redirectTable.Columns()
-							columns.At(0).SetWidth(int(float64(width) * 0.5))  // 服务器路径列占50%
-							columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占50%
-						},
-						OnSizeChanged: func() {
-							width := t.redirectTable.Width()
-							columns := t.redirectTable.Columns()
-							columns.At(0).SetWidth(int(float64(width) * 0.5))  // 服务器路径列占50%
-							columns.At(1).SetWidth(int(float64(width) * 0.45)) // 客户端路径列占50%
-						},
-					},
-					Composite{
-						Layout: HBox{},
-						Children: []Widget{
-							PushButton{
-								Text:      "添加",
-								OnClicked: t.onAddRedirect,
-							},
-							PushButton{
-								Text:      "删除",
-								OnClicked: t.onDeleteRedirect,
-							},
-						},
-					},
-				},
-			},
-			Composite{
-				Layout: HBox{},
-				Children: []Widget{
-					PushButton{
-						Text:      "保存",
-						OnClicked: t.onSave,
-					},
-					PushButton{
-						Text:      "启动服务器",
-						OnClicked: t.onStartServer,
-					},
-					PushButton{
-						Text:      "停止服务器",
-						OnClicked: t.onStopServer,
 					},
 				},
 			},
@@ -540,12 +569,5 @@ func (t *ConfigTab) onDeleteSyncFolder() {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 			return
 		}
-	}
-}
-
-// onRefreshSyncFolders 刷新同步文件夹
-func (t *ConfigTab) onRefreshSyncFolders() {
-	if err := t.viewModel.RefreshSyncFolders(); err != nil {
-		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 	}
 }
