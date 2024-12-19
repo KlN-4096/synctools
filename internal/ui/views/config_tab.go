@@ -143,7 +143,7 @@ func (t *ConfigTab) Setup() error {
 							},
 							Label{Text: "忽略列表:"},
 							TextEdit{AssignTo: &t.ignoreEdit},
-							Label{Text: "同步文件夹:"},
+							Label{Text: "同步文件夹"},
 							Composite{
 								Layout: VBox{},
 								Children: []Widget{
@@ -197,7 +197,7 @@ func (t *ConfigTab) Setup() error {
 									},
 								},
 							},
-							Label{Text: "文件夹重定向:"},
+							Label{Text: "文件夹重定向"},
 							Composite{
 								Layout: VBox{},
 								Children: []Widget{
