@@ -2,6 +2,7 @@ package viewmodels
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -591,7 +592,7 @@ func (vm *ConfigViewModel) OnConfigSelected(index int) error {
 	}
 
 	if index < 0 || index >= len(configs) {
-		vm.logger.Error("无效的选择索引", "index", index, "total", len(configs))
+		vm.logger.Error("无效的选��索引", "index", index, "total", len(configs))
 		return fmt.Errorf("无效的选择索引")
 	}
 
@@ -713,9 +714,10 @@ type SyncFolderListModel struct {
 
 // NewSyncFolderListModel 创建新的同步文件夹列表模型
 func NewSyncFolderListModel(configManager *config.Manager) *SyncFolderListModel {
-	return &SyncFolderListModel{
+	m := &SyncFolderListModel{
 		configManager: configManager,
 	}
+	return m
 }
 
 // RowCount 获取行数
@@ -725,6 +727,11 @@ func (m *SyncFolderListModel) RowCount() int {
 		return 0
 	}
 	return len(config.SyncFolders)
+}
+
+// ColumnCount 返回列数
+func (m *SyncFolderListModel) ColumnCount() int {
+	return 3 // 路径、同步模式、是否有效
 }
 
 // Value 获取单元格值
@@ -740,6 +747,12 @@ func (m *SyncFolderListModel) Value(row, col int) interface{} {
 		return folder.Path
 	case 1:
 		return folder.SyncMode
+	case 2:
+		// 检查文件夹是否存在
+		if _, err := os.Stat(filepath.Join(config.SyncDir, folder.Path)); os.IsNotExist(err) {
+			return "×"
+		}
+		return "√"
 	}
 	return nil
 }
@@ -802,4 +815,12 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 // GetSyncFolderListModel 获取同步文件夹列表模型
 func (vm *ConfigViewModel) GetSyncFolderListModel() *SyncFolderListModel {
 	return vm.syncFolderList
+}
+
+// RefreshSyncFolders 刷新同步文件夹列表
+func (vm *ConfigViewModel) RefreshSyncFolders() error {
+	if vm.syncFolderList != nil {
+		vm.syncFolderList.PublishRowsReset()
+	}
+	return nil
 }

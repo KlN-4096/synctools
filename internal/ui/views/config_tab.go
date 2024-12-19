@@ -127,18 +127,21 @@ func (t *ConfigTab) Setup() error {
 										Columns: []TableViewColumn{
 											{Title: "文件夹名称", Width: 150},
 											{Title: "同步模式", Width: 100},
+											{Title: "是否有效", Width: 80},
 										},
 										OnItemActivated: func() {
 											width := t.syncFolderTable.Width()
 											columns := t.syncFolderTable.Columns()
-											columns.At(0).SetWidth(int(float64(width) * 0.65)) // 路径列占70%
-											columns.At(1).SetWidth(int(float64(width) * 0.3))  // 模式列占30%
+											columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占55%
+											columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
+											columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占15%
 										},
 										OnSizeChanged: func() {
 											width := t.syncFolderTable.Width()
 											columns := t.syncFolderTable.Columns()
-											columns.At(0).SetWidth(int(float64(width) * 0.65)) // 路径列占70%
-											columns.At(1).SetWidth(int(float64(width) * 0.3))  // 模式列占30%
+											columns.At(0).SetWidth(int(float64(width) * 0.45)) // 路径列占55%
+											columns.At(1).SetWidth(int(float64(width) * 0.25)) // 模式列占25%
+											columns.At(2).SetWidth(int(float64(width) * 0.25)) // 有效性列占15%
 										},
 									},
 									Composite{
@@ -151,6 +154,10 @@ func (t *ConfigTab) Setup() error {
 											PushButton{
 												Text:      "删除",
 												OnClicked: t.onDeleteSyncFolder,
+											},
+											PushButton{
+												Text:      "刷新",
+												OnClicked: t.onRefreshSyncFolders,
 											},
 										},
 									},
@@ -533,5 +540,12 @@ func (t *ConfigTab) onDeleteSyncFolder() {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 			return
 		}
+	}
+}
+
+// onRefreshSyncFolders 刷新同步文件夹
+func (t *ConfigTab) onRefreshSyncFolders() {
+	if err := t.viewModel.RefreshSyncFolders(); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 	}
 }
