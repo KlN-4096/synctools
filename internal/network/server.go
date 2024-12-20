@@ -149,3 +149,8 @@ func (c *Client) Start() {
 func (c *Client) Close() {
 	c.conn.Close()
 }
+
+// IsRunning 检查服务器是否正在运行
+func (s *Server) IsRunning() bool {
+	return s.running
+}

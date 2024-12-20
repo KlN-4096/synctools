@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	"synctools/internal/config"
 	"synctools/internal/model"
 )
 
@@ -16,28 +15,32 @@ type SyncProgress struct {
 	Status         string `json:"status"`
 }
 
-// Server 定义服务器接口
-type Server interface {
-	Start() error
-	Stop() error
-}
-
 // SyncService 同步服务
 type SyncService struct {
-	configManager    *config.Manager
-	server           Server
+	configManager    model.ConfigManager
+	server           model.Server
 	logger           model.Logger
 	running          bool
 	runningMux       sync.RWMutex
 	progressCallback func(*SyncProgress)
+	onConfigChanged  func()
 }
 
 // NewSyncService 创建新的同步服务
-func NewSyncService(configManager *config.Manager, logger model.Logger) *SyncService {
-	return &SyncService{
+func NewSyncService(configManager model.ConfigManager, logger model.Logger) *SyncService {
+	s := &SyncService{
 		configManager: configManager,
 		logger:        logger,
 	}
+
+	// 设置配置管理器的变更回调
+	configManager.SetOnChanged(func() {
+		if s.onConfigChanged != nil {
+			s.onConfigChanged()
+		}
+	})
+
+	return s
 }
 
 // SetProgressCallback 设置进度回调函数
@@ -66,12 +69,14 @@ func (s *SyncService) Start() error {
 		return fmt.Errorf("没有选中的配置")
 	}
 
-	server := newMockServer(s.logger)
-	if err := server.Start(); err != nil {
+	if s.server == nil {
+		return fmt.Errorf("服务器未初始化")
+	}
+
+	if err := s.server.Start(); err != nil {
 		return fmt.Errorf("启动服务器失败: %v", err)
 	}
 
-	s.server = server
 	s.running = true
 
 	// 更新初始进度
@@ -96,7 +101,6 @@ func (s *SyncService) Stop() error {
 	}
 
 	s.running = false
-	s.server = nil
 
 	// 更新停止状态
 	s.updateProgress(&SyncProgress{
@@ -113,32 +117,83 @@ func (s *SyncService) IsRunning() bool {
 	return s.running
 }
 
-// mockServer 用于测试的服务器
-type mockServer struct {
-	running bool
-	logger  model.Logger
+// ListConfigs 获取配置列表
+func (s *SyncService) ListConfigs() ([]*model.Config, error) {
+	s.logger.DebugLog("获取配置列表")
+	configs, err := s.configManager.ListConfigs()
+	if err != nil {
+		s.logger.Error("获取配置列表失败: %v", err)
+	}
+	return configs, err
 }
 
-func newMockServer(logger model.Logger) *mockServer {
-	return &mockServer{
-		logger: logger,
+// SaveConfig 保存配置
+func (s *SyncService) SaveConfig() error {
+	s.logger.DebugLog("保存当前配置")
+	if err := s.configManager.SaveCurrentConfig(); err != nil {
+		s.logger.Error("保存当前配置失败: %v", err)
+		return err
 	}
-}
-
-func (s *mockServer) Start() error {
-	if s.running {
-		return fmt.Errorf("服务器已在运行中")
-	}
-	s.running = true
-	s.logger.Info("服务器已启动")
 	return nil
 }
 
-func (s *mockServer) Stop() error {
-	if !s.running {
-		return nil
+// LoadConfig 加载配置
+func (s *SyncService) LoadConfig(uuid string) error {
+	s.logger.DebugLog("加载配置: %s", uuid)
+	if err := s.configManager.LoadConfig(uuid); err != nil {
+		s.logger.Error("加载配置失败: %v", err)
+		return err
 	}
-	s.running = false
-	s.logger.Info("服务器已停止")
 	return nil
+}
+
+// DeleteConfig 删除配置
+func (s *SyncService) DeleteConfig(uuid string) error {
+	s.logger.DebugLog("删除配置: %s", uuid)
+	if err := s.configManager.DeleteConfig(uuid); err != nil {
+		s.logger.Error("删除配置失败: %v", err)
+		return err
+	}
+	return nil
+}
+
+// GetCurrentConfig 获取当前配置
+func (s *SyncService) GetCurrentConfig() *model.Config {
+	config := s.configManager.GetCurrentConfig()
+	if config == nil {
+		s.logger.DebugLog("当前没有选中的配置")
+	} else {
+		s.logger.DebugLog("获取当前配置: %s", config.UUID)
+	}
+	return config
+}
+
+// ValidateConfig 验证配置
+func (s *SyncService) ValidateConfig(config *model.Config) error {
+	s.logger.DebugLog("验证配置: %s", config.UUID)
+	if err := s.configManager.ValidateConfig(config); err != nil {
+		s.logger.Error("配置验证失败: %v", err)
+		return err
+	}
+	return nil
+}
+
+// Save 保存指定配置
+func (s *SyncService) Save(config *model.Config) error {
+	s.logger.DebugLog("保存配置: %s", config.UUID)
+	if err := s.configManager.Save(config); err != nil {
+		s.logger.Error("保存配置失败: %v", err)
+		return err
+	}
+	return nil
+}
+
+// SetServer 设置服务器实例
+func (s *SyncService) SetServer(server model.Server) {
+	s.server = server
+}
+
+// SetOnConfigChanged 设置配置变更回调
+func (s *SyncService) SetOnConfigChanged(callback func()) {
+	s.onConfigChanged = callback
 }

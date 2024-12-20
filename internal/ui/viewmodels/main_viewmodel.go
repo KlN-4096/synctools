@@ -3,7 +3,6 @@ package viewmodels
 import (
 	"github.com/lxn/walk"
 
-	"synctools/internal/config"
 	"synctools/internal/model"
 	"synctools/internal/service"
 )
@@ -16,9 +15,9 @@ type MainViewModel struct {
 }
 
 // NewMainViewModel 创建新的主视图模型
-func NewMainViewModel(configManager *config.Manager, syncService *service.SyncService, logger model.Logger) *MainViewModel {
+func NewMainViewModel(syncService *service.SyncService, logger model.Logger) *MainViewModel {
 	return &MainViewModel{
-		ConfigViewModel: NewConfigViewModel(configManager, syncService, logger),
+		ConfigViewModel: NewConfigViewModel(syncService, logger),
 		logger:          logger,
 	}
 }

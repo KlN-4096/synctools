@@ -9,6 +9,7 @@ import (
 
 	"synctools/internal/config"
 	"synctools/internal/model"
+	"synctools/internal/network"
 	"synctools/internal/service"
 	"synctools/internal/ui"
 	"synctools/internal/ui/viewmodels"
@@ -75,16 +76,23 @@ func main() {
 
 	// 创建同步服务
 	logger.Log("正在创建同步服务")
-	syncService := service.NewSyncService(configManager, logger)
+	syncService := service.NewSyncService(model.ConfigManager(configManager), logger)
 	if syncService == nil {
 		logger.Error("同步服务创建失败: %v", nil)
 		return
+	}
+
+	// 创建网络服务器
+	logger.Log("正在创建网络服务器")
+	if config := configManager.GetCurrentConfig(); config != nil {
+		server := network.NewServer(config, logger)
+		syncService.SetServer(server)
 	}
 	logger.Log("同步服务创建成功")
 
 	// 创建主视图模型
 	logger.Log("正在创建主视图模型")
-	mainViewModel := viewmodels.NewMainViewModel(configManager, syncService, logger)
+	mainViewModel := viewmodels.NewMainViewModel(syncService, logger)
 	if mainViewModel == nil {
 		logger.Error("主视图模型创建失败: %v", nil)
 		return

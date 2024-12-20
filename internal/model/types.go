@@ -176,3 +176,42 @@ func NewUUID() (string, error) {
 	}
 	return hex.EncodeToString(uuid), nil
 }
+
+// ConfigManager 定义配置管理器接口
+type ConfigManager interface {
+	// GetCurrentConfig 获取当前配置
+	GetCurrentConfig() *Config
+
+	// LoadConfig 加载配置
+	LoadConfig(uuid string) error
+
+	// SaveCurrentConfig 保存当前配置
+	SaveCurrentConfig() error
+
+	// ListConfigs 获取配置列表
+	ListConfigs() ([]*Config, error)
+
+	// Save 保存指定配置
+	Save(config *Config) error
+
+	// DeleteConfig 删除配置
+	DeleteConfig(uuid string) error
+
+	// ValidateConfig 验证配置
+	ValidateConfig(config *Config) error
+
+	// SetOnChanged 设置配置变更回调
+	SetOnChanged(callback func())
+}
+
+// Server 定义服务器接口
+type Server interface {
+	// Start 启动服务器
+	Start() error
+
+	// Stop 停止服务器
+	Stop() error
+
+	// IsRunning 检查服务器是否正在运行
+	IsRunning() bool
+}

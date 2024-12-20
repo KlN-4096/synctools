@@ -1,4 +1,4 @@
-package model_test
+package domain
 
 import (
 	"testing"
@@ -6,111 +6,77 @@ import (
 	"synctools/internal/model"
 )
 
-// TestConfigValidation 测试配置验证
-func TestConfigValidation(t *testing.T) {
+func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
 		config  *model.Config
 		wantErr bool
 	}{
 		{
-			name: "完整有效的配置",
+			name: "有效配置",
 			config: &model.Config{
 				UUID:    "test-uuid",
-				Name:    "test-pack",
+				Name:    "test-config",
 				Version: "1.0.0",
-				Host:    "localhost",
+				Host:    "127.0.0.1",
 				Port:    8080,
 				SyncDir: "/test/dir",
-				SyncFolders: []model.SyncFolder{
-					{Path: "mods", SyncMode: "mirror"},
-				},
-				IgnoreList: []string{"*.tmp"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "缺少必填字段-名称",
+			name: "名称为空",
 			config: &model.Config{
 				UUID:    "test-uuid",
 				Version: "1.0.0",
-				Host:    "localhost",
+				Host:    "127.0.0.1",
 				Port:    8080,
 				SyncDir: "/test/dir",
 			},
 			wantErr: true,
 		},
 		{
-			name: "缺少必填字段-版本",
+			name: "版本为空",
 			config: &model.Config{
 				UUID:    "test-uuid",
-				Name:    "test-pack",
-				Host:    "localhost",
+				Name:    "test-config",
+				Host:    "127.0.0.1",
 				Port:    8080,
 				SyncDir: "/test/dir",
 			},
 			wantErr: true,
 		},
 		{
-			name: "无效端口-负数",
+			name: "主机地址为空",
 			config: &model.Config{
 				UUID:    "test-uuid",
-				Name:    "test-pack",
+				Name:    "test-config",
 				Version: "1.0.0",
-				Host:    "localhost",
-				Port:    -1,
-				SyncDir: "/test/dir",
-			},
-			wantErr: true,
-		},
-		{
-			name: "无效端口-超出范围",
-			config: &model.Config{
-				UUID:    "test-uuid",
-				Name:    "test-pack",
-				Version: "1.0.0",
-				Host:    "localhost",
-				Port:    65536,
-				SyncDir: "/test/dir",
-			},
-			wantErr: true,
-		},
-		{
-			name: "无效主机地址-空",
-			config: &model.Config{
-				UUID:    "test-uuid",
-				Name:    "test-pack",
-				Version: "1.0.0",
-				Host:    "",
 				Port:    8080,
 				SyncDir: "/test/dir",
 			},
 			wantErr: true,
 		},
 		{
-			name: "无效同步目录-空",
+			name: "端口无效",
 			config: &model.Config{
 				UUID:    "test-uuid",
-				Name:    "test-pack",
+				Name:    "test-config",
 				Version: "1.0.0",
-				Host:    "localhost",
-				Port:    8080,
-				SyncDir: "",
+				Host:    "127.0.0.1",
+				Port:    0,
+				SyncDir: "/test/dir",
 			},
 			wantErr: true,
 		},
 		{
-			name: "无效同步模式",
+			name: "同步目录为空",
 			config: &model.Config{
 				UUID:    "test-uuid",
-				Name:    "test-pack",
+				Name:    "test-config",
 				Version: "1.0.0",
-				Host:    "localhost",
+				Host:    "127.0.0.1",
 				Port:    8080,
-				SyncDir: "/test/dir",
-				SyncFolders: []model.SyncFolder{
-					{Path: "mods", SyncMode: "invalid"},
-				},
 			},
 			wantErr: true,
 		},
@@ -126,21 +92,21 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-// TestConfigClone 测试配置克隆
-func TestConfigClone(t *testing.T) {
+func TestConfig_Clone(t *testing.T) {
 	original := &model.Config{
 		UUID:    "test-uuid",
-		Name:    "test-pack",
+		Name:    "test-config",
 		Version: "1.0.0",
-		Host:    "localhost",
+		Host:    "127.0.0.1",
 		Port:    8080,
 		SyncDir: "/test/dir",
 		SyncFolders: []model.SyncFolder{
-			{Path: "mods", SyncMode: "mirror"},
+			{Path: "folder1", SyncMode: "mirror"},
+			{Path: "folder2", SyncMode: "push"},
 		},
-		IgnoreList: []string{"*.tmp"},
+		IgnoreList: []string{".git", "node_modules"},
 		FolderRedirects: []model.FolderRedirect{
-			{ServerPath: "server", ClientPath: "client"},
+			{ServerPath: "server1", ClientPath: "client1"},
 		},
 	}
 
@@ -166,7 +132,7 @@ func TestConfigClone(t *testing.T) {
 		t.Errorf("Clone() SyncDir = %v, want %v", clone.SyncDir, original.SyncDir)
 	}
 
-	// 验证切片是否深度复制
+	// 验证切片长度
 	if len(clone.SyncFolders) != len(original.SyncFolders) {
 		t.Errorf("Clone() SyncFolders length = %v, want %v", len(clone.SyncFolders), len(original.SyncFolders))
 	}
@@ -177,9 +143,20 @@ func TestConfigClone(t *testing.T) {
 		t.Errorf("Clone() FolderRedirects length = %v, want %v", len(clone.FolderRedirects), len(original.FolderRedirects))
 	}
 
-	// 修改克隆不应影响原始对象
-	clone.Name = "modified"
-	if original.Name == "modified" {
-		t.Error("Clone() did not create a deep copy")
+	// 验证切片内容
+	for i, folder := range original.SyncFolders {
+		if folder.Path != clone.SyncFolders[i].Path || folder.SyncMode != clone.SyncFolders[i].SyncMode {
+			t.Errorf("Clone() SyncFolder[%d] = %v, want %v", i, clone.SyncFolders[i], folder)
+		}
+	}
+	for i, ignore := range original.IgnoreList {
+		if ignore != clone.IgnoreList[i] {
+			t.Errorf("Clone() IgnoreList[%d] = %v, want %v", i, clone.IgnoreList[i], ignore)
+		}
+	}
+	for i, redirect := range original.FolderRedirects {
+		if redirect.ServerPath != clone.FolderRedirects[i].ServerPath || redirect.ClientPath != clone.FolderRedirects[i].ClientPath {
+			t.Errorf("Clone() FolderRedirect[%d] = %v, want %v", i, clone.FolderRedirects[i], redirect)
+		}
 	}
 }

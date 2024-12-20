@@ -10,7 +10,6 @@ import (
 
 	"github.com/lxn/walk"
 
-	"synctools/internal/config"
 	"synctools/internal/model"
 	"synctools/internal/service"
 )
@@ -32,9 +31,8 @@ type TableViewIface interface {
 
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
-	configManager *config.Manager
-	syncService   *service.SyncService
-	logger        Logger
+	syncService *service.SyncService
+	logger      Logger
 
 	// UI 组件
 	window          *walk.MainWindow
@@ -56,11 +54,10 @@ type ConfigViewModel struct {
 }
 
 // NewConfigViewModel 创建新的配置视图模型
-func NewConfigViewModel(configManager *config.Manager, syncService *service.SyncService, logger Logger) *ConfigViewModel {
+func NewConfigViewModel(syncService *service.SyncService, logger Logger) *ConfigViewModel {
 	return &ConfigViewModel{
-		configManager: configManager,
-		syncService:   syncService,
-		logger:        logger,
+		syncService: syncService,
+		logger:      logger,
 	}
 }
 
@@ -69,12 +66,12 @@ func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
 	vm.window = window
 
 	// 初始化配置列表模型
-	vm.configList = NewConfigListModel(vm.configManager)
-	vm.redirectList = NewRedirectListModel(vm.configManager)
-	vm.syncFolderList = NewSyncFolderListModel(vm.configManager)
+	vm.configList = NewConfigListModel(vm.syncService)
+	vm.redirectList = NewRedirectListModel(vm.syncService)
+	vm.syncFolderList = NewSyncFolderListModel(vm.syncService)
 
 	// 设置配置变更回调
-	vm.configManager.SetOnChanged(vm.onConfigChanged)
+	vm.syncService.SetOnConfigChanged(vm.UpdateUI)
 
 	return nil
 }
@@ -127,14 +124,9 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.UpdateUI()
 }
 
-// onConfigChanged 配置变更回调
-func (vm *ConfigViewModel) onConfigChanged() {
-	vm.UpdateUI()
-}
-
 // UpdateUI 更新UI显示
 func (vm *ConfigViewModel) UpdateUI() {
-	config := vm.configManager.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		// 设置默认值
 		vm.nameEdit.SetText("")
@@ -183,7 +175,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 // SaveConfig 保存当前配置
 func (vm *ConfigViewModel) SaveConfig() error {
-	config := vm.configManager.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -203,12 +195,12 @@ func (vm *ConfigViewModel) SaveConfig() error {
 	}
 
 	// 验证配置
-	if err := vm.configManager.ValidateConfig(config); err != nil {
+	if err := vm.syncService.ValidateConfig(config); err != nil {
 		return err
 	}
 
 	// 保存配置
-	return vm.configManager.SaveCurrentConfig()
+	return vm.syncService.SaveConfig()
 }
 
 // BrowseSyncDir 浏览同步目录
@@ -277,82 +269,39 @@ func (vm *ConfigViewModel) IsServerRunning() bool {
 // ConfigListModel 配置列表模型
 type ConfigListModel struct {
 	walk.TableModelBase
-	configManager *config.Manager
-	sortColumn    int
-	sortOrder     walk.SortOrder
-	filter        string
+	syncService *service.SyncService
+	sortColumn  int
+	sortOrder   walk.SortOrder
+	filter      string
 }
 
 // NewConfigListModel 创建新的配置列表模型
-func NewConfigListModel(configManager *config.Manager) *ConfigListModel {
+func NewConfigListModel(syncService *service.SyncService) *ConfigListModel {
 	return &ConfigListModel{
-		configManager: configManager,
-		sortColumn:    -1,
+		syncService: syncService,
+		sortColumn:  -1,
 	}
 }
 
 // RowCount 返回行数
 func (m *ConfigListModel) RowCount() int {
-	if m.configManager == nil {
+	configs, err := m.syncService.ListConfigs()
+	if err != nil {
+		// TODO: 考虑添加错误日志记录
 		return 0
 	}
-	configs, _ := m.configManager.ListConfigs()
-
-	// 应用过滤
-	if m.filter != "" {
-		filteredConfigs := make([]*model.Config, 0)
-		for _, cfg := range configs {
-			if strings.Contains(strings.ToLower(cfg.Name), strings.ToLower(m.filter)) {
-				filteredConfigs = append(filteredConfigs, cfg)
-			}
-		}
-		configs = filteredConfigs
-	}
-
 	return len(configs)
 }
 
-// Value 返回单元格值
+// Value 获取单元格值
 func (m *ConfigListModel) Value(row, col int) interface{} {
-	if m.configManager == nil {
+	configs, err := m.syncService.ListConfigs()
+	if err != nil {
+		// TODO: 考虑添加错误日志记录
 		return nil
 	}
-	configs, _ := m.configManager.ListConfigs()
-
-	// 应用过滤
-	if m.filter != "" {
-		filteredConfigs := make([]*model.Config, 0)
-		for _, cfg := range configs {
-			if strings.Contains(strings.ToLower(cfg.Name), strings.ToLower(m.filter)) {
-				filteredConfigs = append(filteredConfigs, cfg)
-			}
-		}
-		configs = filteredConfigs
-	}
-
 	if row < 0 || row >= len(configs) {
 		return nil
-	}
-
-	// 如果需要排序，先对配置列表进行排序
-	if m.sortColumn >= 0 {
-		sort.Slice(configs, func(i, j int) bool {
-			var result bool
-			switch m.sortColumn {
-			case 0:
-				result = configs[i].Name < configs[j].Name
-			case 1:
-				result = configs[i].Version < configs[j].Version
-			case 2:
-				result = configs[i].SyncDir < configs[j].SyncDir
-			default:
-				return false
-			}
-			if m.sortOrder == walk.SortDescending {
-				return !result
-			}
-			return result
-		})
 	}
 
 	config := configs[row]
@@ -364,14 +313,37 @@ func (m *ConfigListModel) Value(row, col int) interface{} {
 	case 2:
 		return config.SyncDir
 	}
-
 	return nil
 }
 
-// Sort 设置排序
+// Sort 排序
 func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
 	m.sortColumn = col
 	m.sortOrder = order
+
+	configs, err := m.syncService.ListConfigs()
+	if err != nil {
+		// TODO: 考虑添加错误日志记录
+		return err
+	}
+
+	sort.Slice(configs, func(i, j int) bool {
+		var less bool
+		switch col {
+		case 0:
+			less = configs[i].Name < configs[j].Name
+		case 1:
+			less = configs[i].Version < configs[j].Version
+		case 2:
+			less = configs[i].SyncDir < configs[j].SyncDir
+		}
+
+		if order == walk.SortDescending {
+			return !less
+		}
+		return less
+	})
+
 	m.PublishRowsReset()
 	return nil
 }
@@ -379,28 +351,28 @@ func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
 // RedirectListModel 重定向列表模型
 type RedirectListModel struct {
 	walk.TableModelBase
-	configManager *config.Manager
+	syncService *service.SyncService
 }
 
 // NewRedirectListModel 创建新的重定向列表模型
-func NewRedirectListModel(configManager *config.Manager) *RedirectListModel {
+func NewRedirectListModel(syncService *service.SyncService) *RedirectListModel {
 	return &RedirectListModel{
-		configManager: configManager,
+		syncService: syncService,
 	}
 }
 
 // RowCount 返回行数
 func (m *RedirectListModel) RowCount() int {
-	config := m.configManager.GetCurrentConfig()
+	config := m.syncService.GetCurrentConfig()
 	if config == nil {
 		return 0
 	}
 	return len(config.FolderRedirects)
 }
 
-// Value 返回单元格值
+// Value 获取单元格值
 func (m *RedirectListModel) Value(row, col int) interface{} {
-	config := m.configManager.GetCurrentConfig()
+	config := m.syncService.GetCurrentConfig()
 	if config == nil || row < 0 || row >= len(config.FolderRedirects) {
 		return nil
 	}
@@ -412,31 +384,137 @@ func (m *RedirectListModel) Value(row, col int) interface{} {
 	case 1:
 		return redirect.ClientPath
 	}
+	return nil
+}
+
+// SyncFolderListModel 同步文件夹列表模型
+type SyncFolderListModel struct {
+	walk.TableModelBase
+	syncService *service.SyncService
+}
+
+// NewSyncFolderListModel 创建新的同步文件夹列表模型
+func NewSyncFolderListModel(syncService *service.SyncService) *SyncFolderListModel {
+	return &SyncFolderListModel{
+		syncService: syncService,
+	}
+}
+
+// RowCount 返回行数
+func (m *SyncFolderListModel) RowCount() int {
+	config := m.syncService.GetCurrentConfig()
+	if config == nil {
+		return 0
+	}
+	return len(config.SyncFolders)
+}
+
+// Value 获取单元格值
+func (m *SyncFolderListModel) Value(row, col int) interface{} {
+	config := m.syncService.GetCurrentConfig()
+	if config == nil || row < 0 || row >= len(config.SyncFolders) {
+		return nil
+	}
+
+	folder := config.SyncFolders[row]
+	switch col {
+	case 0:
+		return folder.Path
+	case 1:
+		return folder.SyncMode
+	case 2:
+		// 检查文件夹是否存在
+		if _, err := os.Stat(filepath.Join(config.SyncDir, folder.Path)); os.IsNotExist(err) {
+			return "×"
+		}
+		return "√"
+	}
+	return nil
+}
+
+// GetCurrentConfig 获取当前配置
+func (vm *ConfigViewModel) GetCurrentConfig() *model.Config {
+	return vm.syncService.GetCurrentConfig()
+}
+
+// UpdateSyncFolder 更新同步文件夹
+func (vm *ConfigViewModel) UpdateSyncFolder(index int, path, mode string) error {
+	config := vm.syncService.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	if index < 0 || index >= len(config.SyncFolders) {
+		return fmt.Errorf("无效的索引")
+	}
+
+	// 验证路径
+	if path == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+
+	// 验证模式
+	if mode != "mirror" && mode != "push" {
+		return fmt.Errorf("无效的同步模式")
+	}
+
+	// 更新数据
+	config.SyncFolders[index].Path = path
+	config.SyncFolders[index].SyncMode = mode
+
+	// 保存配置
+	if err := vm.syncService.SaveConfig(); err != nil {
+		return err
+	}
+
+	// 刷新表格
+	vm.syncFolderList.PublishRowsReset()
 
 	return nil
 }
 
-// Save 保存配置
-func (vm *ConfigViewModel) Save(config *model.Config) error {
-	vm.logger.DebugLog("开始保存配置: UUID=%s, Name=%s", config.UUID, config.Name)
+// UpdateRedirect 更新文件夹重定向
+func (vm *ConfigViewModel) UpdateRedirect(index int, serverPath, clientPath string) error {
+	config := vm.syncService.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	if index < 0 || index >= len(config.FolderRedirects) {
+		return fmt.Errorf("无效的索引")
+	}
+
+	// 验证路径
+	if serverPath == "" || clientPath == "" {
+		return fmt.Errorf("路径不能为空")
+	}
+
+	// 更新数据
+	config.FolderRedirects[index].ServerPath = serverPath
+	config.FolderRedirects[index].ClientPath = clientPath
 
 	// 保存配置
-	if err := vm.configManager.Save(config); err != nil {
-		vm.logger.Error("保存配置失败", "error", err)
+	if err := vm.syncService.SaveConfig(); err != nil {
 		return err
 	}
-	vm.logger.DebugLog("配置已保存到存储")
 
-	// 加载配置
-	if err := vm.configManager.LoadConfig(config.UUID); err != nil {
-		vm.logger.Error("加载配置失败", "error", err)
-		return fmt.Errorf("加载配置失败: %v", err)
+	// 刷新表格
+	vm.redirectList.PublishRowsReset()
+
+	return nil
+}
+
+// ListConfigs 获取配置列表
+func (vm *ConfigViewModel) ListConfigs() ([]*model.Config, error) {
+	return vm.syncService.ListConfigs()
+}
+
+// LoadConfig 加载配置
+func (vm *ConfigViewModel) LoadConfig(uuid string) error {
+	if err := vm.syncService.LoadConfig(uuid); err != nil {
+		return err
 	}
-	vm.logger.DebugLog("配置已重新加载")
-
-	// 更新UI显示
 	vm.UpdateUI()
-	vm.logger.DebugLog("UI已更新")
 	return nil
 }
 
@@ -463,187 +541,21 @@ func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 		},
 	}
 
-	if err := vm.configManager.ValidateConfig(config); err != nil {
+	if err := vm.syncService.Save(config); err != nil {
 		return err
 	}
 
-	return vm.configManager.Save(config)
-}
-
-// ListConfigs 获取配置列表
-func (vm *ConfigViewModel) ListConfigs() ([]*model.Config, error) {
-	return vm.configManager.ListConfigs()
-}
-
-// LoadConfig 加载配置
-func (vm *ConfigViewModel) LoadConfig(uuid string) error {
-	return vm.configManager.LoadConfig(uuid)
+	return vm.LoadConfig(config.UUID)
 }
 
 // DeleteConfig 删除配置
 func (vm *ConfigViewModel) DeleteConfig(uuid string) error {
-	return vm.configManager.DeleteConfig(uuid)
-}
-
-// GetCurrentConfig 获取当前配置
-func (vm *ConfigViewModel) GetCurrentConfig() *model.Config {
-	return vm.configManager.GetCurrentConfig()
-}
-
-// SetName 设置名称
-func (vm *ConfigViewModel) SetName(name string) {
-	vm.nameEdit.SetText(name)
-}
-
-// GetName 获取名称
-func (vm *ConfigViewModel) GetName() string {
-	return vm.nameEdit.Text()
-}
-
-// SetVersion 设置版本
-func (vm *ConfigViewModel) SetVersion(version string) {
-	vm.versionEdit.SetText(version)
-}
-
-// GetVersion 获取版本
-func (vm *ConfigViewModel) GetVersion() string {
-	return vm.versionEdit.Text()
-}
-
-// SetHost 设置主机地址
-func (vm *ConfigViewModel) SetHost(host string) {
-	vm.hostEdit.SetText(host)
-}
-
-// GetHost 获取主机地址
-func (vm *ConfigViewModel) GetHost() string {
-	return vm.hostEdit.Text()
-}
-
-// SetPort 设置端口
-func (vm *ConfigViewModel) SetPort(port int) {
-	vm.portEdit.SetText(fmt.Sprintf("%d", port))
-}
-
-// GetPort 获取端口
-func (vm *ConfigViewModel) GetPort() int {
-	port, err := strconv.Atoi(vm.portEdit.Text())
-	if err != nil {
-		return 0
-	}
-	return port
-}
-
-// SetSyncDir 设置同步目录
-func (vm *ConfigViewModel) SetSyncDir(dir string) error {
-	return vm.syncDirEdit.SetText(dir)
-}
-
-// GetSyncDir 获取同步目录
-func (vm *ConfigViewModel) GetSyncDir() string {
-	return vm.syncDirEdit.Text()
-}
-
-// OnConfigSelected 处理配置选择事件
-func (vm *ConfigViewModel) OnConfigSelected(index int) error {
-	vm.logger.DebugLog("开始处理配置选择事件: index=%d", index)
-
-	configs, err := vm.configManager.ListConfigs()
-	if err != nil {
-		vm.logger.Error("获取配置列表失败", "error", err)
-		return err
-	}
-	vm.logger.DebugLog("获取到配置列表，共 %d 个配置", len(configs))
-
-	// 应用过滤和排序
-	if vm.configList != nil {
-		if vm.configList.filter != "" {
-			vm.logger.DebugLog("应用过滤器: %s", vm.configList.filter)
-			filteredConfigs := make([]*model.Config, 0)
-			for _, cfg := range configs {
-				if strings.Contains(strings.ToLower(cfg.Name), strings.ToLower(vm.configList.filter)) {
-					filteredConfigs = append(filteredConfigs, cfg)
-				}
-			}
-			configs = filteredConfigs
-			vm.logger.DebugLog("过滤后剩余 %d 个配置", len(configs))
-		}
-
-		if vm.configList.sortColumn >= 0 {
-			vm.logger.DebugLog("应用排序: column=%d, order=%v", vm.configList.sortColumn, vm.configList.sortOrder)
-			sort.Slice(configs, func(i, j int) bool {
-				var result bool
-				switch vm.configList.sortColumn {
-				case 0:
-					result = configs[i].Name < configs[j].Name
-				case 1:
-					result = configs[i].Version < configs[j].Version
-				case 2:
-					result = configs[i].SyncDir < configs[j].SyncDir
-				default:
-					return false
-				}
-				if vm.configList.sortOrder == walk.SortDescending {
-					return !result
-				}
-				return result
-			})
-		}
-	}
-
-	if index < 0 || index >= len(configs) {
-		vm.logger.Error("无效的选���索引", "index", index, "total", len(configs))
-		return fmt.Errorf("无效的选择索引")
-	}
-
-	// 加载选中的配置
-	selectedConfig := configs[index]
-	vm.logger.DebugLog("选中的配置: UUID=%s, Name=%s", selectedConfig.UUID, selectedConfig.Name)
-
-	// 加载配置
-	if err := vm.configManager.LoadConfig(selectedConfig.UUID); err != nil {
-		vm.logger.Error("加载配置失败", "error", err)
-		return fmt.Errorf("加载配置失败: %v", err)
-	}
-
-	// 获取当前配置
-	currentConfig := vm.configManager.GetCurrentConfig()
-	if currentConfig == nil {
-		vm.logger.Error("加载配置后当前配置为空")
-		return fmt.Errorf("加载配置后当前配置为空")
-	}
-	vm.logger.DebugLog("当前配置: UUID=%s, Name=%s", currentConfig.UUID, currentConfig.Name)
-
-	// 更新UI控件
-	vm.nameEdit.SetText(currentConfig.Name)
-	vm.versionEdit.SetText(currentConfig.Version)
-	vm.hostEdit.SetText(currentConfig.Host)
-	vm.portEdit.SetText(fmt.Sprintf("%d", currentConfig.Port))
-	vm.syncDirEdit.SetText(currentConfig.SyncDir)
-
-	// 更新UI显示
-	vm.UpdateUI()
-	vm.logger.DebugLog("UI已更新")
-	return nil
-}
-
-// SetFilter 设置过滤条件
-func (vm *ConfigViewModel) SetFilter(filter string) {
-	if vm.configList != nil {
-		vm.configList.filter = filter
-		vm.configList.PublishRowsReset()
-	}
-}
-
-// GetConfigList 获取配置列表
-func (vm *ConfigViewModel) GetConfigList() []*model.Config {
-	configs, _ := vm.configManager.ListConfigs()
-	return configs
+	return vm.syncService.DeleteConfig(uuid)
 }
 
 // AddRedirect 添加重定向配置
 func (vm *ConfigViewModel) AddRedirect(serverPath, clientPath string) error {
-	config := vm.configManager.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -662,7 +574,7 @@ func (vm *ConfigViewModel) AddRedirect(serverPath, clientPath string) error {
 	})
 
 	// 保存配置
-	if err := vm.configManager.SaveCurrentConfig(); err != nil {
+	if err := vm.syncService.SaveConfig(); err != nil {
 		return err
 	}
 
@@ -672,7 +584,7 @@ func (vm *ConfigViewModel) AddRedirect(serverPath, clientPath string) error {
 
 // DeleteRedirect 删除重定向配置
 func (vm *ConfigViewModel) DeleteRedirect(index int) error {
-	config := vm.configManager.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -688,7 +600,7 @@ func (vm *ConfigViewModel) DeleteRedirect(index int) error {
 	)
 
 	// 保存配置
-	if err := vm.configManager.SaveCurrentConfig(); err != nil {
+	if err := vm.syncService.SaveConfig(); err != nil {
 		return err
 	}
 
@@ -696,70 +608,9 @@ func (vm *ConfigViewModel) DeleteRedirect(index int) error {
 	return nil
 }
 
-// GetConfigListModel 获取配置列表模型
-func (vm *ConfigViewModel) GetConfigListModel() *ConfigListModel {
-	return vm.configList
-}
-
-// GetRedirectListModel 获取重定向列表模型
-func (vm *ConfigViewModel) GetRedirectListModel() *RedirectListModel {
-	return vm.redirectList
-}
-
-// SyncFolderListModel 同步文件夹列表模型
-type SyncFolderListModel struct {
-	walk.TableModelBase
-	configManager *config.Manager
-}
-
-// NewSyncFolderListModel 创建新的同步文件夹列表模型
-func NewSyncFolderListModel(configManager *config.Manager) *SyncFolderListModel {
-	m := &SyncFolderListModel{
-		configManager: configManager,
-	}
-	return m
-}
-
-// RowCount 获取行数
-func (m *SyncFolderListModel) RowCount() int {
-	config := m.configManager.GetCurrentConfig()
-	if config == nil {
-		return 0
-	}
-	return len(config.SyncFolders)
-}
-
-// ColumnCount 返回列数
-func (m *SyncFolderListModel) ColumnCount() int {
-	return 3 // 路径、同步模式、是否有效
-}
-
-// Value 获取单元格值
-func (m *SyncFolderListModel) Value(row, col int) interface{} {
-	config := m.configManager.GetCurrentConfig()
-	if config == nil || row < 0 || row >= len(config.SyncFolders) {
-		return nil
-	}
-
-	folder := config.SyncFolders[row]
-	switch col {
-	case 0:
-		return folder.Path
-	case 1:
-		return folder.SyncMode
-	case 2:
-		// 检查文件夹是否存在
-		if _, err := os.Stat(filepath.Join(config.SyncDir, folder.Path)); os.IsNotExist(err) {
-			return "×"
-		}
-		return "√"
-	}
-	return nil
-}
-
 // AddSyncFolder 添加同步文件夹
 func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
-	config := vm.configManager.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -767,7 +618,7 @@ func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
 	// 检查路径是否已存在
 	for _, folder := range config.SyncFolders {
 		if folder.Path == path {
-			return fmt.Errorf("路径已存在")
+			return fmt.Errorf("路径已���在")
 		}
 	}
 
@@ -778,7 +629,7 @@ func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
 	})
 
 	// 保存配置
-	if err := vm.configManager.SaveCurrentConfig(); err != nil {
+	if err := vm.syncService.SaveConfig(); err != nil {
 		return err
 	}
 
@@ -788,7 +639,7 @@ func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
 
 // DeleteSyncFolder 删除同步文件夹
 func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
-	config := vm.configManager.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -804,72 +655,10 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 	)
 
 	// 保存配置
-	if err := vm.configManager.SaveCurrentConfig(); err != nil {
+	if err := vm.syncService.SaveConfig(); err != nil {
 		return err
 	}
 
 	vm.UpdateUI()
-	return nil
-}
-
-// GetSyncFolderListModel 获取同步文件夹列表模型
-func (vm *ConfigViewModel) GetSyncFolderListModel() *SyncFolderListModel {
-	return vm.syncFolderList
-}
-
-// UpdateSyncFolder 更新同步文件夹
-func (vm *ConfigViewModel) UpdateSyncFolder(index int, path, mode string) error {
-	config := vm.configManager.GetCurrentConfig()
-	if config == nil {
-		return fmt.Errorf("没有选中的配置")
-	}
-
-	if index < 0 || index >= len(config.SyncFolders) {
-		return fmt.Errorf("无效的索引")
-	}
-
-	// 验证路径
-	if path == "" {
-		return fmt.Errorf("路径不能为空")
-	}
-
-	// 验证模式
-	if mode != "mirror" && mode != "push" {
-		return fmt.Errorf("无效的同步模式")
-	}
-
-	// 更新数据
-	config.SyncFolders[index].Path = path
-	config.SyncFolders[index].SyncMode = mode
-
-	// 刷新表格
-	vm.syncFolderList.PublishRowsReset()
-
-	return nil
-}
-
-// UpdateRedirect 更新文件夹重定向
-func (vm *ConfigViewModel) UpdateRedirect(index int, serverPath, clientPath string) error {
-	config := vm.configManager.GetCurrentConfig()
-	if config == nil {
-		return fmt.Errorf("没有选中的配置")
-	}
-
-	if index < 0 || index >= len(config.FolderRedirects) {
-		return fmt.Errorf("无效的索引")
-	}
-
-	// 验证路径
-	if serverPath == "" || clientPath == "" {
-		return fmt.Errorf("路径不能为空")
-	}
-
-	// 更新数据
-	config.FolderRedirects[index].ServerPath = serverPath
-	config.FolderRedirects[index].ClientPath = clientPath
-
-	// 刷新表格
-	vm.redirectList.PublishRowsReset()
-
 	return nil
 }
