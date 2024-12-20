@@ -105,10 +105,6 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.syncDirEdit = syncDirEdit
 	vm.ignoreEdit = ignoreEdit
 
-	// 设置默认值
-	hostEdit.SetText("0.0.0.0")
-	portEdit.SetText("6666")
-
 	// 设置表格模型
 	if configTable != nil {
 		configTable.SetModel(vm.configList)
@@ -180,27 +176,48 @@ func (vm *ConfigViewModel) SaveConfig() error {
 		return fmt.Errorf("没有选中的配置")
 	}
 
-	// 更新配置值
-	config.Name = vm.nameEdit.Text()
-	config.Version = vm.versionEdit.Text()
-	config.Host = vm.hostEdit.Text()
+	vm.logger.DebugLog("SaveConfig - UI values: name=%s, version=%s, host=%s, port=%s, syncDir=%s",
+		vm.nameEdit.Text(), vm.versionEdit.Text(), vm.hostEdit.Text(), vm.portEdit.Text(), vm.syncDirEdit.Text())
+
+	// 创建一个新的配置对象，以避免引用问题
+	newConfig := &model.Config{
+		UUID:            config.UUID,
+		Name:            vm.nameEdit.Text(),
+		Version:         vm.versionEdit.Text(),
+		Host:            vm.hostEdit.Text(),
+		SyncDir:         vm.syncDirEdit.Text(),
+		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		IgnoreList:      make([]string, 0),
+		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+	}
+
+	// 解析端口号
 	port, err := strconv.Atoi(vm.portEdit.Text())
 	if err != nil {
 		return fmt.Errorf("端口号无效: %v", err)
 	}
-	config.Port = port
-	config.SyncDir = vm.syncDirEdit.Text()
+	newConfig.Port = port
+
+	vm.logger.DebugLog("SaveConfig - New config: %+v", newConfig)
+
+	// 复制切片内容
+	copy(newConfig.SyncFolders, config.SyncFolders)
+	copy(newConfig.FolderRedirects, config.FolderRedirects)
+
+	// 处理忽略列表
 	if vm.ignoreEdit != nil {
-		config.IgnoreList = strings.Split(vm.ignoreEdit.Text(), "\n")
+		ignoreList := strings.Split(vm.ignoreEdit.Text(), "\n")
+		newConfig.IgnoreList = make([]string, len(ignoreList))
+		copy(newConfig.IgnoreList, ignoreList)
 	}
 
 	// 验证配置
-	if err := vm.syncService.ValidateConfig(config); err != nil {
+	if err := vm.syncService.ValidateConfig(newConfig); err != nil {
 		return err
 	}
 
 	// 保存配置
-	return vm.syncService.SaveConfig()
+	return vm.syncService.Save(newConfig)
 }
 
 // BrowseSyncDir 浏览同步目录
@@ -618,7 +635,7 @@ func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
 	// 检查路径是否已存在
 	for _, folder := range config.SyncFolders {
 		if folder.Path == path {
-			return fmt.Errorf("路径已���在")
+			return fmt.Errorf("路径已存在")
 		}
 	}
 

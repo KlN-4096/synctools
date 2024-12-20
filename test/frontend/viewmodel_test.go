@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"fmt"
 	"testing"
 
 	"synctools/internal/model"
@@ -15,6 +16,7 @@ type MockConfigManager struct {
 }
 
 func (m *MockConfigManager) GetCurrentConfig() *model.Config {
+	fmt.Printf("[DEBUG] MockConfigManager.GetCurrentConfig() -> %+v\n", m.currentConfig)
 	return m.currentConfig
 }
 
@@ -23,7 +25,11 @@ func (m *MockConfigManager) LoadConfig(uuid string) error {
 }
 
 func (m *MockConfigManager) SaveCurrentConfig() error {
-	return nil
+	fmt.Printf("[DEBUG] MockConfigManager.SaveCurrentConfig() -> %+v\n", m.currentConfig)
+	if m.currentConfig == nil {
+		return nil
+	}
+	return m.Save(m.currentConfig)
 }
 
 func (m *MockConfigManager) ListConfigs() ([]*model.Config, error) {
@@ -31,7 +37,14 @@ func (m *MockConfigManager) ListConfigs() ([]*model.Config, error) {
 }
 
 func (m *MockConfigManager) Save(config *model.Config) error {
+	fmt.Printf("[DEBUG] MockConfigManager.Save() input -> %+v\n", config)
+	// 直接使用传入的配置对象
 	m.currentConfig = config
+	fmt.Printf("[DEBUG] MockConfigManager.Save() updated -> %+v\n", m.currentConfig)
+
+	if m.onChanged != nil {
+		m.onChanged()
+	}
 	return nil
 }
 
@@ -69,12 +82,20 @@ func (m *MockServer) IsRunning() bool {
 // MockLogger 模拟日志记录器
 type MockLogger struct{}
 
-func (m *MockLogger) Log(format string, v ...interface{})      {}
-func (m *MockLogger) Info(msg string, args ...interface{})     {}
-func (m *MockLogger) Error(msg string, args ...interface{})    {}
-func (m *MockLogger) DebugLog(format string, v ...interface{}) {}
-func (m *MockLogger) SetDebugMode(enabled bool)                {}
-func (m *MockLogger) GetDebugMode() bool                       { return false }
+func (m *MockLogger) Log(format string, v ...interface{}) {
+	fmt.Printf("[LOG] "+format+"\n", v...)
+}
+func (m *MockLogger) Info(msg string, args ...interface{}) {
+	fmt.Printf("[INFO] "+msg+"\n", args...)
+}
+func (m *MockLogger) Error(msg string, args ...interface{}) {
+	fmt.Printf("[ERROR] "+msg+"\n", args...)
+}
+func (m *MockLogger) DebugLog(format string, v ...interface{}) {
+	fmt.Printf("[DEBUG] "+format+"\n", v...)
+}
+func (m *MockLogger) SetDebugMode(enabled bool) {}
+func (m *MockLogger) GetDebugMode() bool        { return true }
 
 // MockLineEdit 模拟文本输入框
 type MockLineEdit struct {
@@ -161,6 +182,7 @@ func TestConfigViewModel_SaveConfig(t *testing.T) {
 		Port:    8080,
 		SyncDir: "/test/dir",
 	}
+	fmt.Printf("[TEST] Initial config -> %+v\n", config)
 
 	// 创建模拟对象
 	configManager := &MockConfigManager{currentConfig: config}
@@ -171,14 +193,18 @@ func TestConfigViewModel_SaveConfig(t *testing.T) {
 	syncService := service.NewSyncService(configManager, logger)
 	syncService.SetServer(server)
 
+	// 创建视图模型
+	viewModel := viewmodels.NewConfigViewModel(syncService, logger)
+
+	// 创建UI组件
 	nameEdit := &MockLineEdit{text: "new-name"}
 	versionEdit := &MockLineEdit{text: "2.0.0"}
 	hostEdit := &MockLineEdit{text: "0.0.0.0"}
 	portEdit := &MockLineEdit{text: "9090"}
 	syncDirEdit := &MockLineEdit{text: "/new/dir"}
 
-	// 创建视图模型
-	viewModel := viewmodels.NewConfigViewModel(syncService, logger)
+	fmt.Printf("[TEST] Before SetupUI - UI components values: name=%s, version=%s, host=%s, port=%s, syncDir=%s\n",
+		nameEdit.Text(), versionEdit.Text(), hostEdit.Text(), portEdit.Text(), syncDirEdit.Text())
 
 	// 设置UI组件
 	viewModel.SetupUI(
@@ -194,26 +220,41 @@ func TestConfigViewModel_SaveConfig(t *testing.T) {
 		nil, // syncFolderTable
 	)
 
+	fmt.Printf("[TEST] After SetupUI - UI components values: name=%s, version=%s, host=%s, port=%s, syncDir=%s\n",
+		nameEdit.Text(), versionEdit.Text(), hostEdit.Text(), portEdit.Text(), syncDirEdit.Text())
+
+	// 重新设置UI组件的值
+	nameEdit.SetText("new-name")
+	versionEdit.SetText("2.0.0")
+	hostEdit.SetText("0.0.0.0")
+	portEdit.SetText("9090")
+	syncDirEdit.SetText("/new/dir")
+
+	fmt.Printf("[TEST] After Reset - UI components values: name=%s, version=%s, host=%s, port=%s, syncDir=%s\n",
+		nameEdit.Text(), versionEdit.Text(), hostEdit.Text(), portEdit.Text(), syncDirEdit.Text())
+
 	// 测试保存配置
 	if err := viewModel.SaveConfig(); err != nil {
 		t.Errorf("SaveConfig() error = %v", err)
 	}
 
 	// 验证配置更新
-	config = configManager.GetCurrentConfig()
-	if config.Name != nameEdit.Text() {
-		t.Errorf("Name = %v, want %v", config.Name, nameEdit.Text())
+	updatedConfig := configManager.GetCurrentConfig()
+	fmt.Printf("[TEST] Final config -> %+v\n", updatedConfig)
+
+	if updatedConfig.Name != "new-name" {
+		t.Errorf("Name = %v, want %v", updatedConfig.Name, "new-name")
 	}
-	if config.Version != versionEdit.Text() {
-		t.Errorf("Version = %v, want %v", config.Version, versionEdit.Text())
+	if updatedConfig.Version != "2.0.0" {
+		t.Errorf("Version = %v, want %v", updatedConfig.Version, "2.0.0")
 	}
-	if config.Host != hostEdit.Text() {
-		t.Errorf("Host = %v, want %v", config.Host, hostEdit.Text())
+	if updatedConfig.Host != "0.0.0.0" {
+		t.Errorf("Host = %v, want %v", updatedConfig.Host, "0.0.0.0")
 	}
-	if config.Port != 9090 {
-		t.Errorf("Port = %v, want 9090", config.Port)
+	if updatedConfig.Port != 9090 {
+		t.Errorf("Port = %v, want %v", updatedConfig.Port, 9090)
 	}
-	if config.SyncDir != syncDirEdit.Text() {
-		t.Errorf("SyncDir = %v, want %v", config.SyncDir, syncDirEdit.Text())
+	if updatedConfig.SyncDir != "/new/dir" {
+		t.Errorf("SyncDir = %v, want %v", updatedConfig.SyncDir, "/new/dir")
 	}
 }

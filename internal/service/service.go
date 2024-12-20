@@ -130,11 +130,11 @@ func (s *SyncService) ListConfigs() ([]*model.Config, error) {
 // SaveConfig 保存配置
 func (s *SyncService) SaveConfig() error {
 	s.logger.DebugLog("保存当前配置")
-	if err := s.configManager.SaveCurrentConfig(); err != nil {
-		s.logger.Error("保存当前配置失败: %v", err)
-		return err
+	config := s.configManager.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
 	}
-	return nil
+	return s.Save(config)
 }
 
 // LoadConfig 加载配置
