@@ -55,6 +55,7 @@ func (m *Manager) LoadConfig(uuid string) error {
 	// 创建新的配置对象以避免引用问题
 	m.currentConfig = &model.Config{
 		UUID:            config.UUID,
+		Type:            config.Type,
 		Name:            config.Name,
 		Version:         config.Version,
 		Host:            config.Host,
@@ -128,6 +129,7 @@ func (m *Manager) ListConfigs() ([]*model.Config, error) {
 		// 创建新的配置对象以避免引用问题
 		configCopy := &model.Config{
 			UUID:            config.UUID,
+			Type:            config.Type,
 			Name:            config.Name,
 			Version:         config.Version,
 			Host:            config.Host,
@@ -208,6 +210,7 @@ func (m *Manager) Save(config *model.Config) error {
 	// 创建新的配置对象以避免引用问题
 	configToSave := &model.Config{
 		UUID:            config.UUID,
+		Type:            config.Type,
 		Name:            config.Name,
 		Version:         config.Version,
 		Host:            config.Host,

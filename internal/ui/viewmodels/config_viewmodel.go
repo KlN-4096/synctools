@@ -73,7 +73,7 @@ func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
 	vm.window = window
 
 	// 初始化配置列表模型
-	vm.configList = NewConfigListModel(vm.syncService)
+	vm.configList = NewConfigListModel(vm.syncService, vm.logger)
 	vm.redirectList = NewRedirectListModel(vm.syncService)
 	vm.syncFolderList = NewSyncFolderListModel(vm.syncService)
 
@@ -142,6 +142,20 @@ func (vm *ConfigViewModel) UpdateUI() {
 	// 获取当前配置（使用缓存）
 	config := vm.GetCurrentConfig()
 
+	// 强制所有表格重新加载数据
+	if vm.configTable != nil {
+		vm.configTable.SetModel(nil)
+		vm.configTable.SetModel(vm.configList)
+	}
+	if vm.redirectTable != nil {
+		vm.redirectTable.SetModel(nil)
+		vm.redirectTable.SetModel(vm.redirectList)
+	}
+	if vm.syncFolderTable != nil {
+		vm.syncFolderTable.SetModel(nil)
+		vm.syncFolderTable.SetModel(vm.syncFolderList)
+	}
+
 	// 更新UI组件
 	if config == nil {
 		// 设置默认值
@@ -192,37 +206,53 @@ func (vm *ConfigViewModel) UpdateUI() {
 func (vm *ConfigViewModel) SaveConfig() error {
 	config := vm.GetCurrentConfig()
 	if config == nil {
-		config = &model.Config{
-			Type: model.ConfigTypeServer, // 设置为服务器配置
-		}
+		return fmt.Errorf("没有选中的配置")
 	}
 
-	// 更新配置字段
-	config.Name = vm.nameEdit.Text()
-	config.Version = vm.versionEdit.Text()
-	config.Host = vm.hostEdit.Text()
-	if port, err := strconv.Atoi(vm.portEdit.Text()); err == nil {
-		config.Port = port
-	}
-	config.SyncDir = vm.syncDirEdit.Text()
-	config.IgnoreList = strings.Split(vm.ignoreEdit.Text(), "\n")
+	vm.logger.DebugLog("SaveConfig - UI values: name=%s, version=%s, host=%s, port=%s, syncDir=%s",
+		vm.nameEdit.Text(), vm.versionEdit.Text(), vm.hostEdit.Text(), vm.portEdit.Text(), vm.syncDirEdit.Text())
 
-	// 如果是新配置，生成UUID
-	if config.UUID == "" {
-		uuid, err := model.NewUUID()
-		if err != nil {
-			return fmt.Errorf("生成UUID失败: %v", err)
-		}
-		config.UUID = uuid
+	// 创建一个新的配置对象，以避免引用问题
+	newConfig := &model.Config{
+		UUID:            config.UUID,
+		Type:            model.ConfigTypeServer, // 设置为服务器配置
+		Name:            vm.nameEdit.Text(),
+		Version:         vm.versionEdit.Text(),
+		Host:            vm.hostEdit.Text(),
+		SyncDir:         vm.syncDirEdit.Text(),
+		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		IgnoreList:      make([]string, 0),
+		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
 	}
 
-	// 保存配置
-	if err := vm.syncService.Save(config); err != nil {
-		return fmt.Errorf("保存配置失败: %v", err)
+	// 解析端口号
+	port, err := strconv.Atoi(vm.portEdit.Text())
+	if err != nil {
+		return fmt.Errorf("端口号无效: %v", err)
+	}
+	newConfig.Port = port
+
+	vm.logger.DebugLog("SaveConfig - New config: %+v", newConfig)
+
+	// 复制切片内容
+	copy(newConfig.SyncFolders, config.SyncFolders)
+	copy(newConfig.FolderRedirects, config.FolderRedirects)
+
+	// 处理忽略列表
+	if vm.ignoreEdit != nil {
+		ignoreList := strings.Split(vm.ignoreEdit.Text(), "\n")
+		newConfig.IgnoreList = make([]string, len(ignoreList))
+		copy(newConfig.IgnoreList, ignoreList)
 	}
 
-	vm.currentConfig = config
-	return nil
+	// 验证配置
+	if err := vm.syncService.ValidateConfig(newConfig); err != nil {
+		return err
+	}
+
+	// 清除缓存
+	vm.currentConfig = nil
+	return vm.syncService.Save(newConfig)
 }
 
 // BrowseSyncDir 浏览同步目录
@@ -245,6 +275,7 @@ func (vm *ConfigViewModel) BrowseSyncDir() error {
 
 // StartServer 启动服务器
 func (vm *ConfigViewModel) StartServer() error {
+	// 先保存当前配置
 	if err := vm.SaveConfig(); err != nil {
 		return err
 	}
@@ -254,6 +285,19 @@ func (vm *ConfigViewModel) StartServer() error {
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
+
+	// 重新加载配置以确保使用最新的设置
+	if err := vm.syncService.LoadConfig(config.UUID); err != nil {
+		return fmt.Errorf("重新加载配置失败: %v", err)
+	}
+
+	// 获取最新的配置
+	config = vm.syncService.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("无法获取配置")
+	}
+
+	vm.logger.DebugLog("启动服务器 - 使用配置: %+v", config)
 
 	// 重新创建网络服务器
 	server := network.NewServer(config, vm.logger)
@@ -316,6 +360,7 @@ func (vm *ConfigViewModel) IsServerRunning() bool {
 type ConfigListModel struct {
 	walk.TableModelBase
 	syncService   *service.SyncService
+	logger        Logger
 	sortColumn    int
 	sortOrder     walk.SortOrder
 	filter        string
@@ -323,9 +368,10 @@ type ConfigListModel struct {
 }
 
 // NewConfigListModel 创建新的配置列表模型
-func NewConfigListModel(syncService *service.SyncService) *ConfigListModel {
+func NewConfigListModel(syncService *service.SyncService, logger Logger) *ConfigListModel {
 	model := &ConfigListModel{
 		syncService: syncService,
+		logger:      logger,
 		sortColumn:  -1,
 	}
 	// 初始加载配置
@@ -338,7 +384,13 @@ func (m *ConfigListModel) refreshCache() {
 	configs, err := m.syncService.ListConfigs()
 	if err != nil {
 		m.cachedConfigs = nil
+		m.logger.Error("刷新配置缓存失败: %v", err)
 		return
+	}
+
+	m.logger.DebugLog("获取到 %d 个配置", len(configs))
+	for _, cfg := range configs {
+		m.logger.DebugLog("配置: UUID=%s, Name=%s, Type=%s", cfg.UUID, cfg.Name, cfg.Type)
 	}
 
 	// 只保留服务器配置
@@ -346,9 +398,13 @@ func (m *ConfigListModel) refreshCache() {
 	for _, config := range configs {
 		if config.Type == model.ConfigTypeServer {
 			serverConfigs = append(serverConfigs, config)
+			m.logger.DebugLog("添加服务器配置: UUID=%s, Name=%s", config.UUID, config.Name)
+		} else {
+			m.logger.DebugLog("跳过非服务器配置: UUID=%s, Name=%s, Type=%s", config.UUID, config.Name, config.Type)
 		}
 	}
 	m.cachedConfigs = serverConfigs
+	m.logger.DebugLog("最终保留 %d 个服务器配置", len(serverConfigs))
 }
 
 // RowCount 返回行数
@@ -359,10 +415,12 @@ func (m *ConfigListModel) RowCount() int {
 // Value 获取单元格值
 func (m *ConfigListModel) Value(row, col int) interface{} {
 	if row < 0 || row >= len(m.cachedConfigs) {
+		m.logger.DebugLog("Value: 无效的行索引 %d (总行数: %d)", row, len(m.cachedConfigs))
 		return nil
 	}
 
 	config := m.cachedConfigs[row]
+
 	switch col {
 	case 0:
 		return config.Name
@@ -402,8 +460,10 @@ func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
 
 // PublishRowsReset 重置行并刷新缓存
 func (m *ConfigListModel) PublishRowsReset() {
+	m.logger.DebugLog("开始刷新配置列表")
 	m.refreshCache()
 	m.TableModelBase.PublishRowsReset()
+	m.logger.DebugLog("配置列表刷新完成，共 %d 个配置", len(m.cachedConfigs))
 }
 
 // RedirectListModel 重定向列表模型
@@ -632,6 +692,7 @@ func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 		Version: version,
 		Host:    "0.0.0.0",
 		Port:    6666,
+		Type:    model.ConfigTypeServer, // 设置为服务器配置
 		IgnoreList: []string{
 			".clientconfig",
 			".DS_Store",
@@ -639,6 +700,12 @@ func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 		},
 		FolderRedirects: []model.FolderRedirect{
 			{ServerPath: "clientmods", ClientPath: "mods"},
+		},
+		SyncFolders: []model.SyncFolder{
+			{
+				Path:     "mods",
+				SyncMode: model.SyncModePack,
+			},
 		},
 	}
 

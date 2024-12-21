@@ -110,7 +110,9 @@ func (c *SyncClient) LoadConfig() error {
 	data, err := os.ReadFile(c.configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// 如果配置文件不存在，保存当前配置
+			// 如果配置文件不存在，创建默认配置
+			c.config.Type = model.ConfigTypeClient // 设置为客户端配置
+			// 保存当前配置
 			return c.SaveConfig()
 		}
 		return fmt.Errorf("读取配置文件失败: %v", err)
@@ -129,6 +131,16 @@ func (c *SyncClient) LoadConfig() error {
 	c.config = config.Config
 	c.uuid = config.UUID
 	c.retryConfig = config.RetryConfig
+
+	// 确保类型正确设置
+	if c.config.Type == "" {
+		c.config.Type = model.ConfigTypeClient
+		// 保存更新后的配置
+		if err := c.SaveConfig(); err != nil {
+			c.logger.Error("保存配置失败: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -139,6 +151,9 @@ func (c *SyncClient) SaveConfig() error {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("创建配置目录失败: %v", err)
 	}
+
+	// 确保类型正确设置
+	c.config.Type = model.ConfigTypeClient
 
 	config := struct {
 		Config      model.Config `json:"config"`
@@ -263,8 +278,24 @@ func (c *SyncClient) syncWithServer() error {
 		return fmt.Errorf("未连接到服务器")
 	}
 
+	// 检查同步文件夹配置
+	if len(c.config.SyncFolders) == 0 {
+		c.logger.Log("没有配置同步文件夹，尝试添加默认配置")
+		// 添加默认的同步文件夹配置
+		c.config.SyncFolders = []model.SyncFolder{
+			{
+				Path:     c.config.SyncDir,
+				SyncMode: model.SyncModePack,
+			},
+		}
+	}
+
+	c.logger.Log("开始同步，共有 %d 个文件夹需要同步", len(c.config.SyncFolders))
+
 	// 遍历同步文件夹
-	for _, folder := range c.config.SyncFolders {
+	for i, folder := range c.config.SyncFolders {
+		c.logger.Log("正在同步第 %d 个文件夹: %s (模式: %s)", i+1, folder.Path, folder.SyncMode)
+
 		switch folder.SyncMode {
 		case model.SyncModePack:
 			if err := c.handlePackSync(folder); err != nil {
@@ -277,26 +308,42 @@ func (c *SyncClient) syncWithServer() error {
 		}
 	}
 
+	// 保存更新后的配置
+	if err := c.SaveConfig(); err != nil {
+		c.logger.Error("保存配置失败: %v", err)
+	}
+
 	return nil
 }
 
 // handlePackSync 处理pack模式的同步
 func (c *SyncClient) handlePackSync(folder model.SyncFolder) error {
+	c.logger.Log("开始pack模式同步")
+
 	if c.progressDisplay != nil {
 		c.progressDisplay.ResetProgress()
 		defer c.progressDisplay.ResetProgress()
 	}
 
+	// 确保目标文件夹存在
+	absPath, err := filepath.Abs(folder.Path)
+	if err != nil {
+		return fmt.Errorf("获取绝对路径失败: %v", err)
+	}
+	folder.Path = absPath
+
+	if err := os.MkdirAll(folder.Path, 0755); err != nil {
+		return fmt.Errorf("创建目标文件夹失败: %v", err)
+	}
+
 	// 发送同步请求
 	msg := ClientMessage{
-		Type: "sync_request",
-		UUID: c.uuid,
-		Payload: json.RawMessage(`{
-			"folder_path": "` + folder.Path + `",
-			"sync_mode": "` + model.SyncModePack + `",
-			"pack_md5": "` + folder.PackMD5 + `"
-		}`),
+		Type:    "sync_request",
+		UUID:    c.uuid,
+		Payload: json.RawMessage(`{"sync_mode": "pack"}`),
 	}
+
+	c.logger.Log("发送同步请求")
 
 	if err := json.NewEncoder(c.conn).Encode(msg); err != nil {
 		return fmt.Errorf("发送同步请求失败: %v", err)
@@ -317,13 +364,17 @@ func (c *SyncClient) handlePackSync(folder model.SyncFolder) error {
 		return fmt.Errorf("接收同步响应失败: %v", err)
 	}
 
+	c.logger.Log("收到同步响应: success=%v, need_pack=%v, md5=%s, message=%s",
+		response.Payload.Success, response.Payload.NeedPack,
+		response.Payload.PackMD5, response.Payload.Message)
+
 	if !response.Payload.Success {
 		return fmt.Errorf("同步请求失败: %s", response.Payload.Message)
 	}
 
 	// 如果不需要更新，直接返回
 	if !response.Payload.NeedPack {
-		c.logger.Log("文件夹 %s 无需更新", folder.Path)
+		c.logger.Log("文件已是最新版本，无需更新")
 		return nil
 	}
 
@@ -336,7 +387,7 @@ func (c *SyncClient) handlePackSync(folder model.SyncFolder) error {
 
 	// 接收压缩包
 	packPath := filepath.Join(tempDir, "pack.zip")
-	if err := c.receivePackage(folder.Path, response.Payload.PackMD5, packPath); err != nil {
+	if err := c.receivePackage(response.Payload.PackMD5, packPath); err != nil {
 		return fmt.Errorf("接收压缩包失败: %v", err)
 	}
 
@@ -349,6 +400,8 @@ func (c *SyncClient) handlePackSync(folder model.SyncFolder) error {
 		return fmt.Errorf("压缩包验证失败: %s", validation.Message)
 	}
 
+	c.logger.Log("开始解压文件到 %s", folder.Path)
+
 	// 解压文件
 	if err := common.ExtractZipPackage(packPath, folder.Path); err != nil {
 		return fmt.Errorf("解压文件失败: %v", err)
@@ -357,12 +410,20 @@ func (c *SyncClient) handlePackSync(folder model.SyncFolder) error {
 	// 更新MD5
 	folder.PackMD5 = response.Payload.PackMD5
 
-	c.logger.Log("文件夹 %s 同步完成", folder.Path)
+	// 更新配置中的文件夹信息
+	for i := range c.config.SyncFolders {
+		if c.config.SyncFolders[i].Path == folder.Path {
+			c.config.SyncFolders[i].PackMD5 = folder.PackMD5
+			break
+		}
+	}
+
+	c.logger.Log("同步完成，新的MD5: %s", folder.PackMD5)
 	return nil
 }
 
 // receivePackage 接收压缩包
-func (c *SyncClient) receivePackage(folderPath, packMD5, savePath string) error {
+func (c *SyncClient) receivePackage(packMD5, savePath string) error {
 	return c.withRetry("接收压缩包", func() error {
 		file, err := os.Create(savePath)
 		if err != nil {
@@ -373,17 +434,30 @@ func (c *SyncClient) receivePackage(folderPath, packMD5, savePath string) error 
 		offset := int64(0)
 		chunkSize := 1024 * 1024 // 1MB chunks
 
+		c.logger.Log("开始接收压缩包: md5=%s", packMD5)
+
 		for {
+			// 准备请求数据
+			payload := struct {
+				PackMD5   string `json:"pack_md5"`
+				Offset    int64  `json:"offset"`
+				ChunkSize int    `json:"chunk_size"`
+			}{
+				PackMD5:   packMD5,
+				Offset:    offset,
+				ChunkSize: chunkSize,
+			}
+
+			payloadBytes, err := json.Marshal(payload)
+			if err != nil {
+				return fmt.Errorf("序列化请求数据失败: %v", err)
+			}
+
 			// 发送传输请求
 			msg := ClientMessage{
-				Type: "pack_transfer_request",
-				UUID: c.uuid,
-				Payload: json.RawMessage(fmt.Sprintf(`{
-					"folder_path": "%s",
-					"pack_md5": "%s",
-					"offset": %d,
-					"chunk_size": %d
-				}`, folderPath, packMD5, offset, chunkSize)),
+				Type:    "pack_transfer_request",
+				UUID:    c.uuid,
+				Payload: payloadBytes,
 			}
 
 			if err := json.NewEncoder(c.conn).Encode(msg); err != nil {
