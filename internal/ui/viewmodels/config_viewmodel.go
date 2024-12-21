@@ -51,6 +51,9 @@ type ConfigViewModel struct {
 	portEdit    LineEditIface
 	syncDirEdit LineEditIface
 	ignoreEdit  *walk.TextEdit
+
+	// 缓存
+	currentConfig *model.Config
 }
 
 // NewConfigViewModel 创建新的配置视图模型
@@ -71,7 +74,17 @@ func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
 	vm.syncFolderList = NewSyncFolderListModel(vm.syncService)
 
 	// 设置配置变更回调
-	vm.syncService.SetOnConfigChanged(vm.UpdateUI)
+	vm.syncService.SetOnConfigChanged(func() {
+		vm.logger.DebugLog("触发配置变更回调")
+		// 清除缓存
+		vm.currentConfig = nil
+		// 更新所有列表模型的缓存
+		vm.configList.refreshCache()
+		vm.redirectList.refreshCache()
+		vm.syncFolderList.refreshCache()
+		// 更新UI
+		vm.UpdateUI()
+	})
 
 	return nil
 }
@@ -122,7 +135,10 @@ func (vm *ConfigViewModel) SetupUI(
 
 // UpdateUI 更新UI显示
 func (vm *ConfigViewModel) UpdateUI() {
-	config := vm.syncService.GetCurrentConfig()
+	// 获取当前配置（使用缓存）
+	config := vm.GetCurrentConfig()
+
+	// 更新UI组件
 	if config == nil {
 		// 设置默认值
 		vm.nameEdit.SetText("")
@@ -133,22 +149,21 @@ func (vm *ConfigViewModel) UpdateUI() {
 		if vm.ignoreEdit != nil {
 			vm.ignoreEdit.SetText("")
 		}
-		return
+	} else {
+		// 更新基本信息
+		vm.nameEdit.SetText(config.Name)
+		vm.versionEdit.SetText(config.Version)
+		vm.hostEdit.SetText(config.Host)
+		vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
+		vm.syncDirEdit.SetText(config.SyncDir)
+
+		// 更新忽略列表
+		if vm.ignoreEdit != nil {
+			vm.ignoreEdit.SetText(strings.Join(config.IgnoreList, "\n"))
+		}
 	}
 
-	// 更新基本信息
-	vm.nameEdit.SetText(config.Name)
-	vm.versionEdit.SetText(config.Version)
-	vm.hostEdit.SetText(config.Host)
-	vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
-	vm.syncDirEdit.SetText(config.SyncDir)
-
-	// 更新忽略列表
-	if vm.ignoreEdit != nil {
-		vm.ignoreEdit.SetText(strings.Join(config.IgnoreList, "\n"))
-	}
-
-	// 刷新表格
+	// 刷新表格（使用缓存的配置）
 	if vm.configList != nil {
 		vm.configList.PublishRowsReset()
 	}
@@ -171,7 +186,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 // SaveConfig 保存当前配置
 func (vm *ConfigViewModel) SaveConfig() error {
-	config := vm.syncService.GetCurrentConfig()
+	config := vm.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -216,7 +231,8 @@ func (vm *ConfigViewModel) SaveConfig() error {
 		return err
 	}
 
-	// 保存配置
+	// 清除缓存
+	vm.currentConfig = nil
 	return vm.syncService.Save(newConfig)
 }
 
@@ -286,42 +302,46 @@ func (vm *ConfigViewModel) IsServerRunning() bool {
 // ConfigListModel 配置列表模型
 type ConfigListModel struct {
 	walk.TableModelBase
-	syncService *service.SyncService
-	sortColumn  int
-	sortOrder   walk.SortOrder
-	filter      string
+	syncService   *service.SyncService
+	sortColumn    int
+	sortOrder     walk.SortOrder
+	filter        string
+	cachedConfigs []*model.Config
 }
 
 // NewConfigListModel 创建新的配置列表模型
 func NewConfigListModel(syncService *service.SyncService) *ConfigListModel {
-	return &ConfigListModel{
+	model := &ConfigListModel{
 		syncService: syncService,
 		sortColumn:  -1,
 	}
+	// 初始加载配置
+	model.refreshCache()
+	return model
+}
+
+// refreshCache 刷新配置缓存
+func (m *ConfigListModel) refreshCache() {
+	configs, err := m.syncService.ListConfigs()
+	if err != nil {
+		m.cachedConfigs = nil
+		return
+	}
+	m.cachedConfigs = configs
 }
 
 // RowCount 返回行数
 func (m *ConfigListModel) RowCount() int {
-	configs, err := m.syncService.ListConfigs()
-	if err != nil {
-		// TODO: 考虑添加错误日志记录
-		return 0
-	}
-	return len(configs)
+	return len(m.cachedConfigs)
 }
 
 // Value 获取单元格值
 func (m *ConfigListModel) Value(row, col int) interface{} {
-	configs, err := m.syncService.ListConfigs()
-	if err != nil {
-		// TODO: 考虑添加错误日志记录
-		return nil
-	}
-	if row < 0 || row >= len(configs) {
+	if row < 0 || row >= len(m.cachedConfigs) {
 		return nil
 	}
 
-	config := configs[row]
+	config := m.cachedConfigs[row]
 	switch col {
 	case 0:
 		return config.Name
@@ -338,21 +358,15 @@ func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
 	m.sortColumn = col
 	m.sortOrder = order
 
-	configs, err := m.syncService.ListConfigs()
-	if err != nil {
-		// TODO: 考虑添加错误日志记录
-		return err
-	}
-
-	sort.Slice(configs, func(i, j int) bool {
+	sort.Slice(m.cachedConfigs, func(i, j int) bool {
 		var less bool
 		switch col {
 		case 0:
-			less = configs[i].Name < configs[j].Name
+			less = m.cachedConfigs[i].Name < m.cachedConfigs[j].Name
 		case 1:
-			less = configs[i].Version < configs[j].Version
+			less = m.cachedConfigs[i].Version < m.cachedConfigs[j].Version
 		case 2:
-			less = configs[i].SyncDir < configs[j].SyncDir
+			less = m.cachedConfigs[i].SyncDir < m.cachedConfigs[j].SyncDir
 		}
 
 		if order == walk.SortDescending {
@@ -365,10 +379,17 @@ func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
 	return nil
 }
 
+// PublishRowsReset 重置行并刷新缓存
+func (m *ConfigListModel) PublishRowsReset() {
+	m.refreshCache()
+	m.TableModelBase.PublishRowsReset()
+}
+
 // RedirectListModel 重定向列表模型
 type RedirectListModel struct {
 	walk.TableModelBase
-	syncService *service.SyncService
+	syncService   *service.SyncService
+	currentConfig *model.Config
 }
 
 // NewRedirectListModel 创建新的重定向列表模型
@@ -378,23 +399,32 @@ func NewRedirectListModel(syncService *service.SyncService) *RedirectListModel {
 	}
 }
 
+// refreshCache 刷新缓存
+func (m *RedirectListModel) refreshCache() {
+	m.currentConfig = m.syncService.GetCurrentConfig()
+}
+
 // RowCount 返回行数
 func (m *RedirectListModel) RowCount() int {
-	config := m.syncService.GetCurrentConfig()
-	if config == nil {
+	if m.currentConfig == nil {
+		m.refreshCache()
+	}
+	if m.currentConfig == nil {
 		return 0
 	}
-	return len(config.FolderRedirects)
+	return len(m.currentConfig.FolderRedirects)
 }
 
 // Value 获取单元格值
 func (m *RedirectListModel) Value(row, col int) interface{} {
-	config := m.syncService.GetCurrentConfig()
-	if config == nil || row < 0 || row >= len(config.FolderRedirects) {
+	if m.currentConfig == nil {
+		m.refreshCache()
+	}
+	if m.currentConfig == nil || row < 0 || row >= len(m.currentConfig.FolderRedirects) {
 		return nil
 	}
 
-	redirect := config.FolderRedirects[row]
+	redirect := m.currentConfig.FolderRedirects[row]
 	switch col {
 	case 0:
 		return redirect.ServerPath
@@ -404,10 +434,17 @@ func (m *RedirectListModel) Value(row, col int) interface{} {
 	return nil
 }
 
+// PublishRowsReset 重置行并刷新缓存
+func (m *RedirectListModel) PublishRowsReset() {
+	m.refreshCache()
+	m.TableModelBase.PublishRowsReset()
+}
+
 // SyncFolderListModel 同步文件夹列表模型
 type SyncFolderListModel struct {
 	walk.TableModelBase
-	syncService *service.SyncService
+	syncService   *service.SyncService
+	currentConfig *model.Config
 }
 
 // NewSyncFolderListModel 创建新的同步文件夹列表模型
@@ -417,23 +454,32 @@ func NewSyncFolderListModel(syncService *service.SyncService) *SyncFolderListMod
 	}
 }
 
+// refreshCache 刷新缓存
+func (m *SyncFolderListModel) refreshCache() {
+	m.currentConfig = m.syncService.GetCurrentConfig()
+}
+
 // RowCount 返回行数
 func (m *SyncFolderListModel) RowCount() int {
-	config := m.syncService.GetCurrentConfig()
-	if config == nil {
+	if m.currentConfig == nil {
+		m.refreshCache()
+	}
+	if m.currentConfig == nil {
 		return 0
 	}
-	return len(config.SyncFolders)
+	return len(m.currentConfig.SyncFolders)
 }
 
 // Value 获取单元格值
 func (m *SyncFolderListModel) Value(row, col int) interface{} {
-	config := m.syncService.GetCurrentConfig()
-	if config == nil || row < 0 || row >= len(config.SyncFolders) {
+	if m.currentConfig == nil {
+		m.refreshCache()
+	}
+	if m.currentConfig == nil || row < 0 || row >= len(m.currentConfig.SyncFolders) {
 		return nil
 	}
 
-	folder := config.SyncFolders[row]
+	folder := m.currentConfig.SyncFolders[row]
 	switch col {
 	case 0:
 		return folder.Path
@@ -441,7 +487,7 @@ func (m *SyncFolderListModel) Value(row, col int) interface{} {
 		return folder.SyncMode
 	case 2:
 		// 检查文件夹是否存在
-		if _, err := os.Stat(filepath.Join(config.SyncDir, folder.Path)); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(m.currentConfig.SyncDir, folder.Path)); os.IsNotExist(err) {
 			return "×"
 		}
 		return "√"
@@ -449,9 +495,22 @@ func (m *SyncFolderListModel) Value(row, col int) interface{} {
 	return nil
 }
 
-// GetCurrentConfig 获取当前配置
+// PublishRowsReset 重置行并刷新缓存
+func (m *SyncFolderListModel) PublishRowsReset() {
+	m.refreshCache()
+	m.TableModelBase.PublishRowsReset()
+}
+
+// GetCurrentConfig 获取当前配置（使用缓存）
 func (vm *ConfigViewModel) GetCurrentConfig() *model.Config {
-	return vm.syncService.GetCurrentConfig()
+	if vm.currentConfig == nil {
+		// 只在缓存为空时记录日志
+		vm.currentConfig = vm.syncService.GetCurrentConfig()
+		if vm.currentConfig == nil {
+			vm.logger.DebugLog("当前没有选中的配置")
+		}
+	}
+	return vm.currentConfig
 }
 
 // UpdateSyncFolder 更新同步文件夹
@@ -528,9 +587,13 @@ func (vm *ConfigViewModel) ListConfigs() ([]*model.Config, error) {
 
 // LoadConfig 加载配置
 func (vm *ConfigViewModel) LoadConfig(uuid string) error {
+	// 先清除缓存，确保加载新配置
+	vm.currentConfig = nil
+
 	if err := vm.syncService.LoadConfig(uuid); err != nil {
 		return err
 	}
+
 	vm.UpdateUI()
 	return nil
 }
