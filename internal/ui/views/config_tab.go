@@ -192,10 +192,12 @@ func (t *ConfigTab) Setup() error {
 														Label{Text: "同步模式:"},
 														ComboBox{
 															AssignTo: &modeComboBox,
-															Model:    []string{"mirror", "push"},
+															Model:    []string{"mirror", "push", "pack"},
 															CurrentIndex: func() int {
 																if config.SyncFolders[index].SyncMode == "push" {
 																	return 1
+																} else if config.SyncFolders[index].SyncMode == "pack" {
+																	return 2
 																}
 																return 0
 															}(),
@@ -623,7 +625,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 			Label{Text: "同步模式:"},
 			ComboBox{
 				AssignTo: &modeComboBox,
-				Model:    []string{"mirror", "push"},
+				Model:    []string{"mirror", "push", "pack"},
 			},
 		},
 	}.Create(NewBuilder(dlg))); err != nil {

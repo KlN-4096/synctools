@@ -1,18 +1,87 @@
+/*
+Package service 实现了同步工具的业务逻辑层。
+
+主要功能：
+- 同步服务管理
+- 配置管理
+- 状态追踪
+- 进度报告
+
+支持的同步模式：
+- mirror: 镜像模式，完全同步
+- push: 推送模式，单向同步
+- pack: 压缩包模式，整体同步
+*/
+
 package service
 
 import (
 	"fmt"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"synctools/internal/model"
+	"synctools/pkg/common"
 )
 
-// SyncProgress 同步进度信息
+// PackProgress 压缩包同步进度
+type PackProgress struct {
+	FolderPath  string  `json:"folder_path"`  // 文件夹路径
+	TotalSize   int64   `json:"total_size"`   // 总大小
+	CurrentSize int64   `json:"current_size"` // 当前大小
+	Percentage  float64 `json:"percentage"`   // 完成百分比
+	Status      string  `json:"status"`       // 状态描述
+}
+
+// SyncProgress 同步进度
 type SyncProgress struct {
-	TotalFiles     int    `json:"total_files"`
-	ProcessedFiles int    `json:"processed_files"`
-	CurrentFile    string `json:"current_file"`
-	Status         string `json:"status"`
+	TotalFiles     int64  `json:"total_files"`     // 总文件数
+	ProcessedFiles int64  `json:"processed_files"` // 已处理文件数
+	CurrentFile    string `json:"current_file"`    // 当前处理的文件
+	Status         string `json:"status"`          // 状态描述
+	BytesTotal     int64  `json:"bytes_total"`     // 总字节数
+	BytesProcessed int64  `json:"bytes_processed"` // 已处理字节数
+	PackMode       bool   `json:"pack_mode"`       // 是否为pack模式
+	PackMD5        string `json:"pack_md5"`        // pack模式下的MD5值
+}
+
+// NewSyncProgress 创建新的同步进度
+func NewSyncProgress() *SyncProgress {
+	return &SyncProgress{
+		Status: "准备就绪",
+	}
+}
+
+// UpdateProgress 更新进度
+func (p *SyncProgress) UpdateProgress(processed, total int64, current, status string) {
+	p.ProcessedFiles = processed
+	p.TotalFiles = total
+	p.CurrentFile = current
+	p.Status = status
+}
+
+// UpdatePackProgress 更新pack模式进度
+func (p *SyncProgress) UpdatePackProgress(processed, total int64, md5, status string) {
+	p.BytesProcessed = processed
+	p.BytesTotal = total
+	p.PackMode = true
+	p.PackMD5 = md5
+	p.Status = status
+}
+
+// GetPercentage 获取完成百分比
+func (p *SyncProgress) GetPercentage() float64 {
+	if p.PackMode {
+		if p.BytesTotal > 0 {
+			return float64(p.BytesProcessed) / float64(p.BytesTotal) * 100
+		}
+	} else {
+		if p.TotalFiles > 0 {
+			return float64(p.ProcessedFiles) / float64(p.TotalFiles) * 100
+		}
+	}
+	return 0
 }
 
 // SyncService 同步服务
@@ -24,6 +93,8 @@ type SyncService struct {
 	runningMux       sync.RWMutex
 	progressCallback func(*SyncProgress)
 	onConfigChanged  func()
+	clientStates     map[string]*model.ClientState
+	statesMux        sync.RWMutex
 }
 
 // NewSyncService 创建新的同步服务
@@ -31,6 +102,7 @@ func NewSyncService(configManager model.ConfigManager, logger model.Logger) *Syn
 	s := &SyncService{
 		configManager: configManager,
 		logger:        logger,
+		clientStates:  make(map[string]*model.ClientState),
 	}
 
 	// 设置配置管理器的变更回调
@@ -196,4 +268,64 @@ func (s *SyncService) SetServer(server model.Server) {
 // SetOnConfigChanged 设置配置变更回调
 func (s *SyncService) SetOnConfigChanged(callback func()) {
 	s.onConfigChanged = callback
+}
+
+// GetClientState 获取客户端状态
+func (s *SyncService) GetClientState(uuid string) *model.ClientState {
+	s.statesMux.RLock()
+	defer s.statesMux.RUnlock()
+
+	if state, exists := s.clientStates[uuid]; exists {
+		return state
+	}
+
+	state := &model.ClientState{
+		UUID:         uuid,
+		LastSyncTime: time.Now().Unix(),
+		FolderStates: make(map[string]model.PackState),
+		IsOnline:     false,
+	}
+	s.clientStates[uuid] = state
+	return state
+}
+
+// UpdateClientState 更新客户端状态
+func (s *SyncService) UpdateClientState(state *model.ClientState) error {
+	s.statesMux.Lock()
+	defer s.statesMux.Unlock()
+
+	s.clientStates[state.UUID] = state
+	return nil
+}
+
+// RemoveClientState 移除客户端状态
+func (s *SyncService) RemoveClientState(uuid string) error {
+	s.statesMux.Lock()
+	defer s.statesMux.Unlock()
+
+	delete(s.clientStates, uuid)
+	return nil
+}
+
+// ListClientStates 列出所有客户端状态
+func (s *SyncService) ListClientStates() ([]*model.ClientState, error) {
+	s.statesMux.RLock()
+	defer s.statesMux.RUnlock()
+
+	states := make([]*model.ClientState, 0, len(s.clientStates))
+	for _, state := range s.clientStates {
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+// CleanupOldPacks 清理旧的压缩包
+func (s *SyncService) CleanupOldPacks(maxAge time.Duration) error {
+	config := s.configManager.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	packDir := filepath.Join(config.SyncDir, "packs")
+	return common.CleanupTempFiles(packDir, maxAge)
 }

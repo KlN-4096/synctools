@@ -9,9 +9,27 @@ import (
 	"os"
 )
 
+/*
+Package model 定义了同步工具的核心领域模型和接口。
+
+主要组件：
+- Config: 配置管理
+- SyncFolder: 同步文件夹定义
+- FileInfo: 文件信息
+- ClientState: 客户端状态管理
+- Logger: 日志接口
+- Server: 服务器接口
+
+同步模式：
+- mirror: 镜像模式，完全同步
+- push: 推送模式，单向同步
+- pack: 压缩包模式，整体同步
+*/
+
 // Config 同步配置
 type Config struct {
 	UUID            string           `json:"uuid"`             // 配置文件唯一标识
+	Type            string           `json:"type"`             // 配置类型: "server" 或 "client"
 	Name            string           `json:"name"`             // 整合包名称
 	Version         string           `json:"version"`          // 整合包版本
 	Host            string           `json:"host"`             // 服务器主机地址
@@ -22,6 +40,12 @@ type Config struct {
 	FolderRedirects []FolderRedirect `json:"folder_redirects"` // 文件夹重定向配置
 }
 
+// 配置类型常量
+const (
+	ConfigTypeServer = "server" // 服务器配置
+	ConfigTypeClient = "client" // 客户端配置
+)
+
 // Validate 验证配置是否有效
 func (c *Config) Validate() error {
 	if c.Name == "" {
@@ -29,6 +53,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Version == "" {
 		return fmt.Errorf("版本不能为空")
+	}
+	if c.Type == "" {
+		return fmt.Errorf("配置类型不能为空")
+	}
+	if c.Type != ConfigTypeServer && c.Type != ConfigTypeClient {
+		return fmt.Errorf("无效的配置类型: %s", c.Type)
 	}
 	if c.Host == "" {
 		return fmt.Errorf("主机地址不能为空")
@@ -45,7 +75,9 @@ func (c *Config) Validate() error {
 		if folder.Path == "" {
 			return fmt.Errorf("同步文件夹路径不能为空")
 		}
-		if folder.SyncMode != "mirror" && folder.SyncMode != "push" {
+		if folder.SyncMode != SyncModeMirror &&
+			folder.SyncMode != SyncModePush &&
+			folder.SyncMode != SyncModePack {
 			return fmt.Errorf("无效的同步模式: %s", folder.SyncMode)
 		}
 	}
@@ -57,6 +89,7 @@ func (c *Config) Validate() error {
 func (c *Config) Clone() *Config {
 	clone := &Config{
 		UUID:    c.UUID,
+		Type:    c.Type,
 		Name:    c.Name,
 		Version: c.Version,
 		Host:    c.Host,
@@ -88,7 +121,8 @@ func (c *Config) Clone() *Config {
 // SyncFolder 同步文件夹配置
 type SyncFolder struct {
 	Path     string `json:"path"`      // 文件夹路径
-	SyncMode string `json:"sync_mode"` // 同步模式: "mirror" 或 "push"
+	SyncMode string `json:"sync_mode"` // 同步模式: "mirror"、"push" 或 "pack"
+	PackMD5  string `json:"pack_md5"`  // pack模式下的压缩包MD5
 }
 
 // FolderRedirect 文件夹重定向配置
@@ -214,4 +248,54 @@ type Server interface {
 
 	// IsRunning 检查服务器是否正在运行
 	IsRunning() bool
+}
+
+// 同步模式常量
+const (
+	SyncModeMirror = "mirror" // 镜像模式
+	SyncModePush   = "push"   // 推送模式
+	SyncModePack   = "pack"   // 压缩包模式
+)
+
+// PackState 压缩包状态
+type PackState struct {
+	PackPath    string `json:"pack_path"`    // 压缩包路径
+	MD5         string `json:"md5"`          // MD5校验值
+	CreateTime  int64  `json:"create_time"`  // 创建时间
+	LastSynced  int64  `json:"last_synced"`  // 最后同步时间
+	Size        int64  `json:"size"`         // 压缩包大小
+	IsTemporary bool   `json:"is_temporary"` // 是否为临时文件
+}
+
+// ClientState 客户端状态
+type ClientState struct {
+	UUID         string               `json:"uuid"`           // 客户端UUID
+	LastSyncTime int64                `json:"last_sync_time"` // 最后同步时间
+	FolderStates map[string]PackState `json:"folder_states"`  // 文件夹状态映射
+	IsOnline     bool                 `json:"is_online"`      // 是否在线
+	Version      string               `json:"version"`        // 客户端版本
+}
+
+// StateManager 状态管理接口
+type StateManager interface {
+	// GetClientState 获取客户端状态
+	GetClientState(uuid string) (*ClientState, error)
+
+	// UpdateClientState 更新客户端状态
+	UpdateClientState(state *ClientState) error
+
+	// RemoveClientState 移除客户端状态
+	RemoveClientState(uuid string) error
+
+	// ListClientStates 列出所有客户端状态
+	ListClientStates() ([]*ClientState, error)
+}
+
+// PackProgress 压缩包同步进度
+type PackProgress struct {
+	FolderPath  string  `json:"folder_path"`  // 文件夹路径
+	TotalSize   int64   `json:"total_size"`   // 总大小
+	CurrentSize int64   `json:"current_size"` // 当前大小
+	Percentage  float64 `json:"percentage"`   // 完成百分比
+	Status      string  `json:"status"`       // 状态描述
 }

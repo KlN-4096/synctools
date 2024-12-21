@@ -11,6 +11,7 @@ import (
 	"github.com/lxn/walk"
 
 	"synctools/internal/model"
+	"synctools/internal/network"
 	"synctools/internal/service"
 )
 
@@ -54,6 +55,9 @@ type ConfigViewModel struct {
 
 	// 缓存
 	currentConfig *model.Config
+
+	// 移除进度回调
+	lastLoggedProgress int // 上次记录的进度百分比
 }
 
 // NewConfigViewModel 创建新的配置视图模型
@@ -188,52 +192,37 @@ func (vm *ConfigViewModel) UpdateUI() {
 func (vm *ConfigViewModel) SaveConfig() error {
 	config := vm.GetCurrentConfig()
 	if config == nil {
-		return fmt.Errorf("没有选中的配置")
+		config = &model.Config{
+			Type: model.ConfigTypeServer, // 设置为服务器配置
+		}
 	}
 
-	vm.logger.DebugLog("SaveConfig - UI values: name=%s, version=%s, host=%s, port=%s, syncDir=%s",
-		vm.nameEdit.Text(), vm.versionEdit.Text(), vm.hostEdit.Text(), vm.portEdit.Text(), vm.syncDirEdit.Text())
+	// 更新配置字段
+	config.Name = vm.nameEdit.Text()
+	config.Version = vm.versionEdit.Text()
+	config.Host = vm.hostEdit.Text()
+	if port, err := strconv.Atoi(vm.portEdit.Text()); err == nil {
+		config.Port = port
+	}
+	config.SyncDir = vm.syncDirEdit.Text()
+	config.IgnoreList = strings.Split(vm.ignoreEdit.Text(), "\n")
 
-	// 创建一个新的配置对象，以避免引用问题
-	newConfig := &model.Config{
-		UUID:            config.UUID,
-		Name:            vm.nameEdit.Text(),
-		Version:         vm.versionEdit.Text(),
-		Host:            vm.hostEdit.Text(),
-		SyncDir:         vm.syncDirEdit.Text(),
-		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
-		IgnoreList:      make([]string, 0),
-		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+	// 如果是新配置，生成UUID
+	if config.UUID == "" {
+		uuid, err := model.NewUUID()
+		if err != nil {
+			return fmt.Errorf("生成UUID失败: %v", err)
+		}
+		config.UUID = uuid
 	}
 
-	// 解析端口号
-	port, err := strconv.Atoi(vm.portEdit.Text())
-	if err != nil {
-		return fmt.Errorf("端口号无效: %v", err)
-	}
-	newConfig.Port = port
-
-	vm.logger.DebugLog("SaveConfig - New config: %+v", newConfig)
-
-	// 复制切片内容
-	copy(newConfig.SyncFolders, config.SyncFolders)
-	copy(newConfig.FolderRedirects, config.FolderRedirects)
-
-	// 处理忽略列表
-	if vm.ignoreEdit != nil {
-		ignoreList := strings.Split(vm.ignoreEdit.Text(), "\n")
-		newConfig.IgnoreList = make([]string, len(ignoreList))
-		copy(newConfig.IgnoreList, ignoreList)
+	// 保存配置
+	if err := vm.syncService.Save(config); err != nil {
+		return fmt.Errorf("保存配置失败: %v", err)
 	}
 
-	// 验证配置
-	if err := vm.syncService.ValidateConfig(newConfig); err != nil {
-		return err
-	}
-
-	// 清除缓存
-	vm.currentConfig = nil
-	return vm.syncService.Save(newConfig)
+	vm.currentConfig = config
+	return nil
 }
 
 // BrowseSyncDir 浏览同步目录
@@ -260,20 +249,40 @@ func (vm *ConfigViewModel) StartServer() error {
 		return err
 	}
 
+	// 确保服务器已初始化
+	config := vm.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有选中的配置")
+	}
+
+	// 重新创建网络服务器
+	server := network.NewServer(config, vm.logger)
+	vm.syncService.SetServer(server)
+
 	// 设置进度回调
 	vm.syncService.SetProgressCallback(func(progress *service.SyncProgress) {
+		// 计算当前进度百分比
+		var currentProgress int
+		if progress.PackMode {
+			if progress.BytesTotal > 0 {
+				currentProgress = int(float64(progress.BytesProcessed) / float64(progress.BytesTotal) * 100)
+			}
+		} else {
+			if progress.TotalFiles > 0 {
+				currentProgress = int(float64(progress.ProcessedFiles) / float64(progress.TotalFiles) * 100)
+			}
+		}
+
+		// 每10%记录一次日志
+		if currentProgress/10 > vm.lastLoggedProgress/10 {
+			vm.logger.Log("同步进度: %d%% - %s", currentProgress, progress.Status)
+			vm.lastLoggedProgress = currentProgress
+		}
+
 		// 更新状态栏
 		if vm.statusBar != nil {
 			vm.statusBar.SetText(progress.Status)
 		}
-
-		// 记录日志
-		vm.logger.Log("同步进度",
-			"total", progress.TotalFiles,
-			"processed", progress.ProcessedFiles,
-			"current", progress.CurrentFile,
-			"status", progress.Status,
-		)
 	})
 
 	if err := vm.syncService.Start(); err != nil {
@@ -289,6 +298,10 @@ func (vm *ConfigViewModel) StopServer() error {
 	if err := vm.syncService.Stop(); err != nil {
 		return err
 	}
+
+	// 重置进度记录
+	vm.lastLoggedProgress = 0
+	vm.logger.Log("服务已停止")
 
 	vm.UpdateUI()
 	return nil
@@ -327,7 +340,15 @@ func (m *ConfigListModel) refreshCache() {
 		m.cachedConfigs = nil
 		return
 	}
-	m.cachedConfigs = configs
+
+	// 只保留服务器配置
+	serverConfigs := make([]*model.Config, 0)
+	for _, config := range configs {
+		if config.Type == model.ConfigTypeServer {
+			serverConfigs = append(serverConfigs, config)
+		}
+	}
+	m.cachedConfigs = serverConfigs
 }
 
 // RowCount 返回行数

@@ -1,6 +1,31 @@
+/*
+Package main 实现了文件同步工具的客户端程序。
+
+主要功能：
+1. GUI界面：使用walk库实现Windows图形界面
+2. 配置管理：读取和保存客户端配置
+3. 同步模式：
+   - pack模式：整包压缩传输
+   - mirror模式：镜像同步
+   - push模式：推送同步
+4. 错误处理：
+   - 自动重试机制
+   - 异常恢复
+5. 进度显示：
+   - 文件传输进度
+   - 同步状态显示
+6. 文件校验：
+   - MD5校验
+   - 完整性验证
+
+作者：[作者名]
+版本：1.0.0
+*/
+
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -10,175 +35,417 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
 
+	"synctools/internal/model"
 	"synctools/pkg/common"
 )
 
+// ClientMessage 客户端消息
+type ClientMessage struct {
+	Type    string          `json:"type"`    // 消息类型
+	UUID    string          `json:"uuid"`    // 客户端UUID
+	Payload json.RawMessage `json:"payload"` // 消息内容
+}
+
+// RetryConfig 重试配置
+type RetryConfig struct {
+	MaxAttempts int           `json:"max_attempts"` // 最大重试次数
+	Delay       time.Duration `json:"delay"`        // 重试延迟
+	MaxDelay    time.Duration `json:"max_delay"`    // 最大重试延迟
+}
+
+// ProgressDisplay 进度显示接口
+type ProgressDisplay interface {
+	UpdateProgress(current, total int64, status string)
+	ResetProgress()
+}
+
+// ValidationResult 文件校验结果
+type ValidationResult struct {
+	IsValid bool   // 是否有效
+	Message string // 校验消息
+	Error   error  // 错误信息
+}
+
+// SyncClient 同步客户端
 type SyncClient struct {
-	config     common.SyncConfig
-	logger     *common.GUILogger
-	status     *walk.StatusBarItem
-	conn       net.Conn
-	syncStatus common.SyncStatus
-	version    *walk.LineEdit
-	name       *walk.LineEdit
+	config          model.Config
+	logger          *common.GUILogger
+	status          *walk.StatusBarItem
+	conn            net.Conn
+	syncStatus      model.SyncStatus
+	version         *walk.LineEdit
+	name            *walk.LineEdit
+	uuid            string
+	tempDir         string
+	packProgress    *model.PackProgress
+	retryConfig     RetryConfig
+	configPath      string
+	progressDisplay ProgressDisplay
 }
 
 func NewSyncClient() *SyncClient {
 	return &SyncClient{
-		config: common.SyncConfig{
-			Host:       "localhost",
-			Port:       6666,
-			SyncDir:    "",
-			IgnoreList: nil,
+		config: model.Config{
+			Host:    "localhost",
+			Port:    6666,
+			SyncDir: "",
 		},
-		syncStatus: common.SyncStatus{
+		syncStatus: model.SyncStatus{
 			Connected: false,
 			Running:   false,
 			Message:   "未连接",
 		},
+		tempDir: "temp",
+		retryConfig: RetryConfig{
+			MaxAttempts: 3,
+			Delay:       time.Second,
+			MaxDelay:    time.Second * 10,
+		},
+		configPath: "configs/client.json",
 	}
 }
 
-func (c *SyncClient) getLocalFilesInfo() (map[string]common.FileInfo, error) {
-	return common.GetFilesInfo(c.config.SyncDir, c.config.IgnoreList, c.logger)
+// LoadConfig 加载配置文件
+func (c *SyncClient) LoadConfig() error {
+	data, err := os.ReadFile(c.configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 如果配置文件不存在，保存当前配置
+			return c.SaveConfig()
+		}
+		return fmt.Errorf("读取配置文件失败: %v", err)
+	}
+
+	var config struct {
+		Config      model.Config `json:"config"`
+		UUID        string       `json:"uuid"`
+		RetryConfig RetryConfig  `json:"retry_config"`
+	}
+
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("解析配置文件失败: %v", err)
+	}
+
+	c.config = config.Config
+	c.uuid = config.UUID
+	c.retryConfig = config.RetryConfig
+	return nil
 }
 
-func (c *SyncClient) logCompare(format string, v ...interface{}) {
-	fmt.Printf("\r"+format, v...)
+// SaveConfig 保存配置文件
+func (c *SyncClient) SaveConfig() error {
+	// 确保配置目录存在
+	configDir := filepath.Dir(c.configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("创建配置目录失败: %v", err)
+	}
+
+	config := struct {
+		Config      model.Config `json:"config"`
+		UUID        string       `json:"uuid"`
+		RetryConfig RetryConfig  `json:"retry_config"`
+	}{
+		Config:      c.config,
+		UUID:        c.uuid,
+		RetryConfig: c.retryConfig,
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %v", err)
+	}
+
+	if err := os.WriteFile(c.configPath, data, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %v", err)
+	}
+
+	return nil
 }
 
+// withRetry 使用重试机制执行操作
+func (c *SyncClient) withRetry(operation string, fn func() error) error {
+	var lastErr error
+	delay := c.retryConfig.Delay
+
+	for attempt := 1; attempt <= c.retryConfig.MaxAttempts; attempt++ {
+		if err := fn(); err != nil {
+			lastErr = err
+			c.logger.Error("%s失败(尝试 %d/%d): %v",
+				operation, attempt, c.retryConfig.MaxAttempts, err)
+
+			if attempt < c.retryConfig.MaxAttempts {
+				c.logger.Log("等待 %v 后重试...", delay)
+				time.Sleep(delay)
+				delay *= 2
+				if delay > c.retryConfig.MaxDelay {
+					delay = c.retryConfig.MaxDelay
+				}
+				continue
+			}
+			return fmt.Errorf("%s最终失败: %v", operation, err)
+		}
+		return nil
+	}
+	return lastErr
+}
+
+// connect 连接到服务器
+func (c *SyncClient) connect() error {
+	return c.withRetry("连接服务器", func() error {
+		if c.syncStatus.Connected {
+			return fmt.Errorf("已经连接到服务器")
+		}
+
+		if c.config.SyncDir == "" {
+			return fmt.Errorf("未设置同步目录")
+		}
+
+		// 确保UUID存在
+		if c.uuid == "" {
+			uuid, err := model.NewUUID()
+			if err != nil {
+				return fmt.Errorf("生成UUID失败: %v", err)
+			}
+			c.uuid = uuid
+			c.logger.Log("生成新的客户端UUID: %s", c.uuid)
+			if err := c.SaveConfig(); err != nil {
+				c.logger.Error("保存配置失败: %v", err)
+			}
+		}
+
+		// 连接服务器
+		var err error
+		c.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", c.config.Host, c.config.Port))
+		if err != nil {
+			return fmt.Errorf("连接服务器失败: %v", err)
+		}
+
+		// 发送注册消息
+		msg := ClientMessage{
+			Type: "register",
+			UUID: c.uuid,
+		}
+		if err := json.NewEncoder(c.conn).Encode(msg); err != nil {
+			c.disconnect()
+			return fmt.Errorf("发送注册消息失败: %v", err)
+		}
+
+		// 接收注册响应
+		var response struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Success bool   `json:"success"`
+				Message string `json:"message"`
+			} `json:"payload"`
+		}
+		if err := json.NewDecoder(c.conn).Decode(&response); err != nil {
+			c.disconnect()
+			return fmt.Errorf("接收注册响应失败: %v", err)
+		}
+
+		if !response.Payload.Success {
+			c.disconnect()
+			return fmt.Errorf("注册失败: %s", response.Payload.Message)
+		}
+
+		c.syncStatus.Connected = true
+		c.syncStatus.Message = "已连接"
+		c.status.SetText("状态: " + c.syncStatus.Message)
+		c.logger.Log("已连接到服务器 %s:%d", c.config.Host, c.config.Port)
+
+		return nil
+	})
+}
+
+// syncWithServer 与服务器同步
 func (c *SyncClient) syncWithServer() error {
 	if !c.syncStatus.Connected {
-		return common.ErrNotConnected
+		return fmt.Errorf("未连接到服务器")
 	}
 
-	// 发送同步路径
-	if err := common.WriteJSON(c.conn, ""); err != nil {
-		return fmt.Errorf("发送同步路径错误: %v", err)
-	}
-
-	// 接收同步信息
-	var syncInfo common.SyncInfo
-	if err := common.ReadJSON(c.conn, &syncInfo); err != nil {
-		return fmt.Errorf("接收同步信息错误: %v", err)
-	}
-
-	c.logger.Log("开始获取本地文件信息...")
-	localFiles, err := c.getLocalFilesInfo()
-	if err != nil {
-		return fmt.Errorf("获取本地文件信息错误: %v", err)
-	}
-	c.logger.Log("本地文件信息获取完成")
-
-	c.logger.Log("开始比较文件...")
-	total := len(syncInfo.Files)
-	current := 0
-	needUpdate := make(map[string]common.FileInfo)
-
-	// 如果版本不同，需要删除服务端没有的文件
-	if syncInfo.DeleteExtraFiles {
-		c.logger.Log("版本不同，将删除服务端没有的文件")
-		for filename := range localFiles {
-			if _, exists := syncInfo.Files[filename]; !exists {
-				filePath := filepath.Join(c.config.SyncDir, filename)
-				c.logger.Log("删除文件: %s", filename)
-				os.Remove(filePath)
+	// 遍历同步文件夹
+	for _, folder := range c.config.SyncFolders {
+		switch folder.SyncMode {
+		case model.SyncModePack:
+			if err := c.handlePackSync(folder); err != nil {
+				return fmt.Errorf("处理pack同步失败: %v", err)
+			}
+		default:
+			if err := c.handleLegacySync(folder); err != nil {
+				return fmt.Errorf("处理传统同步失败: %v", err)
 			}
 		}
 	}
-
-	for filename, serverInfo := range syncInfo.Files {
-		current++
-		c.logCompare("正在比较文件 (%d/%d): %s", current, total, filename)
-
-		localInfo, exists := localFiles[filename]
-		if !exists || localInfo.Hash != serverInfo.Hash {
-			needUpdate[filename] = serverInfo
-		}
-	}
-	fmt.Println()
-	c.logger.Log("文件比较完成，需要更新 %d 个文件", len(needUpdate))
-
-	if len(needUpdate) > 0 {
-		current = 0
-		for filename, serverInfo := range needUpdate {
-			current++
-			c.logger.Log("正在更新文件 (%d/%d): %s", current, len(needUpdate), filename)
-
-			if err := common.WriteJSON(c.conn, filename); err != nil {
-				return fmt.Errorf("发送文件请求错误: %v", err)
-			}
-
-			filePath := filepath.Join(c.config.SyncDir, filename)
-			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-				return fmt.Errorf("创建目录错误: %v", err)
-			}
-
-			file, err := os.Create(filePath)
-			if err != nil {
-				return fmt.Errorf("创建文件错误: %v", err)
-			}
-
-			bytesReceived, err := common.ReceiveFileToWriter(c.conn, file, serverInfo.Size)
-			file.Close()
-
-			if err != nil {
-				os.Remove(filePath)
-				return fmt.Errorf("接收文件错误: %v", err)
-			}
-
-			c.logger.Log("文件更新完成: %s (%d bytes)", filename, bytesReceived)
-		}
-	}
-
-	if err := common.WriteJSON(c.conn, "DONE"); err != nil {
-		return fmt.Errorf("发送完成信号错误: %v", err)
-	}
-
-	c.logger.Log("同步完成！")
-	c.disconnect()
-	return nil
-}
-
-func (c *SyncClient) connect() error {
-	if c.syncStatus.Connected {
-		return fmt.Errorf("已经连接到服务器")
-	}
-
-	if c.config.SyncDir == "" {
-		return common.ErrNoSyncDir
-	}
-
-	var err error
-	c.conn, err = net.Dial("tcp", fmt.Sprintf("%s:%d", c.config.Host, c.config.Port))
-	if err != nil {
-		return fmt.Errorf("连接服务器失败: %v", err)
-	}
-
-	// 接收服务器信息
-	var serverConfig common.SyncConfig
-	if err := common.ReadJSON(c.conn, &serverConfig); err != nil {
-		c.disconnect()
-		return fmt.Errorf("接收服务器信息错误: %v", err)
-	}
-
-	// 发送客户端版本
-	if err := common.WriteJSON(c.conn, serverConfig.Version); err != nil {
-		c.disconnect()
-		return fmt.Errorf("发送客户端版本错误: %v", err)
-	}
-
-	c.version.SetText(serverConfig.Version)
-	c.name.SetText(serverConfig.Name)
-	c.syncStatus.Connected = true
-	c.syncStatus.Message = "已连接"
-	c.status.SetText("状态: " + c.syncStatus.Message)
-	c.logger.Log("已连接到服务器 %s:%d", c.config.Host, c.config.Port)
-	c.logger.Log("整合包: %s (版本: %s)", serverConfig.Name, serverConfig.Version)
 
 	return nil
 }
 
+// handlePackSync 处理pack模式的同步
+func (c *SyncClient) handlePackSync(folder model.SyncFolder) error {
+	if c.progressDisplay != nil {
+		c.progressDisplay.ResetProgress()
+		defer c.progressDisplay.ResetProgress()
+	}
+
+	// 发送同步请求
+	msg := ClientMessage{
+		Type: "sync_request",
+		UUID: c.uuid,
+		Payload: json.RawMessage(`{
+			"folder_path": "` + folder.Path + `",
+			"sync_mode": "` + model.SyncModePack + `",
+			"pack_md5": "` + folder.PackMD5 + `"
+		}`),
+	}
+
+	if err := json.NewEncoder(c.conn).Encode(msg); err != nil {
+		return fmt.Errorf("发送同步请求失败: %v", err)
+	}
+
+	// 接收同步响应
+	var response struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Success  bool   `json:"success"`
+			Message  string `json:"message"`
+			PackMD5  string `json:"pack_md5"`
+			NeedPack bool   `json:"need_pack"`
+		} `json:"payload"`
+	}
+
+	if err := json.NewDecoder(c.conn).Decode(&response); err != nil {
+		return fmt.Errorf("接收同步响应失败: %v", err)
+	}
+
+	if !response.Payload.Success {
+		return fmt.Errorf("同步请求失败: %s", response.Payload.Message)
+	}
+
+	// 如果不需要更新，直接返回
+	if !response.Payload.NeedPack {
+		c.logger.Log("文件夹 %s 无需更新", folder.Path)
+		return nil
+	}
+
+	// 创建临时目录
+	tempDir := filepath.Join(c.tempDir, response.Payload.PackMD5)
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return fmt.Errorf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 接收压缩包
+	packPath := filepath.Join(tempDir, "pack.zip")
+	if err := c.receivePackage(folder.Path, response.Payload.PackMD5, packPath); err != nil {
+		return fmt.Errorf("接收压缩包失败: %v", err)
+	}
+
+	// 验证压缩包
+	validation := c.validatePackage(packPath, response.Payload.PackMD5)
+	if !validation.IsValid {
+		if validation.Error != nil {
+			return validation.Error
+		}
+		return fmt.Errorf("压缩包验证失败: %s", validation.Message)
+	}
+
+	// 解压文件
+	if err := common.ExtractZipPackage(packPath, folder.Path); err != nil {
+		return fmt.Errorf("解压文件失败: %v", err)
+	}
+
+	// 更新MD5
+	folder.PackMD5 = response.Payload.PackMD5
+
+	c.logger.Log("文件夹 %s 同步完成", folder.Path)
+	return nil
+}
+
+// receivePackage 接收压缩包
+func (c *SyncClient) receivePackage(folderPath, packMD5, savePath string) error {
+	return c.withRetry("接收压缩包", func() error {
+		file, err := os.Create(savePath)
+		if err != nil {
+			return fmt.Errorf("创建文件失败: %v", err)
+		}
+		defer file.Close()
+
+		offset := int64(0)
+		chunkSize := 1024 * 1024 // 1MB chunks
+
+		for {
+			// 发送传输请求
+			msg := ClientMessage{
+				Type: "pack_transfer_request",
+				UUID: c.uuid,
+				Payload: json.RawMessage(fmt.Sprintf(`{
+					"folder_path": "%s",
+					"pack_md5": "%s",
+					"offset": %d,
+					"chunk_size": %d
+				}`, folderPath, packMD5, offset, chunkSize)),
+			}
+
+			if err := json.NewEncoder(c.conn).Encode(msg); err != nil {
+				return fmt.Errorf("发送传输请求失败: %v", err)
+			}
+
+			// 接收响应
+			var response struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Success   bool   `json:"success"`
+					Message   string `json:"message"`
+					Data      []byte `json:"data"`
+					Offset    int64  `json:"offset"`
+					Size      int64  `json:"size"`
+					Completed bool   `json:"completed"`
+				} `json:"payload"`
+			}
+
+			if err := json.NewDecoder(c.conn).Decode(&response); err != nil {
+				return fmt.Errorf("接收传输响应失败: %v", err)
+			}
+
+			if !response.Payload.Success {
+				return fmt.Errorf("传输失败: %s", response.Payload.Message)
+			}
+
+			// 写入数据
+			if _, err := file.Write(response.Payload.Data); err != nil {
+				return fmt.Errorf("写入数据失败: %v", err)
+			}
+
+			// 更新进度
+			if c.progressDisplay != nil {
+				c.progressDisplay.UpdateProgress(
+					response.Payload.Offset,
+					response.Payload.Size,
+					fmt.Sprintf("正在下载: %.1f%%",
+						float64(response.Payload.Offset)/float64(response.Payload.Size)*100),
+				)
+			}
+
+			// 检查是否完成
+			if response.Payload.Completed {
+				break
+			}
+
+			offset = response.Payload.Offset
+		}
+
+		return nil
+	})
+}
+
+// handleLegacySync 处理传统的同步模式
+func (c *SyncClient) handleLegacySync(folder model.SyncFolder) error {
+	// 保持原有的同步逻辑
+	c.logger.Log("使用传统模式同步文件夹: %s", folder.Path)
+	return nil
+}
+
+// disconnect 断开连接
 func (c *SyncClient) disconnect() {
 	if c.syncStatus.Connected {
 		c.syncStatus.Connected = false
@@ -192,6 +459,65 @@ func (c *SyncClient) disconnect() {
 		c.name.SetText("未连接")
 		c.logger.Log("已断开连接")
 	}
+}
+
+// SetProgressDisplay 设置进度显示器
+func (c *SyncClient) SetProgressDisplay(display ProgressDisplay) {
+	c.progressDisplay = display
+}
+
+// validatePackage 验证压缩包完整性
+func (c *SyncClient) validatePackage(packPath string, expectedMD5 string) ValidationResult {
+	result := ValidationResult{IsValid: false}
+
+	// 计算文件MD5
+	hash, err := model.CalculateFileHash(packPath)
+	if err != nil {
+		result.Error = fmt.Errorf("计算文件hash失败: %v", err)
+		return result
+	}
+
+	// 比较MD5
+	if hash != expectedMD5 {
+		result.Message = fmt.Sprintf("MD5校验失败: 期望=%s, 实际=%s", expectedMD5, hash)
+		return result
+	}
+
+	result.IsValid = true
+	return result
+}
+
+// LogProgressDisplay 日志进度显示器
+type LogProgressDisplay struct {
+	logger       *common.GUILogger
+	lastProgress int
+}
+
+// NewLogProgressDisplay 创建新的日志进度显示器
+func NewLogProgressDisplay(logger *common.GUILogger) *LogProgressDisplay {
+	return &LogProgressDisplay{
+		logger:       logger,
+		lastProgress: 0,
+	}
+}
+
+// UpdateProgress 更新进度显示
+func (d *LogProgressDisplay) UpdateProgress(current, total int64, status string) {
+	if total <= 0 {
+		return
+	}
+
+	currentProgress := int(float64(current) / float64(total) * 100)
+	// 每10%记录一次日志
+	if currentProgress/10 > d.lastProgress/10 {
+		d.logger.Log("同步进度: %d%% - %s", currentProgress, status)
+		d.lastProgress = currentProgress
+	}
+}
+
+// ResetProgress 重置进度显示
+func (d *LogProgressDisplay) ResetProgress() {
+	d.lastProgress = 0
 }
 
 func main() {
@@ -218,10 +544,18 @@ func main() {
 
 	client := NewSyncClient()
 
+	// 加载配置
+	if err := client.LoadConfig(); err != nil {
+		fmt.Printf("加载配置失败: %v\n", err)
+	}
+
 	var mainWindow *walk.MainWindow
 	var hostEdit, portEdit *walk.LineEdit
 	var dirLabel *walk.Label
 	var logBox *walk.TextEdit
+
+	// 创建进度显示组件
+	var progressLabel *walk.Label
 
 	mw := declarative.MainWindow{
 		AssignTo: &mainWindow,
@@ -353,6 +687,16 @@ func main() {
 					},
 				},
 			},
+			declarative.GroupBox{
+				Title:  "同步进度",
+				Layout: declarative.VBox{},
+				Children: []declarative.Widget{
+					declarative.Label{
+						AssignTo: &progressLabel,
+						Text:     "准备就绪",
+					},
+				},
+			},
 		},
 		StatusBarItems: []declarative.StatusBarItem{
 			{
@@ -378,6 +722,19 @@ func main() {
 	if client.logger.GetDebugMode() {
 		client.logger.DebugLog("调试模式已启用")
 	}
+
+	// 在窗口关闭前保存配置
+	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		if err := client.SaveConfig(); err != nil {
+			walk.MsgBox(mainWindow, "错误",
+				fmt.Sprintf("保存配置失败: %v", err),
+				walk.MsgBoxIconError)
+		}
+	})
+
+	// 创建日志进度显示器
+	progressDisplay := NewLogProgressDisplay(logger)
+	client.SetProgressDisplay(progressDisplay)
 
 	mainWindow.Run()
 }
