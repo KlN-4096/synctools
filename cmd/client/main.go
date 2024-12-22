@@ -78,7 +78,7 @@ func main() {
 	)
 
 	// 初始化视图模型
-	if err := mainViewModel.Initialize(); err != nil {
+	if err := mainViewModel.Initialize(nil); err != nil {
 		logger.Fatal("初始化视图模型失败", interfaces.Fields{
 			"error": err,
 		})

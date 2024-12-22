@@ -25,23 +25,30 @@ import (
 
 // MainViewModel 主窗口视图模型
 type MainViewModel struct {
-	syncService interfaces.SyncService
-	logger      Logger
-	window      MainWindow
-	status      string
+	syncService     interfaces.SyncService
+	logger          ViewModelLogger
+	window          *walk.MainWindow
+	status          string
+	ConfigViewModel *ConfigViewModel
 }
 
 // NewMainViewModel 创建主视图模型
 func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logger) *MainViewModel {
-	return &MainViewModel{
+	vm := &MainViewModel{
 		syncService: syncService,
 		logger:      NewLoggerAdapter(logger),
 		status:      "就绪",
 	}
+
+	// 创建配置视图模型
+	vm.ConfigViewModel = NewConfigViewModel(syncService, vm.logger)
+
+	return vm
 }
 
 // Initialize 初始化视图模型
-func (vm *MainViewModel) Initialize() error {
+func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
+	vm.window = window
 	vm.logger.Info("初始化主视图模型", interfaces.Fields{
 		"status": vm.status,
 	})
@@ -52,11 +59,6 @@ func (vm *MainViewModel) Initialize() error {
 func (vm *MainViewModel) Shutdown() error {
 	vm.logger.Info("关闭主视图模型", nil)
 	return nil
-}
-
-// SetMainWindow 设置主窗口
-func (vm *MainViewModel) SetMainWindow(window MainWindow) {
-	vm.window = window
 }
 
 // GetStatus 获取状态
@@ -90,7 +92,7 @@ func (vm *MainViewModel) StartSync(path string) error {
 			"error": err,
 		})
 		if vm.window != nil {
-			_, _ = vm.window.MsgBox("同步失败", err.Error(), walk.MsgBoxIconError)
+			walk.MsgBox(vm.window, "同步失败", err.Error(), walk.MsgBoxIconError)
 		}
 		return err
 	}
@@ -114,7 +116,7 @@ func (vm *MainViewModel) HandleSyncRequest(request interface{}) error {
 			"error": err,
 		})
 		if vm.window != nil {
-			_, _ = vm.window.MsgBox("处理请求失败", err.Error(), walk.MsgBoxIconError)
+			walk.MsgBox(vm.window, "处理请求失败", err.Error(), walk.MsgBoxIconError)
 		}
 		return err
 	}
@@ -123,9 +125,21 @@ func (vm *MainViewModel) HandleSyncRequest(request interface{}) error {
 	return nil
 }
 
+// LogDebug 记录调试日志
+func (vm *MainViewModel) LogDebug(message string) {
+	vm.logger.Debug(message, nil)
+}
+
+// LogError 记录错误日志
+func (vm *MainViewModel) LogError(message string, err error) {
+	vm.logger.Error(message, interfaces.Fields{
+		"error": err,
+	})
+}
+
 // showError 显示错误消息
 func (vm *MainViewModel) showError(title, message string) {
 	if vm.window != nil {
-		_, _ = vm.window.MsgBox(title, message, walk.MsgBoxIconError)
+		walk.MsgBox(vm.window, title, message, walk.MsgBoxIconError)
 	}
 }

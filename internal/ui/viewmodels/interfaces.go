@@ -23,75 +23,6 @@ import (
 - ItemViewModel: 列表项视图模型接口
 */
 
-// LineEdit 文本输入框接口
-type LineEdit interface {
-	Text() string
-	SetText(text string) error
-}
-
-// NumberEdit 数字输入框接口
-type NumberEdit interface {
-	Value() float64
-	SetValue(value float64) error
-}
-
-// TableView 表格视图接口
-type TableView interface {
-	Model() interface{}
-	SetModel(model interface{}) error
-	CurrentIndex() int
-}
-
-// TableModel 表格模型接口
-type TableModel interface {
-	RowCount() int
-	Value(row, col int) interface{}
-	RowChanged(row int)
-	RowsChanged()
-	Sort(col int, order walk.SortOrder) error
-}
-
-// MainWindow 主窗口接口
-type MainWindow interface {
-	MsgBox(title, message string, style walk.MsgBoxStyle) (int, error)
-}
-
-// Logger 视图模型日志接口
-type Logger interface {
-	interfaces.Logger
-	SetDebugMode(enabled bool)
-	GetDebugMode() bool
-}
-
-// LoggerAdapter 日志适配器
-type LoggerAdapter struct {
-	interfaces.Logger
-	debugMode bool
-}
-
-// NewLoggerAdapter 创建新的日志适配器
-func NewLoggerAdapter(logger interfaces.Logger) Logger {
-	return &LoggerAdapter{
-		Logger:    logger,
-		debugMode: false,
-	}
-}
-
-// SetDebugMode 设置调试模式
-func (l *LoggerAdapter) SetDebugMode(enabled bool) {
-	l.debugMode = enabled
-	if enabled {
-		l.Logger.SetLevel(interfaces.DEBUG)
-	} else {
-		l.Logger.SetLevel(interfaces.INFO)
-	}
-}
-
-// GetDebugMode 获取调试模式状态
-func (l *LoggerAdapter) GetDebugMode() bool {
-	return l.debugMode
-}
-
 // ViewModel 视图模型基础接口
 type ViewModel interface {
 	Initialize() error
@@ -113,36 +44,99 @@ type EventHandler interface {
 // ListModel 列表模型接口
 type ListModel interface {
 	ItemCount() int
-	Item(index int) interface{}
-	ItemsReset()
-	ItemChanged(index int)
-	ItemsInserted(from, count int)
-	ItemsRemoved(from, count int)
+	Value(index int) interface{}
 }
 
 // ItemViewModel 列表项视图模型接口
 type ItemViewModel interface {
-	ID() string
-	Title() string
-	Description() string
-	IsSelected() bool
-	SetSelected(selected bool)
+	GetText() string
+	GetIcon() interface{}
 }
 
-// WindowAdapter walk.MainWindow 适配器
-type WindowAdapter struct {
-	*walk.MainWindow
+// Logger 日志接口
+type Logger interface {
+	Debug(message string, fields interfaces.Fields)
+	Info(message string, fields interfaces.Fields)
+	Warn(message string, fields interfaces.Fields)
+	Error(message string, fields interfaces.Fields)
+	Fatal(message string, fields interfaces.Fields)
+	DebugLog(format string, args ...interface{})
 }
 
-// NewWindowAdapter 创建新的窗口适配器
-func NewWindowAdapter(window *walk.MainWindow) MainWindow {
-	return &WindowAdapter{MainWindow: window}
+// LoggerAdapter 日志适配器
+type LoggerAdapter struct {
+	logger    interfaces.Logger
+	debugMode bool
 }
 
-// MsgBox 显示消息框
-func (w *WindowAdapter) MsgBox(title, message string, style walk.MsgBoxStyle) (int, error) {
-	result := walk.MsgBox(w.MainWindow, title, message, style)
-	return result, nil
+// NewLoggerAdapter 创建日志适配器
+func NewLoggerAdapter(logger interfaces.Logger) *LoggerAdapter {
+	return &LoggerAdapter{
+		logger:    logger,
+		debugMode: false,
+	}
+}
+
+// Debug 记录调试日志
+func (l *LoggerAdapter) Debug(message string, fields interfaces.Fields) {
+	l.logger.Debug(message, fields)
+}
+
+// Info 记录信息日志
+func (l *LoggerAdapter) Info(message string, fields interfaces.Fields) {
+	l.logger.Info(message, fields)
+}
+
+// Warn 记录警告日志
+func (l *LoggerAdapter) Warn(message string, fields interfaces.Fields) {
+	l.logger.Warn(message, fields)
+}
+
+// Error 记录错误日志
+func (l *LoggerAdapter) Error(message string, fields interfaces.Fields) {
+	l.logger.Error(message, fields)
+}
+
+// Fatal 记录致命错误日志
+func (l *LoggerAdapter) Fatal(message string, fields interfaces.Fields) {
+	l.logger.Fatal(message, fields)
+}
+
+// WithFields 添加字段
+func (l *LoggerAdapter) WithFields(fields interfaces.Fields) interfaces.Logger {
+	return l.logger.WithFields(fields)
+}
+
+// SetLevel 设置日志级别
+func (l *LoggerAdapter) SetLevel(level interfaces.LogLevel) {
+	l.logger.SetLevel(level)
+}
+
+// Log 记录普通日志
+func (l *LoggerAdapter) Log(format string, v ...interface{}) {
+	l.logger.Info(fmt.Sprintf(format, v...), nil)
+}
+
+// DebugLog 记录格式化的调试日志
+func (l *LoggerAdapter) DebugLog(format string, v ...interface{}) {
+	if l.debugMode {
+		l.logger.Debug(fmt.Sprintf(format, v...), nil)
+	}
+}
+
+// SetDebugMode 设置调试模式
+func (l *LoggerAdapter) SetDebugMode(enabled bool) {
+	l.debugMode = enabled
+	if enabled {
+		l.logger.SetLevel(interfaces.DEBUG)
+	} else {
+		l.logger.SetLevel(interfaces.INFO)
+	}
+}
+
+// GetDebugMode 获取调试模式状态
+func (l *LoggerAdapter) GetDebugMode() bool {
+	return l.debugMode
 }
 
 // CreateMainWindow 创建主窗口
@@ -161,7 +155,9 @@ func CreateMainWindow(vm *MainViewModel) error {
 		return fmt.Errorf("创建主窗口失败: %v", err)
 	}
 
-	vm.SetMainWindow(NewWindowAdapter(mainWindow))
+	if err := vm.Initialize(mainWindow); err != nil {
+		return fmt.Errorf("初始化视图模型失败: %v", err)
+	}
 
 	result := mainWindow.Run()
 	if result != 0 {

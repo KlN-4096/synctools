@@ -64,9 +64,35 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	if err := (declarative.MainWindow{
 		AssignTo: &mainWindow,
 		Title:    "同步工具",
-		MinSize:  declarative.Size{Width: 40, Height: 30},
-		Size:     declarative.Size{Width: 950, Height: 940},
+		MinSize:  declarative.Size{Width: 800, Height: 600},
+		Size:     declarative.Size{Width: 1024, Height: 768},
 		Layout:   declarative.VBox{},
+		MenuItems: []declarative.MenuItem{
+			declarative.Menu{
+				Text: "文件(&F)",
+				Items: []declarative.MenuItem{
+					declarative.Action{
+						Text:        "退出(&X)",
+						OnTriggered: func() { mainWindow.Close() },
+					},
+				},
+			},
+			declarative.Menu{
+				Text: "帮助(&H)",
+				Items: []declarative.MenuItem{
+					declarative.Action{
+						Text: "关于(&A)",
+						OnTriggered: func() {
+							walk.MsgBox(mainWindow, "关于",
+								"同步工具 v1.0\n\n"+
+									"用于文件同步的工具软件\n"+
+									"支持多目录同步和自动同步",
+								walk.MsgBoxIconInformation)
+						},
+					},
+				},
+			},
+		},
 		Children: []declarative.Widget{
 			declarative.TabWidget{
 				Pages: []declarative.TabPage{
@@ -82,6 +108,7 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 			{
 				AssignTo: &configTab.StatusBar,
 				Text:     "就绪",
+				Width:    200,
 			},
 		},
 	}.Create()); err != nil {
@@ -110,8 +137,52 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	}
 	viewModel.LogDebug("配置标签页UI设置成功")
 
+	// 设置关闭事件处理
+	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		// 关闭前确认
+		if reason == walk.CloseReasonUser {
+			if walk.MsgBox(mainWindow, "确认",
+				"确定要退出程序吗?",
+				walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdNo {
+				*canceled = true
+				return
+			}
+		}
+
+		// 停止服务
+		if viewModel.ConfigViewModel.IsServerRunning() {
+			if err := viewModel.ConfigViewModel.StopServer(); err != nil {
+				viewModel.LogError("停止服务失败", err)
+				walk.MsgBox(mainWindow, "错误",
+					fmt.Sprintf("停止服务失败: %v", err),
+					walk.MsgBoxIconError)
+			}
+		}
+
+		// 保存配置
+		if err := viewModel.ConfigViewModel.SaveConfig(); err != nil {
+			viewModel.LogError("保存配置失败", err)
+			walk.MsgBox(mainWindow, "错误",
+				fmt.Sprintf("保存配置失败: %v", err),
+				walk.MsgBoxIconError)
+		}
+	})
+
 	// 显示窗口
 	viewModel.LogDebug("正在显示主窗口")
 	mainWindow.Run()
 	return nil
+}
+
+// ShowError 显示错误对话框
+func ShowError(owner walk.Form, title string, err error) {
+	walk.MsgBox(owner, title,
+		fmt.Sprintf("发生错误: %v", err),
+		walk.MsgBoxIconError)
+}
+
+// ShowMessage 显示消息对话框
+func ShowMessage(owner walk.Form, title string, message string) {
+	walk.MsgBox(owner, title, message,
+		walk.MsgBoxIconInformation)
 }

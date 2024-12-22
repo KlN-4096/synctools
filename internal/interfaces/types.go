@@ -22,6 +22,10 @@ const (
 	PackSync SyncMode = "pack"
 	// PushSync indicates push synchronization mode
 	PushSync SyncMode = "push"
+	// AutoSync indicates auto synchronization mode
+	AutoSync SyncMode = "auto"
+	// ManualSync indicates manual synchronization mode
+	ManualSync SyncMode = "manual"
 )
 
 // SyncDirection defines the synchronization direction
@@ -88,10 +92,12 @@ type SyncInfo struct {
 
 // Progress represents progress information
 type Progress struct {
-	Total     int64  `json:"total"`     // 总大小
-	Current   int64  `json:"current"`   // 当前大小
-	Filename  string `json:"filename"`  // 文件名
-	Operation string `json:"operation"` // 操作类型
+	Total     int64   `json:"total"`     // 总大小
+	Current   int64   `json:"current"`   // 当前进度
+	Speed     float64 `json:"speed"`     // 速度(bytes/s)
+	Remaining int64   `json:"remaining"` // 剩余时间(秒)
+	FileName  string  `json:"file_name"` // 当前文件名
+	Status    string  `json:"status"`    // 状态描述
 }
 
 // PackProgress represents pack synchronization progress

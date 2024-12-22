@@ -1,19 +1,29 @@
 package interfaces
 
-// SyncService 定义同步服务的核心接口
+// SyncService 同步服务接口
 type SyncService interface {
-	// Start 启动同步服务
+	// 基本操作
 	Start() error
-
-	// Stop 停止同步服务
 	Stop() error
+	IsRunning() bool
 
-	// SyncFiles 执行文件同步
+	// 配置管理
+	GetCurrentConfig() *Config
+	ListConfigs() ([]*Config, error)
+	LoadConfig(id string) error
+	SaveConfig(config *Config) error
+	DeleteConfig(uuid string) error
+	ValidateConfig(config *Config) error
+
+	// 回调设置
+	SetOnConfigChanged(callback func())
+	SetProgressCallback(callback func(progress *Progress))
+
+	// 服务器管理
+	SetServer(server NetworkServer)
+
+	// 同步操作
 	SyncFiles(path string) error
-
-	// HandleSyncRequest 处理同步请求
 	HandleSyncRequest(request interface{}) error
-
-	// GetSyncStatus 获取同步状态
 	GetSyncStatus() string
 }

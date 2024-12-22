@@ -76,8 +76,9 @@ func (o *Operations) SendFile(conn net.Conn, path string, progress chan<- interf
 		return errors.NewNetworkError("SendFile", "获取文件信息失败", err)
 	}
 
-	buffer := make([]byte, 32*1024) // 32KB buffer
+	buffer := make([]byte, 32*1024)
 	totalWritten := int64(0)
+	startTime := time.Now()
 
 	for {
 		n, err := file.Read(buffer)
@@ -96,11 +97,17 @@ func (o *Operations) SendFile(conn net.Conn, path string, progress chan<- interf
 		totalWritten += int64(written)
 
 		if progress != nil {
+			elapsed := time.Since(startTime).Seconds()
+			speed := float64(totalWritten) / elapsed
+			remaining := int64((float64(info.Size()-totalWritten) / speed))
+
 			progress <- interfaces.Progress{
 				Total:     info.Size(),
 				Current:   totalWritten,
-				Filename:  filepath.Base(path),
-				Operation: "send",
+				Speed:     speed,
+				Remaining: remaining,
+				FileName:  filepath.Base(path),
+				Status:    "sending",
 			}
 		}
 	}
@@ -125,8 +132,9 @@ func (o *Operations) ReceiveFile(conn net.Conn, path string, progress chan<- int
 	}
 	defer file.Close()
 
-	buffer := make([]byte, 32*1024) // 32KB buffer
+	buffer := make([]byte, 32*1024)
 	totalRead := int64(0)
+	startTime := time.Now()
 
 	for {
 		n, err := conn.Read(buffer)
@@ -145,11 +153,16 @@ func (o *Operations) ReceiveFile(conn net.Conn, path string, progress chan<- int
 		totalRead += int64(written)
 
 		if progress != nil {
+			elapsed := time.Since(startTime).Seconds()
+			speed := float64(totalRead) / elapsed
+
 			progress <- interfaces.Progress{
 				Total:     -1, // 未知总大小
 				Current:   totalRead,
-				Filename:  filepath.Base(path),
-				Operation: "receive",
+				Speed:     speed,
+				Remaining: -1, // 未知剩余时间
+				FileName:  filepath.Base(path),
+				Status:    "receiving",
 			}
 		}
 	}

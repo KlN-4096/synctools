@@ -26,9 +26,8 @@ import (
 
 	"github.com/lxn/walk"
 
-	"synctools/internal/network"
-	"synctools/internal/service"
-	"synctools/pkg/common"
+	"synctools/internal/interfaces"
+	"synctools/pkg/network"
 )
 
 // LineEditIface 定义 LineEdit 接口
@@ -48,18 +47,24 @@ type TableViewIface interface {
 
 // ViewModelLogger 日志接口
 type ViewModelLogger interface {
+	Debug(msg string, fields interfaces.Fields)
+	Info(msg string, fields interfaces.Fields)
+	Warn(msg string, fields interfaces.Fields)
+	Error(msg string, fields interfaces.Fields)
+	Fatal(msg string, fields interfaces.Fields)
+	WithFields(fields interfaces.Fields) interfaces.Logger
+	SetLevel(level interfaces.LogLevel)
+
+	// UI特定的日志方法
 	Log(format string, v ...interface{})
-	Error(format string, v ...interface{})
 	DebugLog(format string, v ...interface{})
-	Info(msg string, keyvals ...interface{})
 	SetDebugMode(enabled bool)
 	GetDebugMode() bool
-	Close() error
 }
 
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
-	syncService *service.SyncService
+	syncService interfaces.SyncService
 	logger      ViewModelLogger
 
 	// UI 组件
@@ -81,14 +86,14 @@ type ConfigViewModel struct {
 	ignoreEdit  *walk.TextEdit
 
 	// 缓存
-	currentConfig *common.Config
+	currentConfig *interfaces.Config
 
 	// 移除进度回调
 	lastLoggedProgress int // 上次记录的进度百分比
 }
 
 // NewConfigViewModel 创建新的配置视图模型
-func NewConfigViewModel(syncService *service.SyncService, logger ViewModelLogger) *ConfigViewModel {
+func NewConfigViewModel(syncService interfaces.SyncService, logger ViewModelLogger) *ConfigViewModel {
 	return &ConfigViewModel{
 		syncService: syncService,
 		logger:      logger,
@@ -96,27 +101,15 @@ func NewConfigViewModel(syncService *service.SyncService, logger ViewModelLogger
 }
 
 // Initialize 初始化视图模型
-func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
-	vm.window = window
+func (vm *ConfigViewModel) Initialize() error {
+	// 加载默认配置
+	config := vm.syncService.GetCurrentConfig()
+	if config == nil {
+		vm.logger.Info("没有默认配置", interfaces.Fields{})
+		return nil
+	}
 
-	// 初始化配置列表模型
-	vm.configList = NewConfigListModel(vm.syncService, vm.logger)
-	vm.redirectList = NewRedirectListModel(vm.syncService)
-	vm.syncFolderList = NewSyncFolderListModel(vm.syncService)
-
-	// 设置配置变更回调
-	vm.syncService.SetOnConfigChanged(func() {
-		vm.logger.DebugLog("触发配置变更回调")
-		// 清除缓存
-		vm.currentConfig = nil
-		// 更新所有列表模型的缓存
-		vm.configList.refreshCache()
-		vm.redirectList.refreshCache()
-		vm.syncFolderList.refreshCache()
-		// 更新UI
-		vm.UpdateUI()
-	})
-
+	vm.currentConfig = config
 	return nil
 }
 
@@ -166,67 +159,20 @@ func (vm *ConfigViewModel) SetupUI(
 
 // UpdateUI 更新UI显示
 func (vm *ConfigViewModel) UpdateUI() {
-	// 获取当前配置（使用缓存）
 	config := vm.GetCurrentConfig()
-
-	// 强制所有表格重新加载数据
-	if vm.configTable != nil {
-		vm.configTable.SetModel(nil)
-		vm.configTable.SetModel(vm.configList)
-	}
-	if vm.redirectTable != nil {
-		vm.redirectTable.SetModel(nil)
-		vm.redirectTable.SetModel(vm.redirectList)
-	}
-	if vm.syncFolderTable != nil {
-		vm.syncFolderTable.SetModel(nil)
-		vm.syncFolderTable.SetModel(vm.syncFolderList)
-	}
-
-	// 更新UI组件
 	if config == nil {
-		// 设置默认值
-		vm.nameEdit.SetText("")
-		vm.versionEdit.SetText("")
-		vm.hostEdit.SetText("0.0.0.0")
-		vm.portEdit.SetText("6666")
-		vm.syncDirEdit.SetText("")
-		if vm.ignoreEdit != nil {
-			vm.ignoreEdit.SetText("")
-		}
-	} else {
-		// 更新基本信息
-		vm.nameEdit.SetText(config.Name)
-		vm.versionEdit.SetText(config.Version)
-		vm.hostEdit.SetText(config.Host)
-		vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
-		vm.syncDirEdit.SetText(config.SyncDir)
-
-		// 更新忽略列表
-		if vm.ignoreEdit != nil {
-			vm.ignoreEdit.SetText(strings.Join(config.IgnoreList, "\n"))
-		}
+		return
 	}
 
-	// 刷新表格（使用缓存的配置）
-	if vm.configList != nil {
-		vm.configList.PublishRowsReset()
-	}
-	if vm.redirectList != nil {
-		vm.redirectList.PublishRowsReset()
-	}
-	if vm.syncFolderList != nil {
-		vm.syncFolderList.PublishRowsReset()
-	}
+	// 更新基本信息
+	vm.nameEdit.SetText(config.Name)
+	vm.versionEdit.SetText(config.Version)
+	vm.hostEdit.SetText(config.Host)
+	vm.portEdit.SetText(strconv.Itoa(config.Port))
+	vm.syncDirEdit.SetText(config.SyncDir)
 
-	// 更新状态栏
-	if vm.statusBar != nil {
-		if vm.syncService.IsRunning() {
-			vm.statusBar.SetText("状态: 运行中")
-		} else {
-			vm.statusBar.SetText("状态: 已停止")
-		}
-	}
+	// 更新忽略列表
+	vm.ignoreEdit.SetText(strings.Join(config.IgnoreList, "\n"))
 }
 
 // SaveConfig 保存当前配置
@@ -236,50 +182,66 @@ func (vm *ConfigViewModel) SaveConfig() error {
 		return fmt.Errorf("没有选中的配置")
 	}
 
-	vm.logger.DebugLog("SaveConfig - UI values: name=%s, version=%s, host=%s, port=%s, syncDir=%s",
-		vm.nameEdit.Text(), vm.versionEdit.Text(), vm.hostEdit.Text(), vm.portEdit.Text(), vm.syncDirEdit.Text())
+	vm.logger.Debug("保存配置", interfaces.Fields{
+		"name":    vm.nameEdit.Text(),
+		"version": vm.versionEdit.Text(),
+		"host":    vm.hostEdit.Text(),
+		"port":    vm.portEdit.Text(),
+		"syncDir": vm.syncDirEdit.Text(),
+	})
 
 	// 创建一个新的配置对象，以避免引用问题
-	newConfig := &common.Config{
+	newConfig := &interfaces.Config{
 		UUID:            config.UUID,
-		Type:            common.ConfigTypeServer, // 设置为服务器配置
+		Type:            interfaces.ConfigTypeServer, // 设置为服务器配置
 		Name:            vm.nameEdit.Text(),
 		Version:         vm.versionEdit.Text(),
 		Host:            vm.hostEdit.Text(),
 		SyncDir:         vm.syncDirEdit.Text(),
-		SyncFolders:     make([]common.SyncFolder, len(config.SyncFolders)),
-		IgnoreList:      make([]string, 0),
-		FolderRedirects: make([]common.FolderRedirect, len(config.FolderRedirects)),
+		SyncFolders:     make([]interfaces.SyncFolder, len(config.SyncFolders)),
+		IgnoreList:      strings.Split(vm.ignoreEdit.Text(), "\n"),
+		FolderRedirects: make([]interfaces.FolderRedirect, len(config.FolderRedirects)),
 	}
 
 	// 解析端口号
-	port, err := strconv.Atoi(vm.portEdit.Text())
-	if err != nil {
-		return fmt.Errorf("端口号无效: %v", err)
+	if port, err := strconv.Atoi(vm.portEdit.Text()); err == nil {
+		newConfig.Port = port
+	} else {
+		vm.logger.Error("解析端口号失败", interfaces.Fields{
+			"error": err.Error(),
+			"port":  vm.portEdit.Text(),
+		})
+		return fmt.Errorf("无效的端口号: %v", err)
 	}
-	newConfig.Port = port
 
-	vm.logger.DebugLog("SaveConfig - New config: %+v", newConfig)
-
-	// 复制切片内容
+	// 复制同步文件夹列表
 	copy(newConfig.SyncFolders, config.SyncFolders)
-	copy(newConfig.FolderRedirects, config.FolderRedirects)
 
-	// 处理忽略列表
-	if vm.ignoreEdit != nil {
-		ignoreList := strings.Split(vm.ignoreEdit.Text(), "\n")
-		newConfig.IgnoreList = make([]string, len(ignoreList))
-		copy(newConfig.IgnoreList, ignoreList)
-	}
+	// 复制重定向列表
+	copy(newConfig.FolderRedirects, config.FolderRedirects)
 
 	// 验证配置
 	if err := vm.syncService.ValidateConfig(newConfig); err != nil {
-		return err
+		vm.logger.Error("配置验证失败", interfaces.Fields{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("配置验证失败: %v", err)
 	}
 
-	// 清除缓存
-	vm.currentConfig = nil
-	return vm.syncService.Save(newConfig)
+	// 保存配置
+	if err := vm.syncService.SaveConfig(newConfig); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
+	}
+
+	vm.logger.Info("配置已保存", interfaces.Fields{
+		"uuid": newConfig.UUID,
+		"name": newConfig.Name,
+	})
+
+	return nil
 }
 
 // BrowseSyncDir 浏览同步目录
@@ -324,29 +286,28 @@ func (vm *ConfigViewModel) StartServer() error {
 		return fmt.Errorf("无法获取配置")
 	}
 
-	vm.logger.DebugLog("启动服务器 - 使用配置: %+v", config)
+	vm.logger.Debug("启动服务器", interfaces.Fields{
+		"config": fmt.Sprintf("%+v", config),
+	})
 
 	// 重新创建网络服务器
 	server := network.NewServer(config, vm.logger)
 	vm.syncService.SetServer(server)
 
 	// 设置进度回调
-	vm.syncService.SetProgressCallback(func(progress *service.SyncProgress) {
+	vm.syncService.SetProgressCallback(func(progress *interfaces.Progress) {
 		// 计算当前进度百分比
 		var currentProgress int
-		if progress.PackMode {
-			if progress.BytesTotal > 0 {
-				currentProgress = int(float64(progress.BytesProcessed) / float64(progress.BytesTotal) * 100)
-			}
-		} else {
-			if progress.TotalFiles > 0 {
-				currentProgress = int(float64(progress.ProcessedFiles) / float64(progress.TotalFiles) * 100)
-			}
+		if progress.Total > 0 {
+			currentProgress = int(float64(progress.Current) / float64(progress.Total) * 100)
 		}
 
 		// 每10%记录一次日志
 		if currentProgress/10 > vm.lastLoggedProgress/10 {
-			vm.logger.Log("同步进度: %d%% - %s", currentProgress, progress.Status)
+			vm.logger.Info("同步进度", interfaces.Fields{
+				"progress": currentProgress,
+				"status":   progress.Status,
+			})
 			vm.lastLoggedProgress = currentProgress
 		}
 
@@ -386,16 +347,16 @@ func (vm *ConfigViewModel) IsServerRunning() bool {
 // ConfigListModel 配置列表模型
 type ConfigListModel struct {
 	walk.TableModelBase
-	syncService   *service.SyncService
+	syncService   interfaces.SyncService
 	logger        ViewModelLogger
 	sortColumn    int
 	sortOrder     walk.SortOrder
 	filter        string
-	cachedConfigs []*common.Config
+	cachedConfigs []*interfaces.Config
 }
 
 // NewConfigListModel 创建新的配置列表模型
-func NewConfigListModel(syncService *service.SyncService, logger ViewModelLogger) *ConfigListModel {
+func NewConfigListModel(syncService interfaces.SyncService, logger ViewModelLogger) *ConfigListModel {
 	model := &ConfigListModel{
 		syncService: syncService,
 		logger:      logger,
@@ -411,27 +372,45 @@ func (m *ConfigListModel) refreshCache() {
 	configs, err := m.syncService.ListConfigs()
 	if err != nil {
 		m.cachedConfigs = nil
-		m.logger.Error("刷新配置缓存失败: %v", err)
+		m.logger.Error("刷新配置缓存失败", interfaces.Fields{
+			"error": err.Error(),
+		})
 		return
 	}
 
-	m.logger.DebugLog("获取到 %d 个配置", len(configs))
+	m.logger.Debug("获取配置列表", interfaces.Fields{
+		"count": len(configs),
+	})
+
 	for _, cfg := range configs {
-		m.logger.DebugLog("配置: UUID=%s, Name=%s, Type=%s", cfg.UUID, cfg.Name, cfg.Type)
+		m.logger.Debug("配置信息", interfaces.Fields{
+			"uuid": cfg.UUID,
+			"name": cfg.Name,
+			"type": cfg.Type,
+		})
 	}
 
 	// 只保留服务器配置
-	serverConfigs := make([]*common.Config, 0)
+	serverConfigs := make([]*interfaces.Config, 0)
 	for _, config := range configs {
-		if config.Type == common.ConfigTypeServer {
+		if config.Type == interfaces.ConfigTypeServer {
 			serverConfigs = append(serverConfigs, config)
-			m.logger.DebugLog("添加服务器配置: UUID=%s, Name=%s", config.UUID, config.Name)
+			m.logger.Debug("添加服务器配置", interfaces.Fields{
+				"uuid": config.UUID,
+				"name": config.Name,
+			})
 		} else {
-			m.logger.DebugLog("跳过非服务器配置: UUID=%s, Name=%s, Type=%s", config.UUID, config.Name, config.Type)
+			m.logger.Debug("跳过非服务器配置", interfaces.Fields{
+				"uuid": config.UUID,
+				"name": config.Name,
+				"type": config.Type,
+			})
 		}
 	}
 	m.cachedConfigs = serverConfigs
-	m.logger.DebugLog("最终保留 %d 个服务器配置", len(serverConfigs))
+	m.logger.Debug("最终配置数量", interfaces.Fields{
+		"count": len(serverConfigs),
+	})
 }
 
 // RowCount 返回行数
@@ -496,12 +475,12 @@ func (m *ConfigListModel) PublishRowsReset() {
 // RedirectListModel 重定向列表模型
 type RedirectListModel struct {
 	walk.TableModelBase
-	syncService   *service.SyncService
-	currentConfig *common.Config
+	syncService   interfaces.SyncService
+	currentConfig *interfaces.Config
 }
 
 // NewRedirectListModel 创建新的重定向列表模型
-func NewRedirectListModel(syncService *service.SyncService) *RedirectListModel {
+func NewRedirectListModel(syncService interfaces.SyncService) *RedirectListModel {
 	return &RedirectListModel{
 		syncService: syncService,
 	}
@@ -551,12 +530,12 @@ func (m *RedirectListModel) PublishRowsReset() {
 // SyncFolderListModel 同步文件夹列表模型
 type SyncFolderListModel struct {
 	walk.TableModelBase
-	syncService   *service.SyncService
-	currentConfig *common.Config
+	syncService   interfaces.SyncService
+	currentConfig *interfaces.Config
 }
 
 // NewSyncFolderListModel 创建新的同步文件夹列表模型
-func NewSyncFolderListModel(syncService *service.SyncService) *SyncFolderListModel {
+func NewSyncFolderListModel(syncService interfaces.SyncService) *SyncFolderListModel {
 	return &SyncFolderListModel{
 		syncService: syncService,
 	}
@@ -609,21 +588,14 @@ func (m *SyncFolderListModel) PublishRowsReset() {
 	m.TableModelBase.PublishRowsReset()
 }
 
-// GetCurrentConfig 获取当前配置（使用缓存）
-func (vm *ConfigViewModel) GetCurrentConfig() *common.Config {
-	if vm.currentConfig == nil {
-		// 只在缓存为空时记录日志
-		vm.currentConfig = vm.syncService.GetCurrentConfig()
-		if vm.currentConfig == nil {
-			vm.logger.DebugLog("当前没有选中的配置")
-		}
-	}
+// GetCurrentConfig 获取当前配置
+func (vm *ConfigViewModel) GetCurrentConfig() *interfaces.Config {
 	return vm.currentConfig
 }
 
 // UpdateSyncFolder 更新同步文件夹
-func (vm *ConfigViewModel) UpdateSyncFolder(index int, path, mode string) error {
-	config := vm.syncService.GetCurrentConfig()
+func (vm *ConfigViewModel) UpdateSyncFolder(index int, path string, mode interfaces.SyncMode) error {
+	config := vm.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -632,34 +604,26 @@ func (vm *ConfigViewModel) UpdateSyncFolder(index int, path, mode string) error 
 		return fmt.Errorf("无效的索引")
 	}
 
-	// 验证路径
-	if path == "" {
-		return fmt.Errorf("路径不能为空")
-	}
-
-	// 验证模式
-	if mode != "mirror" && mode != "push" {
-		return fmt.Errorf("无效的同步模式")
-	}
-
-	// 更新数据
+	// 更新同步文件夹
 	config.SyncFolders[index].Path = path
 	config.SyncFolders[index].SyncMode = mode
 
 	// 保存配置
-	if err := vm.syncService.SaveConfig(); err != nil {
-		return err
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error": err.Error(),
+			"path":  path,
+			"mode":  mode,
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
 	}
-
-	// 刷新表格
-	vm.syncFolderList.PublishRowsReset()
 
 	return nil
 }
 
-// UpdateRedirect 更新文件夹重定向
+// UpdateRedirect 更新重定向配置
 func (vm *ConfigViewModel) UpdateRedirect(index int, serverPath, clientPath string) error {
-	config := vm.syncService.GetCurrentConfig()
+	config := vm.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -668,79 +632,76 @@ func (vm *ConfigViewModel) UpdateRedirect(index int, serverPath, clientPath stri
 		return fmt.Errorf("无效的索引")
 	}
 
-	// 验证路径
-	if serverPath == "" || clientPath == "" {
-		return fmt.Errorf("路径不能为空")
-	}
-
-	// 更新数据
+	// 更新重定向配置
 	config.FolderRedirects[index].ServerPath = serverPath
 	config.FolderRedirects[index].ClientPath = clientPath
 
 	// 保存配置
-	if err := vm.syncService.SaveConfig(); err != nil {
-		return err
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error":      err.Error(),
+			"serverPath": serverPath,
+			"clientPath": clientPath,
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
 	}
-
-	// 刷新表格
-	vm.redirectList.PublishRowsReset()
 
 	return nil
 }
 
 // ListConfigs 获取配置列表
-func (vm *ConfigViewModel) ListConfigs() ([]*common.Config, error) {
+func (vm *ConfigViewModel) ListConfigs() ([]*interfaces.Config, error) {
 	return vm.syncService.ListConfigs()
 }
 
 // LoadConfig 加载配置
 func (vm *ConfigViewModel) LoadConfig(uuid string) error {
-	// 先清除缓存，确保加载新配置
-	vm.currentConfig = nil
-
 	if err := vm.syncService.LoadConfig(uuid); err != nil {
-		return err
+		vm.logger.Error("加载配置失败", interfaces.Fields{
+			"error": err.Error(),
+			"uuid":  uuid,
+		})
+		return fmt.Errorf("加载配置失败: %v", err)
 	}
 
+	// 获取当前配置
+	config := vm.syncService.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("加载配置失败: 配置为空")
+	}
+
+	vm.currentConfig = config
 	vm.UpdateUI()
 	return nil
 }
 
-// CreateConfig 创建新的配置
+// CreateConfig 创建新配置
 func (vm *ConfigViewModel) CreateConfig(name, version string) error {
-	uuid, err := common.NewUUID()
-	if err != nil {
-		return fmt.Errorf("生成UUID失败: %v", err)
+	// 创建新的配置
+	config := &interfaces.Config{
+		UUID:            fmt.Sprintf("cfg-%s", name),
+		Type:            interfaces.ConfigTypeServer,
+		Name:            name,
+		Version:         version,
+		Host:            "0.0.0.0",
+		Port:            8080,
+		SyncDir:         filepath.Join(filepath.Dir(os.Args[0]), "sync"),
+		SyncFolders:     make([]interfaces.SyncFolder, 0),
+		IgnoreList:      make([]string, 0),
+		FolderRedirects: make([]interfaces.FolderRedirect, 0),
 	}
 
-	config := &common.Config{
-		UUID:    uuid,
-		Name:    name,
-		Version: version,
-		Host:    "0.0.0.0",
-		Port:    6666,
-		Type:    common.ConfigTypeServer, // 设置为服务器配置
-		IgnoreList: []string{
-			".clientconfig",
-			".DS_Store",
-			"thumbs.db",
-		},
-		FolderRedirects: []common.FolderRedirect{
-			{ServerPath: "clientmods", ClientPath: "mods"},
-		},
-		SyncFolders: []common.SyncFolder{
-			{
-				Path:     "mods",
-				SyncMode: common.SyncModePack,
-			},
-		},
+	// 保存配置
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error":   err.Error(),
+			"name":    name,
+			"version": version,
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
 	}
 
-	if err := vm.syncService.Save(config); err != nil {
-		return err
-	}
-
-	return vm.LoadConfig(config.UUID)
+	return nil
 }
 
 // DeleteConfig 删除配置
@@ -750,30 +711,30 @@ func (vm *ConfigViewModel) DeleteConfig(uuid string) error {
 
 // AddRedirect 添加重定向配置
 func (vm *ConfigViewModel) AddRedirect(serverPath, clientPath string) error {
-	config := vm.syncService.GetCurrentConfig()
+	config := vm.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
 
-	// 检查路径是否已存在
-	for _, redirect := range config.FolderRedirects {
-		if redirect.ServerPath == serverPath || redirect.ClientPath == clientPath {
-			return fmt.Errorf("路径已存在")
-		}
-	}
-
-	// 添加新的重定向
-	config.FolderRedirects = append(config.FolderRedirects, common.FolderRedirect{
+	// 创建新的重定向配置
+	redirect := interfaces.FolderRedirect{
 		ServerPath: serverPath,
 		ClientPath: clientPath,
-	})
-
-	// 保存配置
-	if err := vm.syncService.SaveConfig(); err != nil {
-		return err
 	}
 
-	vm.UpdateUI()
+	// 添加到列表
+	config.FolderRedirects = append(config.FolderRedirects, redirect)
+
+	// 保存配置
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error":      err.Error(),
+			"serverPath": serverPath,
+			"clientPath": clientPath,
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
+	}
+
 	return nil
 }
 
@@ -795,8 +756,11 @@ func (vm *ConfigViewModel) DeleteRedirect(index int) error {
 	)
 
 	// 保存配置
-	if err := vm.syncService.SaveConfig(); err != nil {
-		return err
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
 	}
 
 	vm.UpdateUI()
@@ -804,31 +768,31 @@ func (vm *ConfigViewModel) DeleteRedirect(index int) error {
 }
 
 // AddSyncFolder 添加同步文件夹
-func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
-	config := vm.syncService.GetCurrentConfig()
+func (vm *ConfigViewModel) AddSyncFolder(path string, mode interfaces.SyncMode) error {
+	config := vm.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
 
-	// 检查路径是否已存在
-	for _, folder := range config.SyncFolders {
-		if folder.Path == path {
-			return fmt.Errorf("路径已存在")
-		}
-	}
-
-	// 添加新的同步文件夹
-	config.SyncFolders = append(config.SyncFolders, common.SyncFolder{
+	// 创建新的同步文件夹
+	folder := interfaces.SyncFolder{
 		Path:     path,
 		SyncMode: mode,
-	})
-
-	// 保存配置
-	if err := vm.syncService.SaveConfig(); err != nil {
-		return err
 	}
 
-	vm.UpdateUI()
+	// 添加到列表
+	config.SyncFolders = append(config.SyncFolders, folder)
+
+	// 保存配置
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error": err.Error(),
+			"path":  path,
+			"mode":  mode,
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
+	}
+
 	return nil
 }
 
@@ -850,8 +814,11 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 	)
 
 	// 保存配置
-	if err := vm.syncService.SaveConfig(); err != nil {
-		return err
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error": err.Error(),
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
 	}
 
 	vm.UpdateUI()

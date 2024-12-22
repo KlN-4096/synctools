@@ -23,6 +23,7 @@ import (
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
 
+	"synctools/internal/interfaces"
 	"synctools/internal/ui/viewmodels"
 )
 
@@ -231,7 +232,7 @@ func (t *ConfigTab) Setup() error {
 														PushButton{
 															Text: "确定",
 															OnClicked: func() {
-																if err := t.viewModel.UpdateSyncFolder(index, pathEdit.Text(), modeComboBox.Text()); err != nil {
+																if err := t.viewModel.UpdateSyncFolder(index, pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text())); err != nil {
 																	walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 																	return
 																}
@@ -260,118 +261,88 @@ func (t *ConfigTab) Setup() error {
 										Layout: HBox{},
 										Children: []Widget{
 											PushButton{
-												Text:      "添加",
-												OnClicked: t.onAddSyncFolder,
-											},
-											PushButton{
-												Text:      "删除",
-												OnClicked: t.onDeleteSyncFolder,
-											},
-										},
-									},
-								},
-							},
-							Composite{
-								Layout: VBox{},
-								Children: []Widget{
-									Label{Text: "文件夹重定向:"},
-									TableView{
-										AssignTo:         &t.redirectTable,
-										ColumnsOrderable: true,
-										Columns: []TableViewColumn{
-											{Title: "服务器路径", Width: 200},
-											{Title: "客户端路径", Width: 200},
-										},
-										OnItemActivated: func() {
-											// 调整列宽
-											t.adjustTableColumns(t.redirectTable, []float64{0.45, 0.45})
+												Text: "添加文件夹",
+												OnClicked: func() {
+													dlg, err := walk.NewDialog(t.Form())
+													if err != nil {
+														walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+														return
+													}
+													defer dlg.Dispose()
 
-											// 处理双击编辑
-											if t.redirectTable != nil {
-												index := t.redirectTable.CurrentIndex()
-												if index < 0 {
-													return
-												}
+													dlg.SetTitle("添加同步文件夹")
+													dlg.SetLayout(walk.NewVBoxLayout())
 
-												config := t.viewModel.GetCurrentConfig()
-												if config == nil {
-													return
-												}
+													var pathEdit *walk.LineEdit
+													var modeComboBox *walk.ComboBox
 
-												dlg, err := walk.NewDialog(t.Form())
-												if err != nil {
-													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-													return
-												}
-												defer dlg.Dispose()
-
-												dlg.SetTitle("编辑文件夹重定向")
-												dlg.SetLayout(walk.NewVBoxLayout())
-
-												var serverEdit *walk.LineEdit
-												var clientEdit *walk.LineEdit
-
-												if err := (Composite{
-													Layout: Grid{Columns: 2},
-													Children: []Widget{
-														Label{Text: "服务器路径:"},
-														LineEdit{
-															AssignTo: &serverEdit,
-															Text:     config.FolderRedirects[index].ServerPath,
-														},
-														Label{Text: "客户端路径:"},
-														LineEdit{
-															AssignTo: &clientEdit,
-															Text:     config.FolderRedirects[index].ClientPath,
-														},
-													},
-												}.Create(NewBuilder(dlg))); err != nil {
-													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-													return
-												}
-
-												if err := (Composite{
-													Layout: HBox{},
-													Children: []Widget{
-														HSpacer{},
-														PushButton{
-															Text: "确定",
-															OnClicked: func() {
-																if err := t.viewModel.UpdateRedirect(index, serverEdit.Text(), clientEdit.Text()); err != nil {
-																	walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
-																	return
-																}
-																dlg.Accept()
+													if err := (Composite{
+														Layout: Grid{Columns: 2},
+														Children: []Widget{
+															Label{Text: "文件夹路径:"},
+															LineEdit{AssignTo: &pathEdit},
+															Label{Text: "同步模式:"},
+															ComboBox{
+																AssignTo: &modeComboBox,
+																Model:    []string{"mirror", "push", "pack"},
 															},
 														},
-														PushButton{
-															Text:      "取消",
-															OnClicked: dlg.Cancel,
-														},
-													},
-												}.Create(NewBuilder(dlg))); err != nil {
-													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-													return
-												}
+													}.Create(NewBuilder(dlg))); err != nil {
+														walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+														return
+													}
 
-												dlg.Run()
-											}
-										},
-										OnSizeChanged: func() {
-											// 调整列宽
-											t.adjustTableColumns(t.redirectTable, []float64{0.45, 0.45})
-										},
-									},
-									Composite{
-										Layout: HBox{},
-										Children: []Widget{
-											PushButton{
-												Text:      "添加",
-												OnClicked: t.onAddRedirect,
+													if err := (Composite{
+														Layout: HBox{},
+														Children: []Widget{
+															HSpacer{},
+															PushButton{
+																Text: "确定",
+																OnClicked: func() {
+																	if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text())); err != nil {
+																		walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
+																		return
+																	}
+																	dlg.Accept()
+																},
+															},
+															PushButton{
+																Text:      "取消",
+																OnClicked: dlg.Cancel,
+															},
+														},
+													}.Create(NewBuilder(dlg))); err != nil {
+														walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+														return
+													}
+
+													dlg.Run()
+												},
 											},
 											PushButton{
-												Text:      "删除",
-												OnClicked: t.onDeleteRedirect,
+												Text: "删除文件夹",
+												OnClicked: func() {
+													if t.syncFolderTable == nil {
+														return
+													}
+
+													index := t.syncFolderTable.CurrentIndex()
+													if index < 0 {
+														walk.MsgBox(t.Form(), "提示", "请先选择要删除的文件夹", walk.MsgBoxIconInformation)
+														return
+													}
+
+													if walk.MsgBox(t.Form(), "确认",
+														"确定要删除选中的文件夹吗?",
+														walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdNo {
+														return
+													}
+
+													if err := t.viewModel.DeleteSyncFolder(index); err != nil {
+														walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+														return
+													}
+												},
 											},
 										},
 									},
@@ -383,22 +354,8 @@ func (t *ConfigTab) Setup() error {
 			},
 		},
 	}.Create(NewBuilder(t.TabPage))); err != nil {
-		return err
+		return fmt.Errorf("创建配置界面失败: %v", err)
 	}
-
-	// 设置UI组件
-	t.viewModel.SetupUI(
-		t.configTable,
-		t.redirectTable,
-		t.StatusBar,
-		t.nameEdit,
-		t.versionEdit,
-		t.hostEdit,
-		t.portEdit,
-		t.syncDirEdit,
-		t.ignoreEdit,
-		t.syncFolderTable,
-	)
 
 	return nil
 }
@@ -656,7 +613,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 			PushButton{
 				Text: "确定",
 				OnClicked: func() {
-					if err := t.viewModel.AddSyncFolder(pathEdit.Text(), modeComboBox.Text()); err != nil {
+					if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text())); err != nil {
 						walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 						return
 					}
