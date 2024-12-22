@@ -58,6 +58,7 @@ func main() {
 
 	// 获取日志服务
 	logger := c.GetLogger()
+	logger.SetLevel(interfaces.DEBUG)
 	logger.Info("服务器启动", interfaces.Fields{
 		"base_dir": baseDir,
 	})
@@ -130,8 +131,15 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 	storage := c.GetStorage()
 	logger := c.GetLogger()
 
+	logger.Debug("开始加载配置", interfaces.Fields{
+		"configFile": configFile,
+	})
+
 	// 如果指定了配置文件，尝试加载
 	if configFile != "" {
+		logger.Debug("尝试加载指定的配置文件", interfaces.Fields{
+			"configFile": configFile,
+		})
 		if err := cfgManager.LoadConfig(configFile); err != nil {
 			return nil, fmt.Errorf("加载配置文件失败: %v", err)
 		}
@@ -139,11 +147,18 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 	}
 
 	// 检查是否存在默认配置
+	logger.Debug("检查默认配置文件", interfaces.Fields{
+		"exists": storage.Exists("default.json"),
+	})
 	if storage.Exists("default.json") {
 		if err := cfgManager.LoadConfig("default"); err != nil {
 			return nil, fmt.Errorf("加载默认配置失败: %v", err)
 		}
-		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil
+		cfg := cfgManager.GetCurrentConfig().(*interfaces.Config)
+		logger.Debug("已加载默认配置", interfaces.Fields{
+			"config": cfg,
+		})
+		return cfg, nil
 	}
 
 	// 创建默认配置

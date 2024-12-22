@@ -143,3 +143,8 @@ func (vm *MainViewModel) showError(title, message string) {
 		walk.MsgBox(vm.window, title, message, walk.MsgBoxIconError)
 	}
 }
+
+// GetLogger 获取日志记录器
+func (vm *MainViewModel) GetLogger() ViewModelLogger {
+	return vm.logger
+}

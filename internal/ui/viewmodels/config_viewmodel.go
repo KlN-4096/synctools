@@ -94,23 +94,39 @@ type ConfigViewModel struct {
 
 // NewConfigViewModel 创建新的配置视图模型
 func NewConfigViewModel(syncService interfaces.SyncService, logger ViewModelLogger) *ConfigViewModel {
-	return &ConfigViewModel{
+	vm := &ConfigViewModel{
 		syncService: syncService,
 		logger:      logger,
 	}
+
+	// 创建列表模型
+	vm.configList = NewConfigListModel(syncService, logger)
+	vm.redirectList = NewRedirectListModel(syncService, logger)
+	vm.syncFolderList = NewSyncFolderListModel(syncService, logger)
+
+	return vm
 }
 
 // Initialize 初始化视图模型
 func (vm *ConfigViewModel) Initialize() error {
+	vm.logger.Debug("开始初始化配置视图模型", nil)
+
 	// 加载默认配置
 	config := vm.syncService.GetCurrentConfig()
+	vm.logger.Debug("获取当前配置", interfaces.Fields{
+		"config": config,
+	})
+
 	if config == nil {
 		vm.logger.Info("没有默认配置", interfaces.Fields{})
 		return nil
 	}
 
-	// 更新 UI
+	// 更新UI
+	vm.logger.Debug("开始更新UI", nil)
 	vm.UpdateUI()
+	vm.logger.Debug("UI更新完成", nil)
+
 	return nil
 }
 
@@ -148,8 +164,12 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.startServerButton = startServerButton
 	vm.saveButton = saveButton
 
+	vm.logger.Debug("设置表格模型", nil)
 	// 设置表格模型
 	if configTable != nil {
+		vm.logger.Debug("设置配置列表模型", interfaces.Fields{
+			"model": vm.configList != nil,
+		})
 		configTable.SetModel(vm.configList)
 	}
 	if redirectTable != nil {
@@ -165,8 +185,15 @@ func (vm *ConfigViewModel) SetupUI(
 
 // UpdateUI 更新 UI 显示
 func (vm *ConfigViewModel) UpdateUI() {
+	vm.logger.Debug("开始更新UI组件", nil)
+
 	config := vm.syncService.GetCurrentConfig()
+	vm.logger.Debug("获取当前配置用于更新UI", interfaces.Fields{
+		"config": config,
+	})
+
 	if config == nil {
+		vm.logger.Warn("更新UI时配置为空", nil)
 		return
 	}
 
@@ -443,25 +470,21 @@ func (m *ConfigListModel) refreshCache() {
 	}
 
 	m.logger.Debug("获取配置列表", interfaces.Fields{
-		"count": len(configs),
+		"total_count": len(configs),
 	})
-
-	for _, cfg := range configs {
-		m.logger.Debug("配置信息", interfaces.Fields{
-			"uuid": cfg.UUID,
-			"name": cfg.Name,
-			"type": cfg.Type,
-		})
-	}
 
 	// 只保留服务器配置
 	serverConfigs := make([]*interfaces.Config, 0)
 	for _, config := range configs {
 		if config.Type == interfaces.ConfigTypeServer {
 			serverConfigs = append(serverConfigs, config)
-			m.logger.Debug("添加服务器配置", interfaces.Fields{
-				"uuid": config.UUID,
-				"name": config.Name,
+			m.logger.Debug("找到服务器配置", interfaces.Fields{
+				"uuid":     config.UUID,
+				"name":     config.Name,
+				"version":  config.Version,
+				"host":     config.Host,
+				"port":     config.Port,
+				"sync_dir": config.SyncDir,
 			})
 		} else {
 			m.logger.Debug("跳过非服务器配置", interfaces.Fields{
@@ -472,8 +495,9 @@ func (m *ConfigListModel) refreshCache() {
 		}
 	}
 	m.cachedConfigs = serverConfigs
-	m.logger.Debug("最终配置数量", interfaces.Fields{
-		"count": len(serverConfigs),
+	m.logger.Debug("服务器配置统计", interfaces.Fields{
+		"total_configs":  len(configs),
+		"server_configs": len(serverConfigs),
 	})
 }
 
@@ -540,13 +564,15 @@ func (m *ConfigListModel) PublishRowsReset() {
 type RedirectListModel struct {
 	walk.TableModelBase
 	syncService   interfaces.SyncService
+	logger        ViewModelLogger
 	currentConfig *interfaces.Config
 }
 
 // NewRedirectListModel 创建新的重定向列表模型
-func NewRedirectListModel(syncService interfaces.SyncService) *RedirectListModel {
+func NewRedirectListModel(syncService interfaces.SyncService, logger ViewModelLogger) *RedirectListModel {
 	return &RedirectListModel{
 		syncService: syncService,
+		logger:      logger,
 	}
 }
 
@@ -595,13 +621,15 @@ func (m *RedirectListModel) PublishRowsReset() {
 type SyncFolderListModel struct {
 	walk.TableModelBase
 	syncService   interfaces.SyncService
+	logger        ViewModelLogger
 	currentConfig *interfaces.Config
 }
 
 // NewSyncFolderListModel 创建新的同步文件夹列表模型
-func NewSyncFolderListModel(syncService interfaces.SyncService) *SyncFolderListModel {
+func NewSyncFolderListModel(syncService interfaces.SyncService, logger ViewModelLogger) *SyncFolderListModel {
 	return &SyncFolderListModel{
 		syncService: syncService,
+		logger:      logger,
 	}
 }
 

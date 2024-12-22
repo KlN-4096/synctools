@@ -71,10 +71,11 @@ type LoggerAdapter struct {
 
 // NewLoggerAdapter 创建日志适配器
 func NewLoggerAdapter(logger interfaces.Logger) *LoggerAdapter {
-	return &LoggerAdapter{
+	adapter := &LoggerAdapter{
 		logger:    logger,
-		debugMode: false,
+		debugMode: logger.GetLevel() == interfaces.DEBUG,
 	}
+	return adapter
 }
 
 // Debug 记录调试日志

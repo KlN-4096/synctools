@@ -113,3 +113,8 @@ func (l *DefaultLogger) WithFields(fields interfaces.Fields) interfaces.Logger {
 func (l *DefaultLogger) SetLevel(level interfaces.LogLevel) {
 	l.level = level
 }
+
+// GetLevel 获取当前日志级别
+func (l *DefaultLogger) GetLevel() interfaces.LogLevel {
+	return l.level
+}

@@ -83,11 +83,39 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 					declarative.Action{
 						Text: "关于(&A)",
 						OnTriggered: func() {
-							walk.MsgBox(mainWindow, "关于",
-								"同步工具 v1.0\n\n"+
-									"用于文件同步的工具软件\n"+
-									"支持多目录同步和自动同步",
-								walk.MsgBoxIconInformation)
+							dlg, err := walk.NewDialog(mainWindow)
+							if err != nil {
+								return
+							}
+							defer dlg.Dispose()
+
+							dlg.SetTitle("关于")
+							dlg.SetLayout(walk.NewVBoxLayout())
+
+							var debugCheckBox *walk.CheckBox
+							if err := (declarative.Composite{
+								Layout: declarative.VBox{},
+								Children: []declarative.Widget{
+									declarative.Label{
+										Text: "同步工具 v1.0\n\n" +
+											"用于文件同步的工具软件\n" +
+											"支持多目录同步和自动同步",
+									},
+									declarative.HSpacer{},
+									declarative.CheckBox{
+										AssignTo: &debugCheckBox,
+										Text:     "调试模式",
+										Checked:  viewModel.GetLogger().GetDebugMode(),
+										OnCheckedChanged: func() {
+											viewModel.GetLogger().SetDebugMode(debugCheckBox.Checked())
+										},
+									},
+								},
+							}.Create(declarative.NewBuilder(dlg))); err != nil {
+								return
+							}
+
+							dlg.Run()
 						},
 					},
 				},

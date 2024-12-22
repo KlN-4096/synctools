@@ -23,4 +23,5 @@ type Logger interface {
 	Fatal(msg string, fields Fields)
 	WithFields(fields Fields) Logger
 	SetLevel(level LogLevel)
+	GetLevel() LogLevel
 }
