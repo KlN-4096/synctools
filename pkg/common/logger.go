@@ -1,25 +1,17 @@
 /*
-Package common 的日志工具模块。
+文件作用:
+- 实现日志记录功能
+- 定义日志接口和实现
+- 提供调试日志支持
+- 管理日志输出格式
 
-文件作用：
-- 提供日志记录功能
-- 管理日志文件
-- 实现日志级别控制
-- 提供格式化输出
-- 支持文件和回调两种日志输出方式
-
-主要类型：
-- Logger: 日志记录器接口
-- DefaultLogger: 基于文件的日志记录器
-- CallbackLogger: 基于回调的日志记录器
-
-主要方法：
-- NewDefaultLogger: 创建基于文件的日志记录器
-- NewCallbackLogger: 创建基于回调的日志记录器
+主要方法:
+- NewDefaultLogger: 创建默认日志记录器
+- NewCallbackLogger: 创建回调日志记录器
 - Log: 记录普通日志
 - Error: 记录错误日志
 - DebugLog: 记录调试日志
-- Close: 关闭日志记录器
+- SetDebugMode: 设置调试模式
 */
 
 package common
@@ -45,7 +37,7 @@ type Logger interface {
 
 // DefaultLogger 基于文件的日志记录器
 type DefaultLogger struct {
-	debugEnabled bool
+	DebugEnabled bool
 	logFile      *os.File
 	isClosing    bool
 }
@@ -60,7 +52,7 @@ type CallbackLogger struct {
 // NewDefaultLogger 创建基于文件的日志记录器
 func NewDefaultLogger() *DefaultLogger {
 	return &DefaultLogger{
-		debugEnabled: false,
+		DebugEnabled: false,
 		isClosing:    false,
 	}
 }
@@ -121,19 +113,19 @@ func (l *DefaultLogger) Error(msg string, keyvals ...interface{}) {
 
 // DebugLog 记录调试日志
 func (l *DefaultLogger) DebugLog(format string, v ...interface{}) {
-	if l.debugEnabled {
+	if l.DebugEnabled {
 		l.writeLog("DEBUG", format, v...)
 	}
 }
 
 // SetDebugMode 设置调试模式
 func (l *DefaultLogger) SetDebugMode(enabled bool) {
-	l.debugEnabled = enabled
+	l.DebugEnabled = enabled
 }
 
 // GetDebugMode 获取调试模式状态
 func (l *DefaultLogger) GetDebugMode() bool {
-	return l.debugEnabled
+	return l.DebugEnabled
 }
 
 // Close 关闭日志记录器

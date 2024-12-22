@@ -1,31 +1,16 @@
 /*
-Package main 实现了文件同步工具的客户端程序。
-
-文件作用：
+文件作用:
 - 实现客户端的主程序入口
 - 初始化GUI界面和各种组件
 - 管理客户端配置和同步状态
 - 处理与服务器的通信
-- 提供文件同步功能
-- 实现用户界面交互
 
-主要类型：
-- ClientMessage: 客户端消息结构
-- RetryConfig: 重试配置结构
-- ValidationResult: 文件校验结果结构
-- SyncClient: 同步客户端结构
-
-主要方法：
+主要方法:
 - NewSyncClient: 创建新的同步客户端
 - connect: 连接到同步服务器
 - syncWithServer: 执行文件同步操作
 - handlePackSync: 处理打包同步模式
 - handleMirrorSync: 处理镜像同步模式
-- handlePushSync: 处理推送同步模式
-- receiveFile: 接收单个文件
-- validatePackage: 验证压缩包完整性
-- SaveConfig: 保存客户端配置
-- disconnect: 断开服务器连接
 */
 
 package main

@@ -1,18 +1,11 @@
 /*
-Package viewmodels 实现了视图模型层。
-
-文件作用：
+文件作用:
 - 实现配置界面的视图模型
 - 管理配置数据绑定
 - 处理配置界面交互
 - 提供配置操作接口
 
-主要类型：
-- ConfigViewModel: 配置视图模型
-- ConfigListModel: 配置列表模型
-- SyncFolderModel: 同步文件夹模型
-
-主要方法：
+主要方法:
 - NewConfigViewModel: 创建配置视图模型
 - LoadConfig: 加载配置
 - SaveConfig: 保存配置

@@ -3,15 +3,13 @@ package viewmodels
 import "github.com/lxn/walk"
 
 /*
-Package viewmodels 的接口定义。
-
-文件作用：
+文件作用:
 - 定义视图模型接口
 - 定义数据绑定接口
 - 定义事件处理接口
 - 提供通用接口约束
 
-主要接口：
+主要接口:
 - ViewModel: 视图模型基础接口
 - DataBinder: 数据绑定接口
 - EventHandler: 事件处理接口

@@ -10,23 +10,18 @@ import (
 )
 
 /*
-Package config 实现了配置管理功能。
+文件作用:
+- 实现配置管理功能
+- 管理配置文件读写
+- 维护配置缓存
+- 提供配置验证
 
-文件作用：
-- 管理配置文件的读取和保存
-- 维护当前活动配置
-- 处理配置变更通知
-- 提供配置验证功能
-
-主要方法：
-- NewManager: 创建新的配置管理器
-- LoadConfig: 加载指定的配置文件
-- SaveConfig: 保存配置到文件
-- GetCurrentConfig: 获取当前活动配置
-- SetCurrentConfig: 设置当前活动配置
-- GetAllConfigs: 获取所有可用配置
+主要方法:
+- NewManager: 创建配置管理器
+- LoadConfig: 加载配置文件
+- SaveConfig: 保存配置文件
 - ValidateConfig: 验证配置有效性
-- OnConfigChanged: 设置配置变更回调
+- GetCurrentConfig: 获取当前配置
 */
 
 // Manager 配置管理器

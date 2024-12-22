@@ -153,6 +153,20 @@
   - 提供通用日志功能
   - 实现日志记录接口
   - 支持多种日志级别
+  - 提供文件和回调两种日志输出方式
+- **主要类型**：
+  - Logger: 日志记录器接口
+  - DefaultLogger: 基于文件的日志记录器
+  - CallbackLogger: 基于回调的日志记录器
+- **主要方法**：
+  - NewDefaultLogger: 创建基于文件的日志记录器
+  - NewCallbackLogger: 创建基于回调的日志记录器
+  - Log: 记录普通日志
+  - Error: 记录错误日志
+  - Info: 记录信息日志
+  - DebugLog: 记录调试日志
+  - SetDebugMode: 设置调试模式
+  - Close: 关闭日志记录器
 
 #### network.go
 - **文件作用**：
@@ -173,18 +187,24 @@
   - 定义同步状态相关结构
   - 定义文件信息相关结构
   - 实现GUI日志记录器
+  - 提供配置缓存刷新功能
 - **主要类型**：
-  - SyncConfig: 同步配置结构
-  - SyncStatus: 同步状态结构
+  - Config: 核心配置结构
+  - SyncFolder: 同步文件夹配置
   - FileInfo: 文件信息结构
   - SyncInfo: 同步信息结构
   - GUILogger: GUI日志记录器
+  - ConfigManager: 配置管理器接口
+  - SyncService: 同步服务接口
+  - Server: 服务器接口
 - **主要方法**：
   - NewGUILogger: 创建新的GUI日志记录器
-  - Log: 记录普通日志
-  - DebugLog: 记录调试日志
-  - Error: 记录错误日志
-  - SetDebugMode: 设置调试模式
+  - NewUUID: 生成唯一标识符
+  - LoadConfig: 加载配置
+  - SaveConfig: 保存配置
+  - refreshCache: 刷新配置缓存
+  - CalculateFolderMD5: 计算文件夹MD5值
+  - CalculateFileHash: 计算文件哈希值
 
 #### utils.go
 - **文件作用**：
@@ -209,142 +229,69 @@
 
 ## 文件依赖关系
 
-### 前端层
-1. `internal/ui/views/config_tab.go`
-   - 依赖 `internal/ui/viewmodels/config_viewmodel.go`：使用视图模型处理数据和业务逻辑
-   - 依赖 `github.com/lxn/walk`：使用UI组件库
-
-2. `internal/ui/viewmodels/config_viewmodel.go`
-   - 依赖 `internal/model/types.go`：使用配置模型
-   - 依赖 `internal/service/service.go`：使用同步服务
-   - 依赖 `internal/network/server.go`：使用网络服务器功能
-
-3. `internal/ui/viewmodels/main_viewmodel.go`
-   - 依赖 `internal/ui/viewmodels/config_viewmodel.go`：管理配置视图模型
-   - 依赖 `internal/service/service.go`：使用同步服务
-
-4. `internal/ui/main_window.go`
-   - 依赖 `internal/ui/views/config_tab.go`：使用配置标签页
-   - 依赖 `internal/ui/viewmodels/main_viewmodel.go`：使用主窗口视图模型
-
-### 应用层
-1. `internal/service/service.go`
-   - 依赖 `internal/model/types.go`：使用核心模型
-   - 依赖 `internal/config/manager.go`：使用配置管理
-   - 依赖 `internal/network/server.go`：使用网络服务
-   - 依赖 `pkg/common/logger.go`：使用日志功能
-
-2. `internal/config/manager.go`
-   - 依赖 `internal/model/types.go`：使用配置模型
-   - 依赖 `internal/storage/storage.go`：使用存储功能
-   - 依赖 `pkg/common/logger.go`：使用日志功能
-
-### 领域层
-1. `internal/model/types.go`
-   - 依赖 `pkg/common/types.go`：使用基础类型定义
-
-2. `internal/model/logger.go`
-   - 依赖 `pkg/common/logger.go`：扩展基础日志功能
-
-### 基础设施层
-1. `internal/network/server.go`
-   - 依赖 `internal/model/types.go`：使用模型定义
-   - 依赖 `pkg/common/network.go`：使用网络基础功能
-   - 依赖 `pkg/common/types.go`：使用基础类型
-
-2. `internal/storage/storage.go`
-   - 依赖 `encoding/json`：用于JSON序列化
-   - 依赖 `os`：用于文件系统操作
-
-3. `pkg/common/network.go`
-   - 依赖 `pkg/common/types.go`：使用基础类型定义
-   - 依赖 `encoding/json`：用于JSON处理
-
-4. `pkg/common/utils.go`
-   - 依赖 `pkg/common/types.go`：使用基础类型
-   - 依赖 `crypto/md5`：用于哈希计算
-
-5. `pkg/common/zip.go`
-   - 依赖 `pkg/common/utils.go`：使用工具函数
-   - 依赖 `archive/zip`：用于压缩文件处理
-
-### 入口文件
-1. `cmd/server/main.go`
-   - 依赖 `internal/service/service.go`：使用同步服务
-   - 依赖 `internal/ui/main_window.go`：使用主窗口
-   - 依赖 `pkg/common/logger.go`：使用日志功能
-
-2. `cmd/client/main.go`
-   - 依赖 `internal/service/service.go`：使用同步服务
-   - 依赖 `internal/ui/main_window.go`：使用主窗口
-   - 依赖 `pkg/common/logger.go`：使用日志功能
-
-## 依赖关系图
 ```mermaid
-graph TD
-    %% 前端层
-    config_tab[views/config_tab.go] --> config_vm[viewmodels/config_viewmodel.go]
-    main_window[main_window.go] --> config_tab
-    main_window --> main_vm[viewmodels/main_viewmodel.go]
-    main_vm --> config_vm
-    config_vm --> service[service/service.go]
-    
-    %% 应用层
-    service --> model[model/types.go]
-    service --> config_mgr[config/manager.go]
-    service --> network[network/server.go]
-    config_mgr --> storage[storage/storage.go]
-    config_mgr --> model
-    
-    %% 基础设施层
-    network --> model
-    network --> common_network[common/network.go]
-    common_network --> common_types[common/types.go]
-    common_utils[common/utils.go] --> common_types
-    common_zip[common/zip.go] --> common_utils
-    
-    %% 入口文件
-    server_main[cmd/server/main.go] --> service
-    server_main --> main_window
-    client_main[cmd/client/main.go] --> service
-    client_main --> main_window
-    
-    %% 样式
-    classDef frontend fill:#f9f,stroke:#333
-    classDef application fill:#aff,stroke:#333
-    classDef domain fill:#ffa,stroke:#333
-    classDef infrastructure fill:#ddd,stroke:#333
-    
-    class config_tab,config_vm,main_window,main_vm frontend
-    class service,config_mgr application
-    class model domain
-    class network,storage,common_network,common_types,common_utils,common_zip infrastructure
-```
-## 层级关系图
-```mermaid
-graph TD
-    subgraph Frontend["前端层"]
-        ui_package["internal/ui"]
-        view_models["internal/ui/viewmodels"]
+graph TB
+    subgraph 前端层
+        UI[internal/ui]
+        Views[internal/ui/views]
+        ViewModels[internal/ui/viewmodels]
+        UI --> Views
+        UI --> ViewModels
+        Views --> ViewModels
     end
-subgraph Application["应用层"]
-    service_package["internal/service"]
-    config_package["internal/config"]
-end
-subgraph Domain["领域层"]
-    model_package["internal/model"]
-end
-subgraph Infrastructure["基础设施层"]
-    network_package["internal/network"]
-    storage_package["internal/storage"]
-end
-ui_package --> view_models
-view_models --> service_package
-service_package --> model_package
-service_package --> config_package
-service_package --> network_package
-network_package --> model_package
-config_package --> storage_package
-classDef layer fill:#f9f,stroke:#333,stroke-width:2px
-class Frontend,Application,Domain,Infrastructure layer
+
+    subgraph 应用层
+        Service[internal/service]
+        Config[internal/config]
+        Model[internal/model]
+        Service --> Config
+        Service --> Model
+    end
+
+    subgraph 基础设施层
+        Network[internal/network]
+        Storage[internal/storage]
+        Common[pkg/common]
+        Network --> Common
+        Storage --> Common
+    end
+
+    subgraph 入口层
+        Server[cmd/server]
+        Client[cmd/client]
+        Server --> Service
+        Server --> Network
+        Server --> UI
+        Client --> Network
+        Client --> UI
+    end
+
+    ViewModels --> Service
+    Service --> Network
+    Service --> Storage
+    Config --> Storage
+    Model --> Common
 ```
+
+### 层级说明
+
+1. **前端层**
+   - 负责用户界面展示和交互
+   - 包含视图(Views)和视图模型(ViewModels)
+   - 使用 walk 库实现 GUI 功能
+
+2. **应用层**
+   - 实现核心业务逻辑
+   - 协调各个组件工作
+   - 管理配置和同步服务
+
+3. **基础设施层**
+   - 提供底层功能支持
+   - 实现网络通信
+   - 处理数据存储
+   - 提供通用工具
+
+4. **入口层**
+   - 提供程序入口点
+   - 初始化各个组件
+   - 启动服务和界面

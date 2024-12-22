@@ -1,3 +1,18 @@
+/*
+文件作用:
+- 提供通用工具函数
+- 实现文件操作功能
+- 提供加密和解密方法
+- 处理路径和目录操作
+
+主要方法:
+- CalculateFileHash: 计算文件哈希值
+- CompressFiles: 压缩文件
+- DecompressFiles: 解压文件
+- ValidatePath: 验证路径有效性
+- EnsureDir: 确保目录存在
+*/
+
 package common
 
 import (
@@ -9,34 +24,6 @@ import (
 	"path/filepath"
 	"time"
 )
-
-/*
-Package common 提供通用工具函数。
-
-文件作用：
-- 提供文件操作工具
-- 提供哈希计算功能
-- 提供路径处理工具
-- 提供时间处理函数
-- 提供错误处理功能
-
-主要类型：
-- FileAction: 文件操作类型
-- FileDiff: 文件差异信息
-- FileError: 文件操作错误
-- PathError: 路径操作错误
-
-主要方法：
-- CompareFiles: 比较文件差异
-- SyncFiles: 同步文件
-- CopyFile: 复制文件
-- CalculateFileHash: 计算文件哈希值
-- EnsureDir: 确保目录存在
-- CleanupTempFiles: 清理临时文件
-- IsPathExists: 检查路径是否存在
-- GetRelativePath: 获取相对路径
-- ValidatePath: 验证路径
-*/
 
 // FileAction 文件操作类型
 type FileAction string

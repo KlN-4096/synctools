@@ -1,28 +1,16 @@
 /*
-Package network 实现了网络通信功能。
+文件作用:
+- 实现网络服务器功能
+- 处理客户端连接
+- 管理文件同步请求
+- 提供文件传输服务
 
-文件作用：
-- 实现服务器端网络通信
-- 管理客户端连接
-- 处理同步请求
-- 实现文件传输
-
-主要类型：
-- Server: 网络服务器
-- Client: 客户端连接
-- ClientMessage: 客户端消息
-- FileOperation: 文件操作接口
-- TransferResult: 传输结果
-
-主要方法：
-- NewServer: 创建新的服务器实例
+主要方法:
+- NewServer: 创建服务器实例
 - Start: 启动服务器
 - Stop: 停止服务器
-- handleMessage: 处理客户端消息
-- handleSyncRequest: 处理同步请求
-- handleFileTransfer: 处理文件传输
-- handlePackTransfer: 处理压缩包传输
-- sendResponse: 发送响应消息
+- HandleClient: 处理客户端连接
+- SendFile: 发送文件到客户端
 */
 
 package network
@@ -595,7 +583,7 @@ func (op *FileSyncOperation) executePushSync(srcFiles, hashFiles map[string]File
 		FilesToAdd []string `json:"files_to_add"`
 	}{
 		Success:    true,
-		Message:    "同步请求处理成功",
+		Message:    "同步请求处理��功",
 		DiffCount:  len(filesToAdd),
 		FilesToAdd: filesToAdd,
 	}

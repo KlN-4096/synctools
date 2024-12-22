@@ -1,3 +1,18 @@
+/*
+文件作用:
+- 实现服务器的主程序入口
+- 初始化服务器配置和组件
+- 启动网络服务和GUI界面
+- 管理服务器状态和配置
+
+主要方法:
+- main: 程序入口,初始化各个组件并启动服务器
+- initConfig: 初始化服务器配置
+- setupLogger: 设置日志记录器
+- createSyncService: 创建同步服务
+- handlePanic: 处理全局异常
+*/
+
 package main
 
 import (
@@ -14,23 +29,6 @@ import (
 	"synctools/internal/ui/viewmodels"
 	"synctools/pkg/common"
 )
-
-/*
-Package main 实现了文件同步工具的服务器程序。
-
-文件作用：
-- 实现服务器的主程序入口
-- 初始化服务器配置和组件
-- 启动网络服务和GUI界面
-- 管理服务器状态和配置
-
-主要方法：
-- main: 程序入口，初始化各个组件并启动服务器
-- initConfig: 初始化服务器配置
-- setupLogger: 设置日志记录器
-- createSyncService: 创建同步服务
-- handlePanic: 处理全局异常
-*/
 
 func main() {
 	// 获取程序所在目录

@@ -1,25 +1,17 @@
 /*
-Package views 实现了用户界面视图层。
-
-文件作用：
+文件作用:
 - 实现配置界面的UI布局和交互
 - 管理配置界面的各个控件
 - 处理用户界面事件
 - 与视图模型层交互
 
-主要类型：
-- ConfigTab: 配置界面标签页
-- ConfigTabInterface: 配置界面接口
-
-主要方法：
+主要方法:
 - NewConfigTab: 创建新的配置界面
 - Setup: 设置UI组件和布局
 - onConfigActivated: 处理配置选择事件
 - onNewConfig: 处理新建配置事件
 - onDeleteConfig: 处理删除配置事件
 - onSave: 处理保存配置事件
-- onStartServer: 处理启动服务器事件
-- onStopServer: 处理停止服务器事件
 */
 
 package views
