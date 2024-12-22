@@ -1,54 +1,214 @@
 package common
 
 import (
-	"archive/zip"
 	"crypto/md5"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
-// GenerateUUID 生成UUID
-func GenerateUUID() (string, error) {
-	uuid := make([]byte, 16)
-	_, err := rand.Read(uuid)
-	if err != nil {
-		return "", fmt.Errorf("生成UUID失败: %v", err)
+// FileAction 文件操作类型
+type FileAction string
+
+const (
+	FileActionAdd    FileAction = "add"    // 添加文件
+	FileActionDelete FileAction = "delete" // 删除文件
+	FileActionUpdate FileAction = "update" // 更新文件
+)
+
+// FileDiff 文件差异信息
+type FileDiff struct {
+	Path     string      // 文件路径
+	Action   FileAction  // 操作类型
+	FileInfo os.FileInfo // 文件信息
+	Hash     string      // 文件哈希值
+}
+
+// CompareFiles 比较源目录和目标目录的文件差异
+// 返回需要在目标目录进行的操作列表
+func CompareFiles(srcDir, dstDir string, ignoreList []string) ([]FileDiff, error) {
+	var diffs []FileDiff
+
+	// 创建忽略文件匹配器
+	ignoreMatches := make(map[string]bool)
+	for _, pattern := range ignoreList {
+		ignoreMatches[pattern] = true
 	}
-	return hex.EncodeToString(uuid), nil
-}
 
-// EnsureDir 确保目录存在
-func EnsureDir(path string) error {
-	return os.MkdirAll(path, 0755)
-}
+	// 获取源目录的文件列表
+	srcFiles := make(map[string]os.FileInfo)
+	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 
-// IsFileExists 检查文件是否存在
-func IsFileExists(path string) bool {
-	_, err := os.Stat(path)
-	return !os.IsNotExist(err)
-}
+		// 获取相对路径
+		relPath, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
 
-// GetWorkDir 获取工作目录
-func GetWorkDir() (string, error) {
-	exePath, err := os.Executable()
+		// 检查是否在忽略列表中
+		if ignoreMatches[relPath] || ignoreMatches[info.Name()] {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !info.IsDir() {
+			srcFiles[relPath] = info
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("获取程序路径失败: %v", err)
+		return nil, fmt.Errorf("遍历源目录失败: %v", err)
 	}
-	return filepath.Dir(exePath), nil
+
+	// 获取目标目录的文件列表
+	dstFiles := make(map[string]os.FileInfo)
+	err = filepath.Walk(dstDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+
+		// 获取相对路径
+		relPath, err := filepath.Rel(dstDir, path)
+		if err != nil {
+			return err
+		}
+
+		// 检查是否在忽略列表中
+		if ignoreMatches[relPath] || ignoreMatches[info.Name()] {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !info.IsDir() {
+			dstFiles[relPath] = info
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("遍历目标目录失败: %v", err)
+	}
+
+	// 比较文件
+	for path, srcInfo := range srcFiles {
+		dstInfo, exists := dstFiles[path]
+		if !exists {
+			// 目标目录不存在此文件，需要添加
+			hash, err := CalculateFileHash(filepath.Join(srcDir, path))
+			if err != nil {
+				return nil, fmt.Errorf("计算文件哈希失败 [%s]: %v", path, err)
+			}
+			diffs = append(diffs, FileDiff{
+				Path:     path,
+				Action:   FileActionAdd,
+				FileInfo: srcInfo,
+				Hash:     hash,
+			})
+			continue
+		}
+
+		// 文件存在，检查是否需要更新
+		if srcInfo.ModTime().Unix() != dstInfo.ModTime().Unix() ||
+			srcInfo.Size() != dstInfo.Size() {
+			// 计算源文件哈希
+			srcHash, err := CalculateFileHash(filepath.Join(srcDir, path))
+			if err != nil {
+				return nil, fmt.Errorf("计算源文件哈希失败 [%s]: %v", path, err)
+			}
+			// 计算目标文件哈希
+			dstHash, err := CalculateFileHash(filepath.Join(dstDir, path))
+			if err != nil {
+				return nil, fmt.Errorf("计算目标文件哈希失败 [%s]: %v", path, err)
+			}
+			// 只有当哈希值不同时才需要更新
+			if srcHash != dstHash {
+				diffs = append(diffs, FileDiff{
+					Path:     path,
+					Action:   FileActionUpdate,
+					FileInfo: srcInfo,
+					Hash:     srcHash,
+				})
+			}
+		}
+		delete(dstFiles, path)
+	}
+
+	// 剩余的目标文件需要删除
+	for path, info := range dstFiles {
+		diffs = append(diffs, FileDiff{
+			Path:     path,
+			Action:   FileActionDelete,
+			FileInfo: info,
+		})
+	}
+
+	return diffs, nil
 }
 
-// JoinPath 连接路径
-func JoinPath(elem ...string) string {
-	return filepath.Join(elem...)
+// SyncFiles 根据差异列表同步文件
+func SyncFiles(srcDir, dstDir string, diffs []FileDiff) error {
+	for _, diff := range diffs {
+		srcPath := filepath.Join(srcDir, diff.Path)
+		dstPath := filepath.Join(dstDir, diff.Path)
+
+		switch diff.Action {
+		case FileActionAdd, FileActionUpdate:
+			// 确保目标目录存在
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+				return fmt.Errorf("创建目标目录失败 [%s]: %v", diff.Path, err)
+			}
+			// 复制文件
+			if err := CopyFile(srcPath, dstPath); err != nil {
+				return fmt.Errorf("复制文件失败 [%s]: %v", diff.Path, err)
+			}
+			// 保持文件时间一致
+			if err := os.Chtimes(dstPath, diff.FileInfo.ModTime(), diff.FileInfo.ModTime()); err != nil {
+				return fmt.Errorf("设置文件时间失败 [%s]: %v", diff.Path, err)
+			}
+
+		case FileActionDelete:
+			// 删除文件
+			if err := os.Remove(dstPath); err != nil {
+				if !os.IsNotExist(err) {
+					return fmt.Errorf("删除文件失败 [%s]: %v", diff.Path, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
-// CalculateFileHash 计算文件MD5哈希值
+// CopyFile 复制文件
+func CopyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
+}
+
+// CalculateFileHash 计算文件的哈希值
 func CalculateFileHash(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -62,167 +222,6 @@ func CalculateFileHash(path string) (string, error) {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-// ZipOptions 压缩选项
-type ZipOptions struct {
-	ExcludePatterns []string // 排除的文件模式
-	IncludePatterns []string // 包含的文件模式
-	MaxSize         int64    // 最大大小限制
-	TempDir         string   // 临时目录
-}
-
-// CreateZipPackage 创建文件夹的压缩包
-func CreateZipPackage(sourcePath string, targetPath string, options *ZipOptions) error {
-	// 确保目标目录存在
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %v", err)
-	}
-
-	// 创建zip文件
-	zipFile, err := os.Create(targetPath)
-	if err != nil {
-		return fmt.Errorf("创建zip文件失败: %v", err)
-	}
-	defer zipFile.Close()
-
-	// 创建zip写入器
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
-
-	// 遍历源目录
-	err = filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// 跳过目录本身
-		if info.IsDir() {
-			return nil
-		}
-
-		// 获取相对路径
-		relPath, err := filepath.Rel(sourcePath, path)
-		if err != nil {
-			return fmt.Errorf("获取相对路径失败: %v", err)
-		}
-
-		// 创建文件头
-		header, err := zip.FileInfoHeader(info)
-		if err != nil {
-			return fmt.Errorf("创建文件头失败: %v", err)
-		}
-		header.Name = relPath
-		header.Method = zip.Deflate
-
-		// 写入文件
-		writer, err := zipWriter.CreateHeader(header)
-		if err != nil {
-			return fmt.Errorf("创建zip文件头失败: %v", err)
-		}
-
-		file, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("打开文件失败: %v", err)
-		}
-		defer file.Close()
-
-		if _, err := io.Copy(writer, file); err != nil {
-			return fmt.Errorf("写入文件失败: %v", err)
-		}
-
-		return nil
-	})
-
-	return err
-}
-
-// ExtractZipPackage 解压压缩包到指定目录
-func ExtractZipPackage(zipPath string, targetDir string) error {
-	// 打开zip文件
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return fmt.Errorf("打开zip文件失败: %v", err)
-	}
-	defer reader.Close()
-
-	// 确保目标目录存在
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %v", err)
-	}
-
-	// 解压文件
-	for _, file := range reader.File {
-		// 构建完整的目标路径
-		targetPath := filepath.Join(targetDir, file.Name)
-
-		// 确保目标路径在目标目录内
-		if !isSubPath(targetDir, targetPath) {
-			return fmt.Errorf("非法的文件路径: %s", file.Name)
-		}
-
-		if file.FileInfo().IsDir() {
-			// 创建目录
-			if err := os.MkdirAll(targetPath, file.Mode()); err != nil {
-				return fmt.Errorf("创建目录失败: %v", err)
-			}
-			continue
-		}
-
-		// 确保父目录存在
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-			return fmt.Errorf("创建父目录失败: %v", err)
-		}
-
-		// 创建目标文件
-		targetFile, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
-		if err != nil {
-			return fmt.Errorf("创建目标文件失败: %v", err)
-		}
-
-		// 打开源文件
-		sourceFile, err := file.Open()
-		if err != nil {
-			targetFile.Close()
-			return fmt.Errorf("打开源文件失败: %v", err)
-		}
-
-		// 复制内容
-		_, err = io.Copy(targetFile, sourceFile)
-		sourceFile.Close()
-		targetFile.Close()
-
-		if err != nil {
-			return fmt.Errorf("复制文件内容失败: %v", err)
-		}
-	}
-
-	return nil
-}
-
-// CalculateFileMD5 计算文件的MD5值
-func CalculateFileMD5(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("打开文件失败: %v", err)
-	}
-	defer file.Close()
-
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("计算MD5失败: %v", err)
-	}
-
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-// isSubPath 检查子路径是否在父路径下
-func isSubPath(parent, sub string) bool {
-	rel, err := filepath.Rel(parent, sub)
-	if err != nil {
-		return false
-	}
-	return !filepath.IsAbs(rel) && !strings.HasPrefix(rel, "..")
 }
 
 // CleanupTempFiles 清理临时文件

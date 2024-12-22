@@ -4,9 +4,11 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 /*
@@ -38,6 +40,7 @@ type Config struct {
 	SyncFolders     []SyncFolder     `json:"sync_folders"`     // 同步文件夹列表
 	IgnoreList      []string         `json:"ignore_list"`      // 忽略文件列表
 	FolderRedirects []FolderRedirect `json:"folder_redirects"` // 文件夹重定向配置
+	ServerConfig    *Config          `json:"server_config"`    // 服务器配置
 }
 
 // 配置类型常量
@@ -252,9 +255,9 @@ type Server interface {
 
 // 同步模式常量
 const (
-	SyncModeMirror = "mirror" // 镜像模式
-	SyncModePush   = "push"   // 推送模式
-	SyncModePack   = "pack"   // 压缩包模式
+	SyncModeMirror = "mirror" // 镜像同步模式
+	SyncModePush   = "push"   // 推送同步模式
+	SyncModePack   = "pack"   // 打包同步模式
 )
 
 // PackState 压缩包状态
@@ -298,4 +301,60 @@ type PackProgress struct {
 	CurrentSize int64   `json:"current_size"` // 当前大小
 	Percentage  float64 `json:"percentage"`   // 完成百分比
 	Status      string  `json:"status"`       // 状态描述
+}
+
+// LoadConfig 从文件加载配置
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 如果配置文件不存在，创建默认配置
+			config := &Config{
+				Type:    ConfigTypeClient,
+				Host:    "localhost",
+				Port:    6666,
+				SyncDir: "",
+				Version: "1.0.0",
+				Name:    "默认配置",
+			}
+			// 保存默认配置
+			if err := SaveConfig(path, config); err != nil {
+				return nil, fmt.Errorf("保存默认配置失败: %v", err)
+			}
+			return config, nil
+		}
+		return nil, fmt.Errorf("读取配置文件失败: %v", err)
+	}
+
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败: %v", err)
+	}
+
+	// 确保类型正确设置
+	if config.Type == "" {
+		config.Type = ConfigTypeClient
+	}
+
+	return &config, nil
+}
+
+// SaveConfig 保存配置到文件
+func SaveConfig(path string, config *Config) error {
+	// 确保配置目录存在
+	configDir := filepath.Dir(path)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("创建配置目录失败: %v", err)
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %v", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %v", err)
+	}
+
+	return nil
 }
