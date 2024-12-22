@@ -139,33 +139,35 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 
 	// 设置关闭事件处理
 	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		// 关闭前确认
-		if reason == walk.CloseReasonUser {
-			if walk.MsgBox(mainWindow, "确认",
-				"确定要退出程序吗?",
-				walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdNo {
-				*canceled = true
-				return
-			}
+		// 安全检查
+		if viewModel == nil {
+			return
 		}
 
-		// 停止服务
-		if viewModel.ConfigViewModel.IsServerRunning() {
+		// 记录关闭事件
+		viewModel.LogDebug("窗口正在关闭")
+
+		// 如果服务器正在运行，尝试停止它
+		if viewModel.ConfigViewModel != nil && viewModel.ConfigViewModel.IsServerRunning() {
 			if err := viewModel.ConfigViewModel.StopServer(); err != nil {
-				viewModel.LogError("停止服务失败", err)
-				walk.MsgBox(mainWindow, "错误",
-					fmt.Sprintf("停止服务失败: %v", err),
-					walk.MsgBoxIconError)
+				// 记录错误但继续关闭过程
+				viewModel.LogError("停止服务器失败", err)
 			}
 		}
 
-		// 保存配置
-		if err := viewModel.ConfigViewModel.SaveConfig(); err != nil {
-			viewModel.LogError("保存配置失败", err)
-			walk.MsgBox(mainWindow, "错误",
-				fmt.Sprintf("保存配置失败: %v", err),
-				walk.MsgBoxIconError)
+		// 保存配置（如果有选中的配置）
+		if viewModel.ConfigViewModel != nil {
+			if config := viewModel.ConfigViewModel.GetCurrentConfig(); config != nil {
+				if err := viewModel.ConfigViewModel.SaveConfig(); err != nil {
+					// 记录错误但继续关闭过程
+					viewModel.LogError("保存配置失败", err)
+				}
+			} else {
+				viewModel.LogDebug("没有选中的配置，跳过保存")
+			}
 		}
+
+		viewModel.LogDebug("应用程序正在退出")
 	})
 
 	// 显示窗口

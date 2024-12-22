@@ -77,14 +77,6 @@ func main() {
 		})
 	}
 
-	// 启动网络服务器
-	server := c.GetNetworkServer()
-	if err := server.Start(); err != nil {
-		logger.Fatal("启动网络服务器失败", interfaces.Fields{
-			"error": err,
-		})
-	}
-
 	// 启动同步服务
 	syncService := c.GetSyncService()
 	if err := syncService.Start(); err != nil {
@@ -96,17 +88,30 @@ func main() {
 	// 创建主视图模型
 	mainViewModel := viewmodels.NewMainViewModel(syncService, logger)
 
-	// 创建并运行主窗口
-	if err := ui.CreateMainWindow(mainViewModel); err != nil {
-		logger.Fatal("创建主窗口失败", interfaces.Fields{
-			"error": err,
-		})
-	}
+	// 创建退出通道
+	exitChan := make(chan struct{})
 
-	// 等待中断信号
+	// 创建并运行主窗口（在新的 goroutine 中）
+	go func() {
+		if err := ui.CreateMainWindow(mainViewModel); err != nil {
+			logger.Fatal("创建主窗口失败", interfaces.Fields{
+				"error": err,
+			})
+		}
+		// 窗口关闭时发送退出信号
+		close(exitChan)
+	}()
+
+	// 等待中断信号或窗口关闭
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+
+	select {
+	case <-sigChan:
+		logger.Info("收到中断信号", nil)
+	case <-exitChan:
+		logger.Info("窗口已关闭", nil)
+	}
 
 	// 优雅关闭
 	logger.Info("开始关闭服务器...", nil)
@@ -116,6 +121,7 @@ func main() {
 		})
 	}
 	logger.Info("服务器已关闭", nil)
+	os.Exit(0)
 }
 
 // loadOrCreateConfig 加载或创建默认配置

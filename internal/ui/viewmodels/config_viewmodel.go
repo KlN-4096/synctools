@@ -184,46 +184,102 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 // SaveConfig 处理保存配置的 UI 操作
 func (vm *ConfigViewModel) SaveConfig() error {
-	// 禁用保存按钮
-	vm.saveButton.SetEnabled(false)
-	vm.setStatus("正在保存配置...")
+	// 安全检查
+	if vm == nil || vm.syncService == nil {
+		return fmt.Errorf("视图模型或同步服务未初始化")
+	}
+
+	// 检查是否有选中的配置
+	if vm.syncService.GetCurrentConfig() == nil {
+		if vm.statusBar != nil {
+			vm.setStatus("没有选中的配置")
+		}
+		return fmt.Errorf("没有选中的配置")
+	}
 
 	// 从 UI 收集配置数据
 	config := vm.collectConfigFromUI()
 
 	// 调用服务层保存配置
 	if err := vm.syncService.SaveConfig(config); err != nil {
-		vm.setStatus("保存配置失败")
-		vm.saveButton.SetEnabled(true)
+		if vm.statusBar != nil {
+			vm.setStatus("保存配置失败")
+		}
+		if vm.saveButton != nil {
+			vm.saveButton.SetEnabled(true)
+		}
 		return err
 	}
 
 	// 更新 UI 状态
 	vm.isEditing = false
-	vm.saveButton.SetEnabled(true)
-	vm.setStatus("配置已保存")
+	if vm.saveButton != nil {
+		vm.saveButton.SetEnabled(true)
+	}
+	if vm.statusBar != nil {
+		vm.setStatus("配置已保存")
+	}
 	return nil
 }
 
 // collectConfigFromUI 从 UI 控件收集配置数据
 func (vm *ConfigViewModel) collectConfigFromUI() *interfaces.Config {
+	// 安全检查
+	if vm == nil || vm.syncService == nil {
+		return nil
+	}
+
 	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		config = &interfaces.Config{}
 	}
 
-	return &interfaces.Config{
+	// 创建新的配置对象
+	newConfig := &interfaces.Config{
 		UUID:            config.UUID,
 		Type:            interfaces.ConfigTypeServer,
-		Name:            vm.nameEdit.Text(),
-		Version:         vm.versionEdit.Text(),
-		Host:            vm.hostEdit.Text(),
-		Port:            vm.getPortFromUI(),
-		SyncDir:         vm.syncDirEdit.Text(),
-		IgnoreList:      vm.getIgnoreListFromUI(),
 		SyncFolders:     config.SyncFolders,
 		FolderRedirects: config.FolderRedirects,
 	}
+
+	// 安全地获取 UI 值
+	if vm.nameEdit != nil {
+		newConfig.Name = vm.nameEdit.Text()
+	} else {
+		newConfig.Name = config.Name
+	}
+
+	if vm.versionEdit != nil {
+		newConfig.Version = vm.versionEdit.Text()
+	} else {
+		newConfig.Version = config.Version
+	}
+
+	if vm.hostEdit != nil {
+		newConfig.Host = vm.hostEdit.Text()
+	} else {
+		newConfig.Host = config.Host
+	}
+
+	if vm.portEdit != nil {
+		newConfig.Port = vm.getPortFromUI()
+	} else {
+		newConfig.Port = config.Port
+	}
+
+	if vm.syncDirEdit != nil {
+		newConfig.SyncDir = vm.syncDirEdit.Text()
+	} else {
+		newConfig.SyncDir = config.SyncDir
+	}
+
+	if vm.ignoreEdit != nil {
+		newConfig.IgnoreList = vm.getIgnoreListFromUI()
+	} else {
+		newConfig.IgnoreList = config.IgnoreList
+	}
+
+	return newConfig
 }
 
 // getPortFromUI 从 UI 获取端口号
@@ -264,6 +320,10 @@ func (vm *ConfigViewModel) updateButtonStates() {
 
 // setStatus 设置状态栏文本
 func (vm *ConfigViewModel) setStatus(status string) {
+	if vm == nil || vm.logger == nil {
+		return
+	}
+
 	if vm.statusBar != nil {
 		vm.statusBar.SetText(status)
 	}
@@ -274,6 +334,12 @@ func (vm *ConfigViewModel) setStatus(status string) {
 
 // StartServer 处理启动服务器的 UI 操作
 func (vm *ConfigViewModel) StartServer() error {
+	// 检查是否有选中的配置
+	if vm.syncService.GetCurrentConfig() == nil {
+		vm.setStatus("没有选中的配置")
+		return fmt.Errorf("没有选中的配置")
+	}
+
 	// 禁用按钮，防止重复点击
 	vm.startServerButton.SetEnabled(false)
 	vm.setStatus("正在启动服务器...")
@@ -294,6 +360,16 @@ func (vm *ConfigViewModel) StartServer() error {
 
 // StopServer 处理停止服务器的 UI 操作
 func (vm *ConfigViewModel) StopServer() error {
+	// 安全检查
+	if vm == nil || vm.syncService == nil {
+		return fmt.Errorf("视图模型或同步服务未初始化")
+	}
+
+	// 检查按钮是否存在
+	if vm.startServerButton == nil {
+		return fmt.Errorf("服务器按钮未初始化")
+	}
+
 	// 禁用按钮，防止重复点击
 	vm.startServerButton.SetEnabled(false)
 	vm.setStatus("正在停止服务器...")
@@ -814,5 +890,9 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 
 // IsServerRunning 返回服务器是否正在运行
 func (vm *ConfigViewModel) IsServerRunning() bool {
+	// 安全检查
+	if vm == nil || vm.syncService == nil {
+		return false
+	}
 	return vm.syncService.IsRunning()
 }

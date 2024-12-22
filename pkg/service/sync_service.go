@@ -1,18 +1,32 @@
 /*
 文件作用:
-- 实现文件同步服务
+- 实现核心业务逻辑服务层
+- 管理配置的存储和验证
 - 管理文件同步状态和进度
 - 处理同步请求和响应
-- 提供同步操作的核心功能
+- 管理网络服务器的生命周期
+
+主要功能:
+1. 配置管理:
+   - 配置的 CRUD 操作
+   - 配置的验证和存储
+   - 配置变更通知
+
+2. 同步服务:
+   - 文件同步操作
+   - 同步模式管理
+   - 进度跟踪和回调
+
+3. 网络服务:
+   - 服务器的启动和停止
+   - 请求的处理和响应
+   - 状态管理
 
 主要方法:
-- NewSyncService: 创建新的同步服务
-- Start: 启动同步服务
-- Stop: 停止同步服务
-- SyncFiles: 同步指定路径的文件
-- HandleSyncRequest: 处理同步请求
-- GetSyncStatus: 获取同步状态
-- setStatus: 设置同步状态
+- 配置相关：LoadConfig, SaveConfig, ValidateConfig
+- 同步相关：SyncFiles, HandleSyncRequest
+- 服务器相关：StartServer, StopServer
+- 状态管理：GetSyncStatus, IsRunning
 */
 
 package service
@@ -31,6 +45,7 @@ import (
 
 	"synctools/internal/interfaces"
 	"synctools/pkg/errors"
+	"synctools/pkg/network"
 )
 
 // SyncService 同步服务实现
@@ -78,9 +93,8 @@ func (s *SyncService) StartServer() error {
 		return errors.ErrServiceNotRunning
 	}
 
-	if s.server == nil {
-		return errors.NewError("NETWORK_SERVER", "网络服务器未初始化", nil)
-	}
+	// 创建新的网络服务器实例
+	s.server = network.NewServer(s.config, s.logger)
 
 	// 启动网络服务器
 	if err := s.server.Start(); err != nil {
@@ -113,6 +127,9 @@ func (s *SyncService) StopServer() error {
 		return err
 	}
 
+	// 清理服务器实例
+	s.server = nil
+
 	s.setStatus("服务器已停止")
 	s.logger.Info("网络服务器已停止", nil)
 
@@ -123,6 +140,13 @@ func (s *SyncService) StopServer() error {
 func (s *SyncService) Stop() error {
 	if !s.running {
 		return nil
+	}
+
+	// 确保先停止网络服务器
+	if err := s.StopServer(); err != nil {
+		s.logger.Error("停止网络服务器失败", interfaces.Fields{
+			"error": err,
+		})
 	}
 
 	s.running = false
@@ -570,7 +594,7 @@ func (s *SyncService) ListConfigs() ([]*interfaces.Config, error) {
 
 // LoadConfig 实现配置加载功能
 func (s *SyncService) LoadConfig(id string) error {
-	// 构造配置文件名
+	// 构造配置��件名
 	filename := fmt.Sprintf("%s.json", id)
 
 	// 读取配置文件
@@ -696,5 +720,9 @@ func (s *SyncService) SetProgressCallback(callback func(progress *interfaces.Pro
 
 // SetServer 实现服务器设置
 func (s *SyncService) SetServer(server interfaces.NetworkServer) {
+	if s.server != nil {
+		// 如果已有服务器在运行，先停止它
+		s.StopServer()
+	}
 	s.server = server
 }
