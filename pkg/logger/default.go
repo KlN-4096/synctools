@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -29,9 +30,12 @@ func NewDefaultLogger(logDir string) (*DefaultLogger, error) {
 		return nil, fmt.Errorf("打开日志文件失败: %v", err)
 	}
 
+	// 创建一个同时写入文件和标准输出的writer
+	multiWriter := io.MultiWriter(file, os.Stdout)
+
 	return &DefaultLogger{
 		level:  interfaces.INFO,
-		logger: log.New(file, "", log.LstdFlags),
+		logger: log.New(multiWriter, "", log.LstdFlags),
 		fields: make(interfaces.Fields),
 	}, nil
 }
