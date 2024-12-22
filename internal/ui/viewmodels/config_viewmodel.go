@@ -111,6 +111,11 @@ func NewConfigViewModel(syncService interfaces.SyncService, logger ViewModelLogg
 func (vm *ConfigViewModel) Initialize() error {
 	vm.logger.Debug("开始初始化配置视图模型", nil)
 
+	// 初始化配置列表模型
+	vm.configList = NewConfigListModel(vm.syncService, vm.logger)
+	vm.redirectList = NewRedirectListModel(vm.syncService, vm.logger)
+	vm.syncFolderList = NewSyncFolderListModel(vm.syncService, vm.logger)
+
 	// 加载默认配置
 	config := vm.syncService.GetCurrentConfig()
 	vm.logger.Debug("获取当前配置", interfaces.Fields{
@@ -145,8 +150,11 @@ func (vm *ConfigViewModel) SetupUI(
 	startServerButton *walk.PushButton,
 	saveButton *walk.PushButton,
 ) {
+	vm.logger.Debug("开始设置UI组件", nil)
+
 	// 检查必要的 UI 控件
 	if nameEdit == nil || versionEdit == nil || hostEdit == nil || portEdit == nil || syncDirEdit == nil {
+		vm.logger.Error("必要的UI控件为空", nil)
 		panic("必要的 UI 控件不能为空")
 	}
 
@@ -164,23 +172,34 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.startServerButton = startServerButton
 	vm.saveButton = saveButton
 
-	vm.logger.Debug("设置表格模型", nil)
+	vm.logger.Debug("开始设置表格模型", nil)
 	// 设置表格模型
 	if configTable != nil {
 		vm.logger.Debug("设置配置列表模型", interfaces.Fields{
 			"model": vm.configList != nil,
+			"rows":  vm.configList.RowCount(),
 		})
-		configTable.SetModel(vm.configList)
-	}
-	if redirectTable != nil {
-		redirectTable.SetModel(vm.redirectList)
-	}
-	if syncFolderTable != nil {
-		syncFolderTable.SetModel(vm.syncFolderList)
+		// 先刷新缓存
+		vm.configList.refreshCache()
+		vm.logger.Debug("刷新缓存后的配置列表", interfaces.Fields{
+			"rows": vm.configList.RowCount(),
+		})
+		// 设置模型
+		if err := configTable.SetModel(vm.configList); err != nil {
+			vm.logger.Error("设置配置列表模型失败", interfaces.Fields{
+				"error": err.Error(),
+			})
+		}
+		// 通知UI更新
+		vm.configList.PublishRowsReset()
+		vm.logger.Debug("配置列表模型设置完成", nil)
+	} else {
+		vm.logger.Warn("配置表格为空", nil)
 	}
 
 	// 更新UI显示
 	vm.UpdateUI()
+	vm.logger.Debug("UI组件设置完成", nil)
 }
 
 // UpdateUI 更新 UI 显示
@@ -197,7 +216,30 @@ func (vm *ConfigViewModel) UpdateUI() {
 		return
 	}
 
+	// 强制所有表格重新加载数据
+	if vm.configTable != nil {
+		vm.logger.Debug("更新配置表格", interfaces.Fields{
+			"before_rows": vm.configList.RowCount(),
+		})
+		vm.configTable.SetModel(nil)
+		vm.configTable.SetModel(vm.configList)
+		vm.configList.PublishRowsReset()
+		vm.logger.Debug("配置表格更新完成", interfaces.Fields{
+			"after_rows": vm.configList.RowCount(),
+		})
+	} else {
+		vm.logger.Warn("配置表格为空", nil)
+	}
+
 	// 更新基本信息
+	vm.logger.Debug("更新基本信息", interfaces.Fields{
+		"name":     config.Name,
+		"version":  config.Version,
+		"host":     config.Host,
+		"port":     config.Port,
+		"sync_dir": config.SyncDir,
+	})
+
 	vm.nameEdit.SetText(config.Name)
 	vm.versionEdit.SetText(config.Version)
 	vm.hostEdit.SetText(config.Host)
@@ -207,6 +249,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 更新按钮状态
 	vm.updateButtonStates()
+	vm.logger.Debug("UI组件更新完成", nil)
 }
 
 // SaveConfig 处理保存配置的 UI 操作
@@ -361,26 +404,37 @@ func (vm *ConfigViewModel) setStatus(status string) {
 
 // StartServer 处理启动服务器的 UI 操作
 func (vm *ConfigViewModel) StartServer() error {
+	// 安全检查
+	if vm == nil || vm.syncService == nil {
+		return fmt.Errorf("视图模型或同步服务未初始化")
+	}
+
 	// 检查是否有选中的配置
 	if vm.syncService.GetCurrentConfig() == nil {
 		vm.setStatus("没有选中的配置")
 		return fmt.Errorf("没有选中的配置")
 	}
 
-	// 禁用按钮，防止重复点击
-	vm.startServerButton.SetEnabled(false)
+	// 更新 UI 状态
+	if vm.startServerButton != nil {
+		vm.startServerButton.SetEnabled(false)
+	}
 	vm.setStatus("正在启动服务器...")
 
 	// 调用服务层启动服务器
 	if err := vm.syncService.StartServer(); err != nil {
 		vm.setStatus("启动服务器失败")
-		vm.startServerButton.SetEnabled(true)
+		if vm.startServerButton != nil {
+			vm.startServerButton.SetEnabled(true)
+		}
 		return err
 	}
 
 	// 更新 UI 状态
-	vm.startServerButton.SetText("停止服务器")
-	vm.startServerButton.SetEnabled(true)
+	if vm.startServerButton != nil {
+		vm.startServerButton.SetText("停止服务器")
+		vm.startServerButton.SetEnabled(true)
+	}
 	vm.setStatus("服务器已启动")
 	return nil
 }
@@ -392,25 +446,26 @@ func (vm *ConfigViewModel) StopServer() error {
 		return fmt.Errorf("视图模型或同步服务未初始化")
 	}
 
-	// 检查按钮是否存在
-	if vm.startServerButton == nil {
-		return fmt.Errorf("服务器按钮未初始化")
+	// 更新 UI 状态
+	if vm.startServerButton != nil {
+		vm.startServerButton.SetEnabled(false)
 	}
-
-	// 禁用按钮，防止重复点击
-	vm.startServerButton.SetEnabled(false)
 	vm.setStatus("正在停止服务器...")
 
 	// 调用服务层停止服务器
 	if err := vm.syncService.StopServer(); err != nil {
 		vm.setStatus("停止服务器失败")
-		vm.startServerButton.SetEnabled(true)
+		if vm.startServerButton != nil {
+			vm.startServerButton.SetEnabled(true)
+		}
 		return err
 	}
 
 	// 更新 UI 状态
-	vm.startServerButton.SetText("启动服务器")
-	vm.startServerButton.SetEnabled(true)
+	if vm.startServerButton != nil {
+		vm.startServerButton.SetText("启动服务器")
+		vm.startServerButton.SetEnabled(true)
+	}
 	vm.setStatus("服务器已停止")
 	return nil
 }
@@ -460,6 +515,7 @@ func NewConfigListModel(syncService interfaces.SyncService, logger ViewModelLogg
 
 // refreshCache 刷新配置缓存
 func (m *ConfigListModel) refreshCache() {
+	m.logger.Debug("开始刷新配置缓存", nil)
 	configs, err := m.syncService.ListConfigs()
 	if err != nil {
 		m.cachedConfigs = nil
@@ -503,27 +559,75 @@ func (m *ConfigListModel) refreshCache() {
 
 // RowCount 返回行数
 func (m *ConfigListModel) RowCount() int {
-	return len(m.cachedConfigs)
+	count := len(m.cachedConfigs)
+	m.logger.Debug("获取行数", interfaces.Fields{
+		"count": count,
+	})
+	return count
+}
+
+// ColumnCount 返回列数
+func (m *ConfigListModel) ColumnCount() int {
+	m.logger.Debug("获取列数", interfaces.Fields{
+		"count": 3,
+	})
+	return 3 // 名称、版本、同步目录
+}
+
+// ColumnTitle 返回列标题
+func (m *ConfigListModel) ColumnTitle(col int) string {
+	var title string
+	switch col {
+	case 0:
+		title = "名称"
+	case 1:
+		title = "版本"
+	case 2:
+		title = "同步目录"
+	}
+	m.logger.Debug("获取列标题", interfaces.Fields{
+		"col":   col,
+		"title": title,
+	})
+	return title
 }
 
 // Value 获取单元格值
 func (m *ConfigListModel) Value(row, col int) interface{} {
 	if row < 0 || row >= len(m.cachedConfigs) {
-		m.logger.DebugLog("Value: 无效的行索引 %d (总行数: %d)", row, len(m.cachedConfigs))
+		m.logger.Debug("Value: 无效的行索引", interfaces.Fields{
+			"row":       row,
+			"total_row": len(m.cachedConfigs),
+		})
 		return nil
 	}
 
 	config := m.cachedConfigs[row]
-
+	var value interface{}
 	switch col {
 	case 0:
-		return config.Name
+		value = config.Name
 	case 1:
-		return config.Version
+		value = config.Version
 	case 2:
-		return config.SyncDir
+		value = config.SyncDir
+	default:
+		m.logger.Debug("Value: 无效的列索引", interfaces.Fields{
+			"col": col,
+		})
+		return nil
 	}
-	return nil
+
+	// m.logger.Debug("获取单元格值", interfaces.Fields{
+	// 	"row":      row,
+	// 	"col":      col,
+	// 	"value":    value,
+	// 	"config":   config.UUID,
+	// 	"name":     config.Name,
+	// 	"version":  config.Version,
+	// 	"sync_dir": config.SyncDir,
+	// })
+	return value
 }
 
 // Sort 排序
@@ -554,10 +658,15 @@ func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
 
 // PublishRowsReset 重置行并刷新缓存
 func (m *ConfigListModel) PublishRowsReset() {
-	m.logger.DebugLog("开始刷新配置列表")
+	m.logger.Debug("开始刷新配置列表", interfaces.Fields{
+		"before_rows": len(m.cachedConfigs),
+	})
 	m.refreshCache()
 	m.TableModelBase.PublishRowsReset()
-	m.logger.DebugLog("配置列表刷新完成，共 %d 个配置", len(m.cachedConfigs))
+	m.logger.Debug("配置列表刷新完成", interfaces.Fields{
+		"after_rows": len(m.cachedConfigs),
+		"configs":    m.cachedConfigs,
+	})
 }
 
 // RedirectListModel 重定向列表模型

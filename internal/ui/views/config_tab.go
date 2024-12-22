@@ -32,16 +32,18 @@ type ConfigTab struct {
 	*walk.TabPage
 
 	// UI 组件
-	configTable     *walk.TableView
-	redirectTable   *walk.TableView
-	StatusBar       *walk.StatusBarItem
-	nameEdit        *walk.LineEdit
-	versionEdit     *walk.LineEdit
-	hostEdit        *walk.LineEdit
-	portEdit        *walk.LineEdit
-	syncDirEdit     *walk.LineEdit
-	ignoreEdit      *walk.TextEdit
-	syncFolderTable *walk.TableView
+	configTable       *walk.TableView
+	redirectTable     *walk.TableView
+	StatusBar         *walk.StatusBarItem
+	nameEdit          *walk.LineEdit
+	versionEdit       *walk.LineEdit
+	hostEdit          *walk.LineEdit
+	portEdit          *walk.LineEdit
+	syncDirEdit       *walk.LineEdit
+	ignoreEdit        *walk.TextEdit
+	syncFolderTable   *walk.TableView
+	startServerButton *walk.PushButton
+	saveButton        *walk.PushButton
 
 	viewModel *viewmodels.ConfigViewModel
 
@@ -94,6 +96,7 @@ func (t *ConfigTab) Setup() error {
 								Children: []Widget{
 									PushButton{
 										Text:      "保存配置",
+										AssignTo:  &t.saveButton,
 										OnClicked: t.onSave,
 									},
 									PushButton{
@@ -136,6 +139,7 @@ func (t *ConfigTab) Setup() error {
 								Children: []Widget{
 									PushButton{
 										Text:      "启动服务器",
+										AssignTo:  &t.startServerButton,
 										OnClicked: t.onStartServer,
 									},
 									PushButton{
@@ -356,6 +360,22 @@ func (t *ConfigTab) Setup() error {
 	}.Create(NewBuilder(t.TabPage))); err != nil {
 		return fmt.Errorf("创建配置界面失败: %v", err)
 	}
+
+	// 设置UI组件
+	t.viewModel.SetupUI(
+		t.configTable,
+		t.redirectTable,
+		t.StatusBar,
+		t.nameEdit,
+		t.versionEdit,
+		t.hostEdit,
+		t.portEdit,
+		t.syncDirEdit,
+		t.ignoreEdit,
+		t.syncFolderTable,
+		t.startServerButton,
+		t.saveButton,
+	)
 
 	return nil
 }
