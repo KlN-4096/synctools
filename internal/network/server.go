@@ -198,22 +198,74 @@ func (c *Client) Start() {
 
 // handleMessage 处理客户端消息
 func (c *Client) handleMessage(msg *ClientMessage) {
-	switch msg.Type {
-	case "register":
-		c.handleRegister(msg)
-	case "sync_request":
-		c.handleSyncRequest(msg)
-	case "pack_transfer_request":
-		c.handlePackTransfer(msg)
-	case "file_transfer_request":
-		c.handleFileTransfer(msg)
-	default:
+	var err error
+
+	handlers := map[string]MessageHandler{
+		"register":              c.handleRegister,
+		"sync_request":          c.handleSyncRequest,
+		"pack_transfer_request": c.handlePackTransfer,
+		"file_transfer_request": c.handleFileTransfer,
+	}
+
+	handler, exists := handlers[msg.Type]
+	if !exists {
 		c.server.logger.Error("未知的消息类型", "type", msg.Type, "client", c.ID)
+		return
+	}
+
+	if err = handler(c, msg); err != nil {
+		c.server.logger.Error("处理消息失败", "type", msg.Type, "error", err, "client", c.ID)
+		c.sendErrorResponse(msg.Type+"_response", err)
 	}
 }
 
+// handleFileTransfer 处理文件传输请求
+func (c *Client) handleFileTransfer(client *Client, msg *ClientMessage) error {
+	var req struct {
+		FilePath  string `json:"file_path"`
+		ChunkSize int    `json:"chunk_size"`
+		Offset    int64  `json:"offset"`
+	}
+
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return fmt.Errorf("解析请求失败: %v", err)
+	}
+
+	op := &FileTransferOperation{
+		Path:      filepath.Join(c.server.config.SyncDir, req.FilePath),
+		ChunkSize: req.ChunkSize,
+		Offset:    req.Offset,
+		Client:    c,
+	}
+
+	return op.Execute()
+}
+
+// handleSyncRequest 处理同步请求
+func (c *Client) handleSyncRequest(client *Client, msg *ClientMessage) error {
+	var syncReq struct {
+		FolderPath string            `json:"folder_path"`
+		SyncMode   string            `json:"sync_mode"`
+		FileHashes map[string]string `json:"file_hashes"`
+	}
+
+	if err := json.Unmarshal(msg.Payload, &syncReq); err != nil {
+		return fmt.Errorf("解析同步请求失败: %v", err)
+	}
+
+	op := &FileSyncOperation{
+		SrcPath:  filepath.Join(c.server.config.SyncDir, syncReq.FolderPath),
+		DstPath:  syncReq.FolderPath,
+		Mode:     syncReq.SyncMode,
+		Client:   c,
+		FileHash: syncReq.FileHashes,
+	}
+
+	return op.Execute()
+}
+
 // handleRegister 处理客户端注册
-func (c *Client) handleRegister(msg *ClientMessage) {
+func (c *Client) handleRegister(client *Client, msg *ClientMessage) error {
 	c.UUID = msg.UUID
 	c.state = &model.ClientState{
 		UUID:         msg.UUID,
@@ -223,368 +275,14 @@ func (c *Client) handleRegister(msg *ClientMessage) {
 		Version:      c.server.config.Version,
 	}
 
-	response := map[string]interface{}{
-		"success": true,
-		"message": "注册成功",
-	}
-	c.sendResponse("register_response", response)
-}
-
-// handleSyncRequest 处理同步请求
-func (c *Client) handleSyncRequest(msg *ClientMessage) {
-	var syncReq struct {
-		FolderPath string            `json:"folder_path"`
-		SyncMode   string            `json:"sync_mode"`
-		FileHashes map[string]string `json:"file_hashes"`
-	}
-	if err := json.Unmarshal(msg.Payload, &syncReq); err != nil {
-		c.server.logger.Error("解析同步请求失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("解析请求失败: %v", err), "", false)
-		return
-	}
-
-	// 根据同步模式处理请求
-	switch syncReq.SyncMode {
-	case model.SyncModeMirror:
-		c.handleMirrorSync(syncReq)
-	case model.SyncModePush:
-		c.handlePushSync(syncReq)
-	case model.SyncModePack:
-		c.handlePackSync(syncReq)
-	default:
-		c.server.logger.Error("不支持的同步模式", "mode", syncReq.SyncMode)
-		c.sendSyncResponse(false, fmt.Sprintf("不支持的同步模式: %s", syncReq.SyncMode), "", false)
-	}
-}
-
-// handleMirrorSync 处理镜像同步请求
-func (c *Client) handleMirrorSync(syncReq struct {
-	FolderPath string            `json:"folder_path"`
-	SyncMode   string            `json:"sync_mode"`
-	FileHashes map[string]string `json:"file_hashes"`
-}) {
-	c.server.logger.Log("处理镜像同步请求: %s", syncReq.FolderPath)
-
-	// 获取服务器端文件列表
-	serverFiles := make(map[string]string)
-	serverPath := filepath.Join(c.server.config.SyncDir, syncReq.FolderPath)
-
-	// 确保服务器目录存在
-	if err := os.MkdirAll(serverPath, 0755); err != nil {
-		c.server.logger.Error("创建服务器目录失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("创建服务器目录失败: %v", err), "", false)
-		return
-	}
-
-	// 获取服务器端文件列表和哈希值
-	err := filepath.Walk(serverPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(serverPath, path)
-			if err != nil {
-				return err
-			}
-			hash, err := pkgcommon.CalculateFileHash(path)
-			if err != nil {
-				return err
-			}
-			serverFiles[relPath] = hash
-		}
-		return nil
+	c.sendResponse("register_response", Response{
+		Success: true,
+		Message: "注册成功",
 	})
-	if err != nil {
-		c.server.logger.Error("获取服务器文件列表失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("获取服务器文件列表失败: %v", err), "", false)
-		return
-	}
-
-	// 比较文件差异
-	var filesToAdd []string
-	var filesToDel []string
-
-	// 找出需要添加或更新的文件
-	for path, serverHash := range serverFiles {
-		clientHash, exists := syncReq.FileHashes[path]
-		if !exists || clientHash != serverHash {
-			filesToAdd = append(filesToAdd, path)
-		}
-	}
-
-	// 找出需要删除的文件
-	for path := range syncReq.FileHashes {
-		if _, exists := serverFiles[path]; !exists {
-			filesToDel = append(filesToDel, path)
-		}
-	}
-
-	// 发送响应
-	response := struct {
-		Success    bool     `json:"success"`
-		Message    string   `json:"message"`
-		DiffCount  int      `json:"diff_count"`
-		FilesToAdd []string `json:"files_to_add"`
-		FilesToDel []string `json:"files_to_del"`
-	}{
-		Success:    true,
-		Message:    "同步请求处理成功",
-		DiffCount:  len(filesToAdd) + len(filesToDel),
-		FilesToAdd: filesToAdd,
-		FilesToDel: filesToDel,
-	}
-
-	responseBytes, err := json.Marshal(response)
-	if err != nil {
-		c.server.logger.Error("序列化响应失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("序列化响应失败: %v", err), "", false)
-		return
-	}
-
-	c.sendResponse("sync_response", json.RawMessage(responseBytes))
+	return nil
 }
 
-// handlePushSync 处理推送同步请求
-func (c *Client) handlePushSync(syncReq struct {
-	FolderPath string            `json:"folder_path"`
-	SyncMode   string            `json:"sync_mode"`
-	FileHashes map[string]string `json:"file_hashes"`
-}) {
-	c.server.logger.Log("处理推送同步请求: %s", syncReq.FolderPath)
-
-	// 获取服务器端文件列表
-	serverFiles := make(map[string]string)
-	serverPath := filepath.Join(c.server.config.SyncDir, syncReq.FolderPath)
-
-	// 确保服务器目录存在
-	if err := os.MkdirAll(serverPath, 0755); err != nil {
-		c.server.logger.Error("创建服务器目录失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("创建服务器目录失败: %v", err), "", false)
-		return
-	}
-
-	// 获取服务器端文件列表和哈希值
-	err := filepath.Walk(serverPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(serverPath, path)
-			if err != nil {
-				return err
-			}
-			hash, err := pkgcommon.CalculateFileHash(path)
-			if err != nil {
-				return err
-			}
-			serverFiles[relPath] = hash
-		}
-		return nil
-	})
-	if err != nil {
-		c.server.logger.Error("获取服务器文件列表失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("获取服务器文件列表失败: %v", err), "", false)
-		return
-	}
-
-	// 比较文件差异，找出需要添加或更新的文件
-	var filesToAdd []string
-	for path, clientHash := range syncReq.FileHashes {
-		serverHash, exists := serverFiles[path]
-		if !exists || clientHash != serverHash {
-			filesToAdd = append(filesToAdd, path)
-		}
-	}
-
-	// 发送响应
-	response := struct {
-		Success    bool     `json:"success"`
-		Message    string   `json:"message"`
-		DiffCount  int      `json:"diff_count"`
-		FilesToAdd []string `json:"files_to_add"`
-	}{
-		Success:    true,
-		Message:    "同步请求处理成功",
-		DiffCount:  len(filesToAdd),
-		FilesToAdd: filesToAdd,
-	}
-
-	responseBytes, err := json.Marshal(response)
-	if err != nil {
-		c.server.logger.Error("序列化响应失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("序列化响应失败: %v", err), "", false)
-		return
-	}
-
-	c.sendResponse("sync_response", json.RawMessage(responseBytes))
-}
-
-// handlePackSync 处理打包同步请求
-func (c *Client) handlePackSync(syncReq struct {
-	FolderPath string            `json:"folder_path"`
-	SyncMode   string            `json:"sync_mode"`
-	FileHashes map[string]string `json:"file_hashes"`
-}) {
-	c.server.logger.Log("处理打包同步请求: %s", syncReq.FolderPath)
-
-	// 获取服务器端文件列表
-	serverFiles := make(map[string]string)
-	serverPath := filepath.Join(c.server.config.SyncDir, syncReq.FolderPath)
-
-	err := filepath.Walk(serverPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(serverPath, path)
-			if err != nil {
-				return err
-			}
-			hash, err := pkgcommon.CalculateFileHash(path)
-			if err != nil {
-				return err
-			}
-			serverFiles[relPath] = hash
-		}
-		return nil
-	})
-	if err != nil {
-		c.server.logger.Error("获取服务器文件列表失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("获取服务器文件列表失败: %v", err), "", false)
-		return
-	}
-
-	// 创建临时目录用于打包
-	tempDir, err := os.MkdirTemp("", "sync_pack_*")
-	if err != nil {
-		c.server.logger.Error("创建临时目录失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("创建临时目录失败: %v", err), "", false)
-		return
-	}
-	defer os.RemoveAll(tempDir)
-
-	// 创建文件清单
-	manifestPath := filepath.Join(tempDir, "manifest.json")
-	manifestData, err := json.MarshalIndent(serverFiles, "", "  ")
-	if err != nil {
-		c.server.logger.Error("序列化文件清单失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("序列化文件清单失败: %v", err), "", false)
-		return
-	}
-
-	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
-		c.server.logger.Error("写入文件清单失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("写入文件清单失败: %v", err), "", false)
-		return
-	}
-
-	// 计算文件清单的哈希值
-	manifestHash, err := pkgcommon.CalculateFileHash(manifestPath)
-	if err != nil {
-		c.server.logger.Error("计算文件清单哈希值失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("计算文件清单哈希值失败: %v", err), "", false)
-		return
-	}
-
-	// 准备响应
-	response := struct {
-		Success      bool              `json:"success"`
-		Message      string            `json:"message"`
-		ManifestHash string            `json:"manifest_hash"`
-		FileHashes   map[string]string `json:"file_hashes"`
-	}{
-		Success:      true,
-		Message:      "同步请求处理成功",
-		ManifestHash: manifestHash,
-		FileHashes:   serverFiles,
-	}
-
-	responseBytes, err := json.Marshal(response)
-	if err != nil {
-		c.server.logger.Error("序列化响应失败", "error", err)
-		c.sendSyncResponse(false, fmt.Sprintf("序列化响应失败: %v", err), "", false)
-		return
-	}
-
-	c.sendResponse("sync_response", json.RawMessage(responseBytes))
-}
-
-// handlePackTransfer 处理压缩包传输
-func (c *Client) handlePackTransfer(msg *ClientMessage) {
-	var req PackTransferRequest
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		c.server.logger.Error("解析传输请求失败", "error", err, "client", c.ID)
-		return
-	}
-
-	// 获取文件夹状态
-	folderState, exists := c.state.FolderStates[req.FolderPath]
-	if !exists {
-		c.sendPackTransferResponse(false, "未找到文件夹状态", nil, 0, 0, true)
-		return
-	}
-
-	// 验证MD5
-	if folderState.MD5 != req.PackMD5 {
-		c.sendPackTransferResponse(false, "MD5不匹配", nil, 0, 0, true)
-		return
-	}
-
-	// 打开压缩包文件
-	file, err := os.Open(folderState.PackPath)
-	if err != nil {
-		c.server.logger.Error("打开压缩包失败", "error", err, "client", c.ID)
-		c.sendPackTransferResponse(false, fmt.Sprintf("打开压缩包失败: %v", err), nil, 0, 0, true)
-		return
-	}
-	defer file.Close()
-
-	// 获取文件大小
-	fileInfo, err := file.Stat()
-	if err != nil {
-		c.server.logger.Error("获取文件信息失败", "error", err, "client", c.ID)
-		c.sendPackTransferResponse(false, fmt.Sprintf("获取文件信息失败: %v", err), nil, 0, 0, true)
-		return
-	}
-
-	// 设置读取位置
-	if _, err := file.Seek(req.Offset, 0); err != nil {
-		c.server.logger.Error("设置文件偏移量失败", "error", err, "client", c.ID)
-		c.sendPackTransferResponse(false, fmt.Sprintf("设置文件偏移量失败: %v", err), nil, 0, 0, true)
-		return
-	}
-
-	// 读取数据块
-	chunkSize := req.ChunkSize
-	if chunkSize <= 0 || chunkSize > 1024*1024 { // 限制最大块大小为1MB
-		chunkSize = 1024 * 1024
-	}
-
-	data := make([]byte, chunkSize)
-	n, err := file.Read(data)
-	if err != nil && err != io.EOF {
-		c.server.logger.Error("读取文件失败", "error", err, "client", c.ID)
-		c.sendPackTransferResponse(false, fmt.Sprintf("读取文件失败: %v", err), nil, 0, 0, true)
-		return
-	}
-
-	// 发送响应
-	completed := req.Offset+int64(n) >= fileInfo.Size()
-	c.sendPackTransferResponse(true, "", data[:n], req.Offset+int64(n), fileInfo.Size(), completed)
-
-	// 更新状态
-	if completed {
-		c.server.logger.Log("压缩包传输完成",
-			"client", c.ID,
-			"folder", req.FolderPath,
-			"size", fileInfo.Size())
-	}
-}
-
-// sendResponse 发送响应
+// sendResponse 发送统一响应
 func (c *Client) sendResponse(msgType string, data interface{}) {
 	response := struct {
 		Type    string      `json:"type"`
@@ -651,93 +349,350 @@ func (s *Server) IsRunning() bool {
 	return s.running
 }
 
-// handleFileTransfer 处理文件传输请求
-func (c *Client) handleFileTransfer(msg *ClientMessage) {
-	var req struct {
-		FilePath string `json:"file_path"`
-	}
+// handlePackTransfer 处理压缩包传输请求
+func (c *Client) handlePackTransfer(client *Client, msg *ClientMessage) error {
+	var req PackTransferRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		c.server.logger.Error("解析文件传输请求失败", "error", err)
-		c.sendFileTransferResponse(false, "解析请求失败", nil, 0, 0, true)
-		return
+		return fmt.Errorf("解析传输请求失败: %v", err)
 	}
 
-	// 构建完整的文件路径
-	filePath := filepath.Join(c.server.config.SyncDir, req.FilePath)
+	// 获取文件夹状态
+	folderState, exists := c.state.FolderStates[req.FolderPath]
+	if !exists {
+		c.sendPackTransferResponse(false, "未找到文件夹状态", nil, 0, 0, true)
+		return nil
+	}
 
-	// 打开文件
-	file, err := os.Open(filePath)
+	// 验证MD5
+	if folderState.MD5 != req.PackMD5 {
+		c.sendPackTransferResponse(false, "MD5不匹配", nil, 0, 0, true)
+		return nil
+	}
+
+	op := &FileTransferOperation{
+		Path:      folderState.PackPath,
+		ChunkSize: req.ChunkSize,
+		Offset:    req.Offset,
+		Client:    c,
+	}
+
+	return op.Execute()
+}
+
+// sendErrorResponse 发送错误响应
+func (c *Client) sendErrorResponse(msgType string, err error) {
+	c.sendResponse(msgType, map[string]interface{}{
+		"success": false,
+		"message": err.Error(),
+	})
+}
+
+// MessageHandler 消息处理器
+type MessageHandler func(*Client, *ClientMessage) error
+
+// ResponseType 响应类型
+type ResponseType string
+
+const (
+	ResponseTypeRegister     ResponseType = "register_response"
+	ResponseTypeSync         ResponseType = "sync_response"
+	ResponseTypePackTransfer ResponseType = "pack_transfer_response"
+	ResponseTypeFileTransfer ResponseType = "file_transfer_response"
+)
+
+// Response 统一响应结构
+type Response struct {
+	Success   bool        `json:"success"`
+	Message   string      `json:"message"`
+	Data      interface{} `json:"data,omitempty"`
+	Completed bool        `json:"completed,omitempty"`
+}
+
+// FileOperation 文件操作接口
+type FileOperation interface {
+	Execute() error
+}
+
+// FileTransferOperation 文件传输操作
+type FileTransferOperation struct {
+	Path      string
+	ChunkSize int
+	Offset    int64
+	Client    *Client
+}
+
+// Execute 执行文件传输
+func (op *FileTransferOperation) Execute() error {
+	result, err := op.Client.transferFile(FileTransferOptions{
+		FilePath:   op.Path,
+		ChunkSize:  op.ChunkSize,
+		Offset:     op.Offset,
+		RetryCount: 3,
+	})
 	if err != nil {
-		c.server.logger.Error("打开文件失败", "error", err)
-		c.sendFileTransferResponse(false, fmt.Sprintf("打开文件失败: %v", err), nil, 0, 0, true)
-		return
+		return err
 	}
-	defer file.Close()
 
-	// 获取文件信息
-	fileInfo, err := file.Stat()
+	op.Client.sendResponse("file_transfer_response", TransferResult{
+		Success:   result.Success,
+		Message:   result.Message,
+		Data:      result.Data,
+		Offset:    result.Offset,
+		Size:      result.Size,
+		Completed: result.Completed,
+	})
+	return nil
+}
+
+// FileSyncOperation 文件同步操作
+type FileSyncOperation struct {
+	SrcPath  string
+	DstPath  string
+	Mode     string
+	Client   *Client
+	FileHash map[string]string
+}
+
+// Execute 执行文件同步
+func (op *FileSyncOperation) Execute() error {
+	// 确保目标目录存在
+	if err := os.MkdirAll(op.DstPath, 0755); err != nil {
+		return fmt.Errorf("创建目标目录失败: %v", err)
+	}
+
+	// 获取源目录文件列表
+	srcFiles, err := op.Client.getFileList(op.SrcPath)
 	if err != nil {
-		c.server.logger.Error("获取文件信息失败", "error", err)
-		c.sendFileTransferResponse(false, fmt.Sprintf("获取文件信息失败: %v", err), nil, 0, 0, true)
-		return
+		return err
 	}
 
-	// 分块传输文件
-	buffer := make([]byte, 32*1024) // 32KB chunks
-	offset := int64(0)
-	totalSize := fileInfo.Size()
-
-	for {
-		n, err := file.Read(buffer)
-		if err != nil && err != io.EOF {
-			c.server.logger.Error("读取文件失败", "error", err)
-			c.sendFileTransferResponse(false, fmt.Sprintf("读取文件失败: %v", err), nil, offset, totalSize, true)
-			return
+	// 转换文件哈希列表
+	hashFiles := make(map[string]FileInfo)
+	for path, hash := range op.FileHash {
+		hashFiles[path] = FileInfo{
+			Path: path,
+			Hash: hash,
 		}
+	}
 
-		if n > 0 {
-			offset += int64(n)
-			c.sendFileTransferResponse(true, "", buffer[:n], offset, totalSize, offset >= totalSize)
-		}
-
-		if err == io.EOF {
-			break
-		}
+	// 根据同步模式处理
+	switch op.Mode {
+	case model.SyncModeMirror:
+		return op.executeMirrorSync(srcFiles, hashFiles)
+	case model.SyncModePush:
+		return op.executePushSync(srcFiles, hashFiles)
+	case model.SyncModePack:
+		return op.executePackSync(srcFiles, hashFiles)
+	default:
+		return fmt.Errorf("不支持的同步模式: %s", op.Mode)
 	}
 }
 
-// sendFileTransferResponse 发送文件传输响应
-func (c *Client) sendFileTransferResponse(success bool, message string, data []byte, offset, size int64, complete bool) {
-	response := struct {
-		Type    string `json:"type"`
-		Payload struct {
-			Success  bool   `json:"success"`
-			Message  string `json:"message"`
-			Data     []byte `json:"data"`
-			Size     int64  `json:"size"`
-			Offset   int64  `json:"offset"`
-			Complete bool   `json:"complete"`
-		} `json:"payload"`
-	}{
-		Type: "file_transfer_response",
-		Payload: struct {
-			Success  bool   `json:"success"`
-			Message  string `json:"message"`
-			Data     []byte `json:"data"`
-			Size     int64  `json:"size"`
-			Offset   int64  `json:"offset"`
-			Complete bool   `json:"complete"`
-		}{
-			Success:  success,
-			Message:  message,
-			Data:     data,
-			Size:     size,
-			Offset:   offset,
-			Complete: complete,
-		},
+// executePackSync 执行打包同步
+func (op *FileSyncOperation) executePackSync(srcFiles, hashFiles map[string]FileInfo) error {
+	// 创建临时目录用于打包
+	tempDir, err := os.MkdirTemp("", "sync_pack_*")
+	if err != nil {
+		return fmt.Errorf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 创建文件清单
+	manifestPath := filepath.Join(tempDir, "manifest.json")
+	manifestData := make(map[string]string)
+	for path, info := range srcFiles {
+		manifestData[path] = info.Hash
 	}
 
-	if err := json.NewEncoder(c.conn).Encode(response); err != nil {
-		c.server.logger.Error("发送文件传输响应失败", "error", err)
+	manifestBytes, err := json.MarshalIndent(manifestData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化文件清单失败: %v", err)
 	}
+
+	if err := os.WriteFile(manifestPath, manifestBytes, 0644); err != nil {
+		return fmt.Errorf("写入文件清单失败: %v", err)
+	}
+
+	// 计算文件清单的哈希值
+	manifestHash, err := pkgcommon.CalculateFileHash(manifestPath)
+	if err != nil {
+		return fmt.Errorf("计算文件清单哈希值失败: %v", err)
+	}
+
+	// 发送响应
+	response := struct {
+		Success      bool              `json:"success"`
+		Message      string            `json:"message"`
+		ManifestHash string            `json:"manifest_hash"`
+		FileHashes   map[string]string `json:"file_hashes"`
+	}{
+		Success:      true,
+		Message:      "同步请求处理成功",
+		ManifestHash: manifestHash,
+		FileHashes:   manifestData,
+	}
+
+	op.Client.sendResponse("sync_response", response)
+	return nil
+}
+
+// executeMirrorSync 执行镜像同步
+func (op *FileSyncOperation) executeMirrorSync(srcFiles, hashFiles map[string]FileInfo) error {
+	filesToAdd, filesToDel := op.Client.compareFiles(srcFiles, hashFiles)
+
+	response := struct {
+		Success    bool     `json:"success"`
+		Message    string   `json:"message"`
+		DiffCount  int      `json:"diff_count"`
+		FilesToAdd []string `json:"files_to_add"`
+		FilesToDel []string `json:"files_to_del"`
+	}{
+		Success:    true,
+		Message:    "同步请求处理成功",
+		DiffCount:  len(filesToAdd) + len(filesToDel),
+		FilesToAdd: filesToAdd,
+		FilesToDel: filesToDel,
+	}
+
+	op.Client.sendResponse("sync_response", response)
+	return nil
+}
+
+// executePushSync 执行推送同步
+func (op *FileSyncOperation) executePushSync(srcFiles, hashFiles map[string]FileInfo) error {
+	filesToAdd, _ := op.Client.compareFiles(hashFiles, srcFiles)
+
+	response := struct {
+		Success    bool     `json:"success"`
+		Message    string   `json:"message"`
+		DiffCount  int      `json:"diff_count"`
+		FilesToAdd []string `json:"files_to_add"`
+	}{
+		Success:    true,
+		Message:    "同步请求处理成功",
+		DiffCount:  len(filesToAdd),
+		FilesToAdd: filesToAdd,
+	}
+
+	op.Client.sendResponse("sync_response", response)
+	return nil
+}
+
+// FileTransferOptions 文件传输选项
+type FileTransferOptions struct {
+	FilePath   string // 文件路径
+	ChunkSize  int    // 分块大小
+	Offset     int64  // 起始偏移量
+	RetryCount int    // 重试次数
+}
+
+// TransferResult 传输结果
+type TransferResult struct {
+	Success   bool   // 是否成功
+	Message   string // 消息
+	Data      []byte // 数据
+	Offset    int64  // 当前偏移量
+	Size      int64  // 总大小
+	Completed bool   // 是否完成
+}
+
+// FileInfo 文件信息
+type FileInfo struct {
+	Path string // 相对路径
+	Hash string // 文件哈希
+	Size int64  // 文件大小
+}
+
+// transferFile 通用文件传输方法
+func (c *Client) transferFile(opts FileTransferOptions) (*TransferResult, error) {
+	if opts.ChunkSize <= 0 || opts.ChunkSize > 1024*1024 {
+		opts.ChunkSize = 32 * 1024 // 默认32KB
+	}
+
+	file, err := os.Open(opts.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("打开文件失败: %v", err)
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("获取文件信息失败: %v", err)
+	}
+
+	if _, err := file.Seek(opts.Offset, 0); err != nil {
+		return nil, fmt.Errorf("设置文件偏移量失败: %v", err)
+	}
+
+	data := make([]byte, opts.ChunkSize)
+	n, err := file.Read(data)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("读取文件失败: %v", err)
+	}
+
+	completed := opts.Offset+int64(n) >= fileInfo.Size()
+	return &TransferResult{
+		Success:   true,
+		Data:      data[:n],
+		Offset:    opts.Offset + int64(n),
+		Size:      fileInfo.Size(),
+		Completed: completed,
+	}, nil
+}
+
+// getFileList 获取目录下的文件列表
+func (c *Client) getFileList(dirPath string) (map[string]FileInfo, error) {
+	files := make(map[string]FileInfo)
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+
+		if !info.IsDir() {
+			relPath, err := filepath.Rel(dirPath, path)
+			if err != nil {
+				return err
+			}
+
+			hash, err := pkgcommon.CalculateFileHash(path)
+			if err != nil {
+				return err
+			}
+
+			files[relPath] = FileInfo{
+				Path: relPath,
+				Hash: hash,
+				Size: info.Size(),
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("获取文件列表失败: %v", err)
+	}
+
+	return files, nil
+}
+
+// compareFiles 比较文件差异
+func (c *Client) compareFiles(serverFiles, clientFiles map[string]FileInfo) (toAdd, toDel []string) {
+	for path, serverFile := range serverFiles {
+		clientFile, exists := clientFiles[path]
+		if !exists || clientFile.Hash != serverFile.Hash {
+			toAdd = append(toAdd, path)
+		}
+	}
+
+	for path := range clientFiles {
+		if _, exists := serverFiles[path]; !exists {
+			toDel = append(toDel, path)
+		}
+	}
+
+	return toAdd, toDel
 }
