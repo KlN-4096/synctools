@@ -25,6 +25,8 @@ import (
 
 	"synctools/internal/container"
 	"synctools/internal/interfaces"
+	"synctools/internal/ui"
+	"synctools/internal/ui/viewmodels"
 )
 
 var (
@@ -60,7 +62,7 @@ func main() {
 		"base_dir": baseDir,
 	})
 
-	// 加载或创建默认配置
+	// 加载或创建配置
 	cfg, err := loadOrCreateConfig(c, configFile)
 	if err != nil {
 		logger.Fatal("加载配置失败", interfaces.Fields{
@@ -87,6 +89,16 @@ func main() {
 	syncService := c.GetSyncService()
 	if err := syncService.Start(); err != nil {
 		logger.Fatal("启动同步服务失败", interfaces.Fields{
+			"error": err,
+		})
+	}
+
+	// 创建主视图模型
+	mainViewModel := viewmodels.NewMainViewModel(syncService, logger)
+
+	// 创建并运行主窗口
+	if err := ui.CreateMainWindow(mainViewModel); err != nil {
+		logger.Fatal("创建主窗口失败", interfaces.Fields{
 			"error": err,
 		})
 	}

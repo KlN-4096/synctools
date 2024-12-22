@@ -52,6 +52,17 @@ func New(baseDir string) (*Container, error) {
 	c.logger = l
 	c.Register("logger", l)
 
+	// 初始化存储
+	store, err := storage.NewFileStorage(filepath.Join(baseDir, "configs"))
+	if err != nil {
+		return nil, fmt.Errorf("初始化存储失败: %v", err)
+	}
+	c.Register("storage", store)
+
+	// 初始化配置管理器
+	cfgManager := config.NewManager(store, l)
+	c.Register("config_manager", cfgManager)
+
 	return c, nil
 }
 
@@ -71,22 +82,12 @@ func (c *Container) Get(name string) interface{} {
 
 // InitializeServices 初始化所有服务
 func (c *Container) InitializeServices(baseDir string, cfg *interfaces.Config) error {
-	// 初始化存储
-	store, err := storage.NewFileStorage(filepath.Join(baseDir, "configs"))
-	if err != nil {
-		return fmt.Errorf("初始化存储失败: %v", err)
-	}
-	c.Register("storage", store)
-
-	// 初始化配置管理器
-	cfgManager := config.NewManager(store, c.logger)
-	c.Register("config_manager", cfgManager)
-
 	// 初始化网络服务器
 	server := network.NewServer(cfg, c.logger)
 	c.Register("network_server", server)
 
 	// 初始化同步服务
+	store := c.GetStorage()
 	syncService := service.NewSyncService(cfg, c.logger, store)
 	c.Register("sync_service", syncService)
 

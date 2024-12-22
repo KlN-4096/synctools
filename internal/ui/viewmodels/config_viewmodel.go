@@ -27,7 +27,6 @@ import (
 	"github.com/lxn/walk"
 
 	"synctools/internal/interfaces"
-	"synctools/pkg/network"
 )
 
 // LineEditIface 定义 LineEdit 接口
@@ -67,6 +66,9 @@ type ConfigViewModel struct {
 	syncService interfaces.SyncService
 	logger      ViewModelLogger
 
+	// UI 状态
+	isEditing bool
+
 	// UI 组件
 	window          *walk.MainWindow
 	configTable     TableViewIface
@@ -85,11 +87,9 @@ type ConfigViewModel struct {
 	syncDirEdit LineEditIface
 	ignoreEdit  *walk.TextEdit
 
-	// 缓存
-	currentConfig *interfaces.Config
-
-	// 移除进度回调
-	lastLoggedProgress int // 上次记录的进度百分比
+	// 按钮
+	startServerButton *walk.PushButton
+	saveButton        *walk.PushButton
 }
 
 // NewConfigViewModel 创建新的配置视图模型
@@ -109,7 +109,8 @@ func (vm *ConfigViewModel) Initialize() error {
 		return nil
 	}
 
-	vm.currentConfig = config
+	// 更新 UI
+	vm.UpdateUI()
 	return nil
 }
 
@@ -125,12 +126,15 @@ func (vm *ConfigViewModel) SetupUI(
 	syncDirEdit LineEditIface,
 	ignoreEdit *walk.TextEdit,
 	syncFolderTable TableViewIface,
+	startServerButton *walk.PushButton,
+	saveButton *walk.PushButton,
 ) {
 	// 检查必要的 UI 控件
 	if nameEdit == nil || versionEdit == nil || hostEdit == nil || portEdit == nil || syncDirEdit == nil {
 		panic("必要的 UI 控件不能为空")
 	}
 
+	// 设置 UI 组件
 	vm.configTable = configTable
 	vm.redirectTable = redirectTable
 	vm.syncFolderTable = syncFolderTable
@@ -141,6 +145,8 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.portEdit = portEdit
 	vm.syncDirEdit = syncDirEdit
 	vm.ignoreEdit = ignoreEdit
+	vm.startServerButton = startServerButton
+	vm.saveButton = saveButton
 
 	// 设置表格模型
 	if configTable != nil {
@@ -157,9 +163,9 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.UpdateUI()
 }
 
-// UpdateUI 更新UI显示
+// UpdateUI 更新 UI 显示
 func (vm *ConfigViewModel) UpdateUI() {
-	config := vm.GetCurrentConfig()
+	config := vm.syncService.GetCurrentConfig()
 	if config == nil {
 		return
 	}
@@ -170,77 +176,139 @@ func (vm *ConfigViewModel) UpdateUI() {
 	vm.hostEdit.SetText(config.Host)
 	vm.portEdit.SetText(strconv.Itoa(config.Port))
 	vm.syncDirEdit.SetText(config.SyncDir)
-
-	// 更新忽略列表
 	vm.ignoreEdit.SetText(strings.Join(config.IgnoreList, "\n"))
+
+	// 更新按钮状态
+	vm.updateButtonStates()
 }
 
-// SaveConfig 保存当前配置
+// SaveConfig 处理保存配置的 UI 操作
 func (vm *ConfigViewModel) SaveConfig() error {
-	config := vm.GetCurrentConfig()
-	if config == nil {
-		return fmt.Errorf("没有选中的配置")
+	// 禁用保存按钮
+	vm.saveButton.SetEnabled(false)
+	vm.setStatus("正在保存配置...")
+
+	// 从 UI 收集配置数据
+	config := vm.collectConfigFromUI()
+
+	// 调用服务层保存配置
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.setStatus("保存配置失败")
+		vm.saveButton.SetEnabled(true)
+		return err
 	}
 
-	vm.logger.Debug("保存配置", interfaces.Fields{
-		"name":    vm.nameEdit.Text(),
-		"version": vm.versionEdit.Text(),
-		"host":    vm.hostEdit.Text(),
-		"port":    vm.portEdit.Text(),
-		"syncDir": vm.syncDirEdit.Text(),
-	})
+	// 更新 UI 状态
+	vm.isEditing = false
+	vm.saveButton.SetEnabled(true)
+	vm.setStatus("配置已保存")
+	return nil
+}
 
-	// 创建一个新的配置对象，以避免引用问题
-	newConfig := &interfaces.Config{
+// collectConfigFromUI 从 UI 控件收集配置数据
+func (vm *ConfigViewModel) collectConfigFromUI() *interfaces.Config {
+	config := vm.syncService.GetCurrentConfig()
+	if config == nil {
+		config = &interfaces.Config{}
+	}
+
+	return &interfaces.Config{
 		UUID:            config.UUID,
-		Type:            interfaces.ConfigTypeServer, // 设置为服务器配置
+		Type:            interfaces.ConfigTypeServer,
 		Name:            vm.nameEdit.Text(),
 		Version:         vm.versionEdit.Text(),
 		Host:            vm.hostEdit.Text(),
+		Port:            vm.getPortFromUI(),
 		SyncDir:         vm.syncDirEdit.Text(),
-		SyncFolders:     make([]interfaces.SyncFolder, len(config.SyncFolders)),
-		IgnoreList:      strings.Split(vm.ignoreEdit.Text(), "\n"),
-		FolderRedirects: make([]interfaces.FolderRedirect, len(config.FolderRedirects)),
+		IgnoreList:      vm.getIgnoreListFromUI(),
+		SyncFolders:     config.SyncFolders,
+		FolderRedirects: config.FolderRedirects,
 	}
+}
 
-	// 解析端口号
-	if port, err := strconv.Atoi(vm.portEdit.Text()); err == nil {
-		newConfig.Port = port
-	} else {
+// getPortFromUI 从 UI 获取端口号
+func (vm *ConfigViewModel) getPortFromUI() int {
+	port, err := strconv.Atoi(vm.portEdit.Text())
+	if err != nil {
 		vm.logger.Error("解析端口号失败", interfaces.Fields{
 			"error": err.Error(),
 			"port":  vm.portEdit.Text(),
 		})
-		return fmt.Errorf("无效的端口号: %v", err)
+		return 8080 // 默认端口
 	}
+	return port
+}
 
-	// 复制同步文件夹列表
-	copy(newConfig.SyncFolders, config.SyncFolders)
-
-	// 复制重定向列表
-	copy(newConfig.FolderRedirects, config.FolderRedirects)
-
-	// 验证配置
-	if err := vm.syncService.ValidateConfig(newConfig); err != nil {
-		vm.logger.Error("配置验证失败", interfaces.Fields{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("配置验证失败: %v", err)
+// getIgnoreListFromUI 从 UI 获取忽略列表
+func (vm *ConfigViewModel) getIgnoreListFromUI() []string {
+	text := vm.ignoreEdit.Text()
+	if text == "" {
+		return nil
 	}
+	return strings.Split(text, "\n")
+}
 
-	// 保存配置
-	if err := vm.syncService.SaveConfig(newConfig); err != nil {
-		vm.logger.Error("保存配置失败", interfaces.Fields{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("保存配置失败: %v", err)
+// updateButtonStates 更新按钮状态
+func (vm *ConfigViewModel) updateButtonStates() {
+	// 服务器按钮
+	if vm.syncService.IsRunning() {
+		vm.startServerButton.SetText("停止服务器")
+	} else {
+		vm.startServerButton.SetText("启动服务器")
 	}
+	vm.startServerButton.SetEnabled(true)
 
-	vm.logger.Info("配置已保存", interfaces.Fields{
-		"uuid": newConfig.UUID,
-		"name": newConfig.Name,
+	// 保存按钮
+	vm.saveButton.SetEnabled(!vm.isEditing)
+}
+
+// setStatus 设置状态栏文本
+func (vm *ConfigViewModel) setStatus(status string) {
+	if vm.statusBar != nil {
+		vm.statusBar.SetText(status)
+	}
+	vm.logger.Debug("UI状态更新", interfaces.Fields{
+		"status": status,
 	})
+}
 
+// StartServer 处理启动服务器的 UI 操作
+func (vm *ConfigViewModel) StartServer() error {
+	// 禁用按钮，防止重复点击
+	vm.startServerButton.SetEnabled(false)
+	vm.setStatus("正在启动服务器...")
+
+	// 调用服务层启动服务器
+	if err := vm.syncService.StartServer(); err != nil {
+		vm.setStatus("启动服务器失败")
+		vm.startServerButton.SetEnabled(true)
+		return err
+	}
+
+	// 更新 UI 状态
+	vm.startServerButton.SetText("停止服务器")
+	vm.startServerButton.SetEnabled(true)
+	vm.setStatus("服务器已启动")
+	return nil
+}
+
+// StopServer 处理停止服务器的 UI 操作
+func (vm *ConfigViewModel) StopServer() error {
+	// 禁用按钮，防止重复点击
+	vm.startServerButton.SetEnabled(false)
+	vm.setStatus("正在停止服务器...")
+
+	// 调用服务层停止服务器
+	if err := vm.syncService.StopServer(); err != nil {
+		vm.setStatus("停止服务器失败")
+		vm.startServerButton.SetEnabled(true)
+		return err
+	}
+
+	// 更新 UI 状态
+	vm.startServerButton.SetText("启动服务器")
+	vm.startServerButton.SetEnabled(true)
+	vm.setStatus("服务器已停止")
 	return nil
 }
 
@@ -259,89 +327,9 @@ func (vm *ConfigViewModel) BrowseSyncDir() error {
 	}
 
 	vm.syncDirEdit.SetText(dlg.FilePath)
+	vm.isEditing = true
+	vm.saveButton.SetEnabled(true)
 	return nil
-}
-
-// StartServer 启动服务器
-func (vm *ConfigViewModel) StartServer() error {
-	// 先保存当前配置
-	if err := vm.SaveConfig(); err != nil {
-		return err
-	}
-
-	// 确保服务器已初始化
-	config := vm.GetCurrentConfig()
-	if config == nil {
-		return fmt.Errorf("没有选中的配置")
-	}
-
-	// 重新加载配置以确保使用最新的设置
-	if err := vm.syncService.LoadConfig(config.UUID); err != nil {
-		return fmt.Errorf("重新加载配置失败: %v", err)
-	}
-
-	// 获取最新的配置
-	config = vm.syncService.GetCurrentConfig()
-	if config == nil {
-		return fmt.Errorf("无法获取配置")
-	}
-
-	vm.logger.Debug("启动服务器", interfaces.Fields{
-		"config": fmt.Sprintf("%+v", config),
-	})
-
-	// 重新创建网络服务器
-	server := network.NewServer(config, vm.logger)
-	vm.syncService.SetServer(server)
-
-	// 设置进度回调
-	vm.syncService.SetProgressCallback(func(progress *interfaces.Progress) {
-		// 计算当前进度百分比
-		var currentProgress int
-		if progress.Total > 0 {
-			currentProgress = int(float64(progress.Current) / float64(progress.Total) * 100)
-		}
-
-		// 每10%记录一次日志
-		if currentProgress/10 > vm.lastLoggedProgress/10 {
-			vm.logger.Info("同步进度", interfaces.Fields{
-				"progress": currentProgress,
-				"status":   progress.Status,
-			})
-			vm.lastLoggedProgress = currentProgress
-		}
-
-		// 更新状态栏
-		if vm.statusBar != nil {
-			vm.statusBar.SetText(progress.Status)
-		}
-	})
-
-	if err := vm.syncService.Start(); err != nil {
-		return err
-	}
-
-	vm.UpdateUI()
-	return nil
-}
-
-// StopServer 停止服务器
-func (vm *ConfigViewModel) StopServer() error {
-	if err := vm.syncService.Stop(); err != nil {
-		return err
-	}
-
-	// 重置进度记录
-	vm.lastLoggedProgress = 0
-	vm.logger.Log("服务已停止")
-
-	vm.UpdateUI()
-	return nil
-}
-
-// IsServerRunning 返回服务器是否正在运行
-func (vm *ConfigViewModel) IsServerRunning() bool {
-	return vm.syncService.IsRunning()
 }
 
 // ConfigListModel 配置列表模型
@@ -590,7 +578,7 @@ func (m *SyncFolderListModel) PublishRowsReset() {
 
 // GetCurrentConfig 获取当前配置
 func (vm *ConfigViewModel) GetCurrentConfig() *interfaces.Config {
-	return vm.currentConfig
+	return vm.syncService.GetCurrentConfig()
 }
 
 // UpdateSyncFolder 更新同步文件夹
@@ -670,7 +658,6 @@ func (vm *ConfigViewModel) LoadConfig(uuid string) error {
 		return fmt.Errorf("加载配置失败: 配置为空")
 	}
 
-	vm.currentConfig = config
 	vm.UpdateUI()
 	return nil
 }
@@ -798,7 +785,7 @@ func (vm *ConfigViewModel) AddSyncFolder(path string, mode interfaces.SyncMode) 
 
 // DeleteSyncFolder 删除同步文件夹
 func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
-	config := vm.syncService.GetCurrentConfig()
+	config := vm.GetCurrentConfig()
 	if config == nil {
 		return fmt.Errorf("没有选中的配置")
 	}
@@ -823,4 +810,9 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 
 	vm.UpdateUI()
 	return nil
+}
+
+// IsServerRunning 返回服务器是否正在运行
+func (vm *ConfigViewModel) IsServerRunning() bool {
+	return vm.syncService.IsRunning()
 }

@@ -1,6 +1,6 @@
 # SyncTools 代码库说明
 
-## 文件说明
+## 项目结构
 
 ### cmd/ - 入口程序
 #### client/main.go
@@ -26,6 +26,7 @@
   - loadOrCreateConfig: 加载或创建默认配置文件
 
 ### internal/ - 内部包
+
 #### container/container.go
 - **文件作用**：
   - 实现依赖注入容器
@@ -40,75 +41,73 @@
   - GetLogger/GetConfigManager/GetNetworkServer/GetSyncService/GetStorage: 获取特定服务
   - Shutdown: 关闭所有服务
 
+#### interfaces/ - 接口定义
+- **config.go**: 定义配置管理接口
+- **logger.go**: 定义日志记录接口
+- **network.go**: 定义网络操作接口
+- **service.go**: 定义同步服务接口
+- **storage.go**: 定义存储操作接口
+- **types.go**: 定义共享数据类型
+
+#### ui/ - 用户界面
+- **main_window.go**: 主窗口实现
+- **viewmodels/**: 视图模型实现
+  - config_viewmodel.go: 配置视图模型
+  - main_viewmodel.go: 主视图模型
+  - interfaces.go: 视图模型接口
+- **views/**: 视图实现
+  - config_tab.go: 配置标签页
+
 ### pkg/ - 可重用包
+
+#### archive/zip.go
+- **文件作用**：
+  - 实现文件压缩和解压功能
+  - 提供进度报告
+  - 处理文件完整性验证
+
 #### config/manager.go
 - **文件作用**：
   - 实现配置管理器
   - 负责配置文件的加载、保存和验证
   - 管理配置的生命周期和变更通知
-  - 提供配置的CRUD操作
 - **主要方法**：
-  - NewManager: 创建新的配置管理器
-  - LoadConfig: 加载配置文件
-  - SaveConfig: 保存配置到文件
-  - ValidateConfig: 验证配置有效性
+  - NewManager: 创建配置管理器
+  - LoadConfig: 加载配置
+  - SaveConfig: 保存配置
+  - ValidateConfig: 验证配置
   - GetCurrentConfig: 获取当前配置
-  - GetLastModified: 获取最后修改时间
-  - ListConfigs: 获取所有配置列表
-  - SetOnChanged: 设置配置变更回调
 
-#### network/server.go
+#### errors/ - 错误定义
+- **common.go**: 通用错误类型
+- **config.go**: 配置相关错误
+- **network.go**: 网络相关错误
+- **service.go**: 服务相关错误
+- **storage.go**: 存储相关错误
+
+#### logger/default.go
 - **文件作用**：
-  - 实现网络服务器
-  - 管理客户端连接
-  - 处理网络消息和数据传输
-  - 提供服务器状态管理
-- **主要方法**：
-  - NewServer: 创建新的网络服务器
-  - Start: 启动服务器
-  - Stop: 停止服务器
-  - HandleClient: 处理客户端连接
-  - GetStatus: 获取服务器状态
-  - IsRunning: 检查服务器是否运行中
-  - acceptLoop: 接受新的客户端连接
-  - addClient/removeClient: 管理客户端连接
+  - 实现默认日志记录器
+  - 支持不同日志级别
+  - 提供结构化日志记录
+
+#### network/ - 网络实现
+- **server.go**: 网络服务器实现
+- **operations.go**: 网络操作实现
 
 #### service/sync_service.go
 - **文件作用**：
   - 实现文件同步服务
-  - 管理文件同步状态和进度
+  - 管理同步状态和进度
   - 处理同步请求和响应
-  - 提供同步操作的核心功能
-- **主要方法**：
-  - NewSyncService: 创建新的同步服务
-  - Start: 启动同步服务
-  - Stop: 停止同步服务
-  - SyncFiles: 同步指定路径的文件
-  - HandleSyncRequest: 处理同步请求
-  - GetSyncStatus: 获取同步状态
-  - setStatus: 设置同步状态
 
-#### errors/network.go
-- **文件作用**：
-  - 定义网络相关错误类型
-  - 实现网络错误处理
-  - 提供网络错误创建和判断功能
-  - 实现net.Error接口
-- **主要内容**：
-  - NetworkError: 网络错误类型,实现error和net.Error接口
-  - NewNetworkError: 创建新的网络错误
-  - Error: 获取错误信息
-  - IsTimeout: 判断是否为超时错误
-  - IsTemporary: 判断是否为临时错误
-- **预定义错误**：
-  - ErrNetworkConnect: 网络连接失败
-  - ErrNetworkTimeout: 网络超时
-  - ErrNetworkClosed: 网络连接已关闭
-  - ErrNetworkInvalidData: 无效的网络数据
-  - ErrNetworkServerStart: 服务器启动失败
+#### storage/ - 存储实现
+- **file_storage.go**: 文件存储实现
+- **file_utils.go**: 文件操作工具
 
-## 依赖关系图
+## 架构设计
 
+### 分层架构
 ```mermaid
 graph TB
     subgraph 入口层[入口层 cmd/]
@@ -118,6 +117,7 @@ graph TB
 
     subgraph 应用层[应用层 internal/]
         Container[container/container.go]
+        UI[ui/]
     end
 
     subgraph 接口层[接口层 internal/interfaces/]
@@ -126,64 +126,103 @@ graph TB
 
     subgraph 基础设施层[基础设施层 pkg/]
         Config[config/manager.go]
-        Network[network/server.go]
+        Network[network/*.go]
         Service[service/sync_service.go]
-        Errors[errors/*.go]
-        Logger[logger/default.go]
         Storage[storage/*.go]
+        Logger[logger/default.go]
         Archive[archive/zip.go]
+        Errors[errors/*.go]
     end
 
-    %% 入口层依赖
+    %% 依赖关系
     Client --> Container
     Server --> Container
-
-    %% 应用层依赖
     Container --> Interfaces
-    Container --> Config
-    Container --> Network
-    Container --> Service
-    Container --> Logger
-    Container --> Storage
-
-    %% 基础设施层依赖
+    UI --> Interfaces
     Config --> Interfaces
     Network --> Interfaces
     Service --> Interfaces
-    Logger --> Interfaces
     Storage --> Interfaces
+    Logger --> Interfaces
     Archive --> Interfaces
     Errors --> Interfaces
-
-    %% 错误处理依赖
-    Config --> Errors
-    Network --> Errors
-    Service --> Errors
-    Storage --> Errors
 ```
 
-## 层级说明
+### 设计原则
 
-1. **入口层** (`cmd/`)
-   - 提供程序入口点
-   - 初始化和启动应用
-   - 通过容器组装组件
-   - 处理命令行参数
+1. **依赖倒置**
+   - 所有组件依赖于接口而非实现
+   - 通过接口层实现解耦
+   - 便于测试和替换实现
 
-2. **应用层** (`internal/container/`)
-   - 实现依赖注入容器
-   - 管理组件生命周期
-   - 协调各个组件
-   - 提供服务访问接口
+2. **关注点分离**
+   - UI层：负责用户界面和交互
+   - 服务层：处理业务逻辑
+   - 存储层：处理数据持久化
+   - 网络层：处理通信
 
-3. **接口层** (`internal/interfaces/`)
-   - 定义所有核心接口
-   - 定义共享数据类型
-   - 实现依赖倒置
-   - 确保模块解耦
+3. **MVVM模式**
+   - Model: 数据模型和业务逻辑
+   - ViewModel: 视图模型，处理UI逻辑
+   - View: 用户界面实现
 
-4. **基础设施层** (`pkg/`)
-   - 实现具体功能
-   - 实现接口定义
-   - 处理技术细节
-   - 提供错误处理
+4. **错误处理**
+   - 统一的错误类型体系
+   - 结构化的错误信息
+   - 错误追踪和日志记录
+
+5. **配置管理**
+   - 集中的配置管理
+   - 配置验证和迁移
+   - 实时配置更新
+
+6. **日志系统**
+   - 分级日志记录
+   - 结构化日志
+   - 可配置的日志输出
+
+### 主要功能
+
+1. **文件同步**
+   - 多种同步模式：镜像、推送、打包
+   - 增量同步
+   - 文件完整性验证
+
+2. **网络通信**
+   - TCP长连接
+   - JSON消息协议
+   - 断线重连
+
+3. **用户界面**
+   - 配置管理
+   - 同步状态监控
+   - 进度显示
+
+4. **存储管理**
+   - 文件存储
+   - 配置持久化
+   - 缓存管理
+
+## 开发指南
+
+### 添加新功能
+1. 在接口层定义接口
+2. 在基础设施层实现接口
+3. 在容器中注册服务
+4. 更新UI（如需要）
+
+### 错误处理
+1. 使用特定的错误类型
+2. 记录详细的错误信息
+3. 提供用户友好的错误提示
+
+### 测试策略
+1. 单元测试：测试独立组件
+2. 集成测试：测试组件交互
+3. UI测试：测试用户界面
+4. 性能测试：测试同步性能
+
+### 日志规范
+1. 使用适当的日志级别
+2. 包含上下文信息
+3. 避免敏感信息

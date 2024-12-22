@@ -6,8 +6,18 @@ type SyncService interface {
 	Start() error
 	Stop() error
 	IsRunning() bool
+	GetSyncStatus() string
 
-	// 配置管理
+	// 服务器操作
+	StartServer() error
+	StopServer() error
+	SetServer(server NetworkServer)
+
+	// 同步操作
+	SyncFiles(path string) error
+	HandleSyncRequest(request interface{}) error
+
+	// 配置操作
 	GetCurrentConfig() *Config
 	ListConfigs() ([]*Config, error)
 	LoadConfig(id string) error
@@ -18,12 +28,4 @@ type SyncService interface {
 	// 回调设置
 	SetOnConfigChanged(callback func())
 	SetProgressCallback(callback func(progress *Progress))
-
-	// 服务器管理
-	SetServer(server NetworkServer)
-
-	// 同步操作
-	SyncFiles(path string) error
-	HandleSyncRequest(request interface{}) error
-	GetSyncStatus() string
 }
