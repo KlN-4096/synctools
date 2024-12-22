@@ -5,20 +5,40 @@ import (
 	"path/filepath"
 	"strings"
 
-	"synctools/internal/model"
 	"synctools/internal/storage"
+	"synctools/pkg/common"
 )
+
+/*
+Package config 实现了配置管理功能。
+
+文件作用：
+- 管理配置文件的读取和保存
+- 维护当前活动配置
+- 处理配置变更通知
+- 提供配置验证功能
+
+主要方法：
+- NewManager: 创建新的配置管理器
+- LoadConfig: 加载指定的配置文件
+- SaveConfig: 保存配置到文件
+- GetCurrentConfig: 获取当前活动配置
+- SetCurrentConfig: 设置当前活动配置
+- GetAllConfigs: 获取所有可用配置
+- ValidateConfig: 验证配置有效性
+- OnConfigChanged: 设置配置变更回调
+*/
 
 // Manager 配置管理器
 type Manager struct {
 	storage       storage.Storage
-	logger        model.Logger
-	currentConfig *model.Config
+	logger        common.Logger
+	currentConfig *common.Config
 	onChanged     func()
 }
 
 // NewManager 创建新的配置管理器
-func NewManager(configDir string, logger model.Logger) (*Manager, error) {
+func NewManager(configDir string, logger common.Logger) (*Manager, error) {
 	return &Manager{
 		storage: storage.NewFileStorage(configDir),
 		logger:  logger,
@@ -31,7 +51,7 @@ func (m *Manager) SetOnChanged(callback func()) {
 }
 
 // GetCurrentConfig 获取当前配置
-func (m *Manager) GetCurrentConfig() *model.Config {
+func (m *Manager) GetCurrentConfig() *common.Config {
 	return m.currentConfig
 }
 
@@ -39,7 +59,7 @@ func (m *Manager) GetCurrentConfig() *model.Config {
 func (m *Manager) LoadConfig(uuid string) error {
 	m.logger.DebugLog("开始加载配置: UUID=%s", uuid)
 
-	config := &model.Config{}
+	config := &common.Config{}
 	if err := m.storage.Load(uuid+".json", config); err != nil {
 		m.logger.Error("加载配置失败", "error", err)
 		return fmt.Errorf("加载配置失败: %v", err)
@@ -53,7 +73,7 @@ func (m *Manager) LoadConfig(uuid string) error {
 	}
 
 	// 创建新的配置对象以避免引用问题
-	m.currentConfig = &model.Config{
+	m.currentConfig = &common.Config{
 		UUID:            config.UUID,
 		Type:            config.Type,
 		Name:            config.Name,
@@ -61,9 +81,9 @@ func (m *Manager) LoadConfig(uuid string) error {
 		Host:            config.Host,
 		Port:            config.Port,
 		SyncDir:         config.SyncDir,
-		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		SyncFolders:     make([]common.SyncFolder, len(config.SyncFolders)),
 		IgnoreList:      make([]string, len(config.IgnoreList)),
-		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+		FolderRedirects: make([]common.FolderRedirect, len(config.FolderRedirects)),
 	}
 
 	// 复制切片内容
@@ -103,19 +123,19 @@ func (m *Manager) SaveCurrentConfig() error {
 }
 
 // ListConfigs 获取配置列表
-func (m *Manager) ListConfigs() ([]*model.Config, error) {
+func (m *Manager) ListConfigs() ([]*common.Config, error) {
 	files, err := m.storage.List()
 	if err != nil {
 		return nil, fmt.Errorf("列出配置文件失败: %v", err)
 	}
 
-	var configs []*model.Config
+	var configs []*common.Config
 	for _, file := range files {
 		if filepath.Ext(file) != ".json" {
 			continue
 		}
 
-		config := &model.Config{}
+		config := &common.Config{}
 		if err := m.storage.Load(file, config); err != nil {
 			m.logger.Error("加载配置文件失败", "file", file, "error", err)
 			continue
@@ -127,7 +147,7 @@ func (m *Manager) ListConfigs() ([]*model.Config, error) {
 		}
 
 		// 创建新的配置对象以避免引用问题
-		configCopy := &model.Config{
+		configCopy := &common.Config{
 			UUID:            config.UUID,
 			Type:            config.Type,
 			Name:            config.Name,
@@ -135,9 +155,9 @@ func (m *Manager) ListConfigs() ([]*model.Config, error) {
 			Host:            config.Host,
 			Port:            config.Port,
 			SyncDir:         config.SyncDir,
-			SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+			SyncFolders:     make([]common.SyncFolder, len(config.SyncFolders)),
 			IgnoreList:      make([]string, len(config.IgnoreList)),
-			FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+			FolderRedirects: make([]common.FolderRedirect, len(config.FolderRedirects)),
 		}
 
 		// 复制切片内容
@@ -168,7 +188,7 @@ func (m *Manager) DeleteConfig(uuid string) error {
 }
 
 // ValidateConfig 验证配置
-func (m *Manager) ValidateConfig(config *model.Config) error {
+func (m *Manager) ValidateConfig(config *common.Config) error {
 	if config.UUID == "" {
 		return fmt.Errorf("UUID不能为空")
 	}
@@ -188,7 +208,7 @@ func (m *Manager) ValidateConfig(config *model.Config) error {
 }
 
 // Save 保存指定的配置
-func (m *Manager) Save(config *model.Config) error {
+func (m *Manager) Save(config *common.Config) error {
 	m.logger.DebugLog("开始保存配置: UUID=%s, Name=%s", config.UUID, config.Name)
 
 	if err := m.ValidateConfig(config); err != nil {
@@ -198,7 +218,7 @@ func (m *Manager) Save(config *model.Config) error {
 
 	// 确保 UUID 正确设置
 	if config.UUID == "" {
-		uuid, err := model.NewUUID()
+		uuid, err := common.NewUUID()
 		if err != nil {
 			m.logger.Error("生成UUID失败", "error", err)
 			return fmt.Errorf("生成UUID失败: %v", err)
@@ -208,7 +228,7 @@ func (m *Manager) Save(config *model.Config) error {
 	}
 
 	// 创建新的配置对象以避免引用问题
-	configToSave := &model.Config{
+	configToSave := &common.Config{
 		UUID:            config.UUID,
 		Type:            config.Type,
 		Name:            config.Name,
@@ -216,9 +236,9 @@ func (m *Manager) Save(config *model.Config) error {
 		Host:            config.Host,
 		Port:            config.Port,
 		SyncDir:         config.SyncDir,
-		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		SyncFolders:     make([]common.SyncFolder, len(config.SyncFolders)),
 		IgnoreList:      make([]string, len(config.IgnoreList)),
-		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+		FolderRedirects: make([]common.FolderRedirect, len(config.FolderRedirects)),
 	}
 
 	// 复制切片内容

@@ -1,3 +1,30 @@
+/*
+Package network 实现了网络通信功能。
+
+文件作用：
+- 实现服务器端网络通信
+- 管理客户端连接
+- 处理同步请求
+- 实现文件传输
+
+主要类型：
+- Server: 网络服务器
+- Client: 客户端连接
+- ClientMessage: 客户端消息
+- FileOperation: 文件操作接口
+- TransferResult: 传输结果
+
+主要方法：
+- NewServer: 创建新的服务器实例
+- Start: 启动服务器
+- Stop: 停止服务器
+- handleMessage: 处理客户端消息
+- handleSyncRequest: 处理同步请求
+- handleFileTransfer: 处理文件传输
+- handlePackTransfer: 处理压缩包传输
+- sendResponse: 发送响应消息
+*/
+
 package network
 
 import (
@@ -10,22 +37,21 @@ import (
 	"sync"
 	"time"
 
-	"synctools/internal/model"
 	pkgcommon "synctools/pkg/common"
 )
 
 // Server 网络服务器
 type Server struct {
-	config     *model.Config
+	config     *pkgcommon.Config
 	listener   net.Listener
 	clients    map[string]*Client
 	clientsMux sync.RWMutex
-	logger     model.Logger
+	logger     pkgcommon.Logger
 	running    bool
 }
 
 // NewServer 创建新的网络服务器
-func NewServer(config *model.Config, logger model.Logger) *Server {
+func NewServer(config *pkgcommon.Config, logger pkgcommon.Logger) *Server {
 	return &Server{
 		config:  config,
 		clients: make(map[string]*Client),
@@ -160,7 +186,7 @@ type Client struct {
 	UUID         string
 	conn         net.Conn
 	server       *Server
-	state        *model.ClientState
+	state        *pkgcommon.ClientState
 	lastActivity time.Time
 }
 
@@ -267,10 +293,10 @@ func (c *Client) handleSyncRequest(client *Client, msg *ClientMessage) error {
 // handleRegister 处理客户端注册
 func (c *Client) handleRegister(client *Client, msg *ClientMessage) error {
 	c.UUID = msg.UUID
-	c.state = &model.ClientState{
+	c.state = &pkgcommon.ClientState{
 		UUID:         msg.UUID,
 		LastSyncTime: time.Now().Unix(),
-		FolderStates: make(map[string]model.PackState),
+		FolderStates: make(map[string]pkgcommon.PackState),
 		IsOnline:     true,
 		Version:      c.server.config.Version,
 	}
@@ -477,11 +503,11 @@ func (op *FileSyncOperation) Execute() error {
 
 	// 根据同步模式处理
 	switch op.Mode {
-	case model.SyncModeMirror:
+	case pkgcommon.SyncModeMirror:
 		return op.executeMirrorSync(srcFiles, hashFiles)
-	case model.SyncModePush:
+	case pkgcommon.SyncModePush:
 		return op.executePushSync(srcFiles, hashFiles)
-	case model.SyncModePack:
+	case pkgcommon.SyncModePack:
 		return op.executePackSync(srcFiles, hashFiles)
 	default:
 		return fmt.Errorf("不支持的同步模式: %s", op.Mode)

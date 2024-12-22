@@ -8,12 +8,29 @@ import (
 	"time"
 
 	"synctools/internal/config"
-	"synctools/internal/model"
 	"synctools/internal/network"
 	"synctools/internal/service"
 	"synctools/internal/ui"
 	"synctools/internal/ui/viewmodels"
+	"synctools/pkg/common"
 )
+
+/*
+Package main 实现了文件同步工具的服务器程序。
+
+文件作用：
+- 实现服务器的主程序入口
+- 初始化服务器配置和组件
+- 启动网络服务和GUI界面
+- 管理服务器状态和配置
+
+主要方法：
+- main: 程序入口，初始化各个组件并启动服务器
+- initConfig: 初始化服务器配置
+- setupLogger: 设置日志记录器
+- createSyncService: 创建同步服务
+- handlePanic: 处理全局异常
+*/
 
 func main() {
 	// 获取程序所在目录
@@ -35,9 +52,8 @@ func main() {
 	fmt.Printf("日志目录: %s\n", logDir)
 
 	// 创建日志记录器
-	logger := &model.DefaultLogger{
-		DebugEnabled: true,
-	}
+	logger := common.NewDefaultLogger()
+	logger.SetDebugMode(true)
 	logger.Log("日志记录器初始化完成")
 
 	// 设置panic处理
@@ -76,7 +92,7 @@ func main() {
 
 	// 创建同步服务
 	logger.Log("正在创建同步服务")
-	syncService := service.NewSyncService(model.ConfigManager(configManager), logger)
+	syncService := service.NewSyncService(common.ConfigManager(configManager), logger)
 	if syncService == nil {
 		logger.Error("同步服务创建失败: %v", nil)
 		return

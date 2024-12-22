@@ -1,3 +1,26 @@
+/*
+Package viewmodels 实现了视图模型层。
+
+文件作用：
+- 实现配置界面的视图模型
+- 管理配置数据绑定
+- 处理配置界面交互
+- 提供配置操作接口
+
+主要类型：
+- ConfigViewModel: 配置视图模型
+- ConfigListModel: 配置列表模型
+- SyncFolderModel: 同步文件夹模型
+
+主要方法：
+- NewConfigViewModel: 创建配置视图模型
+- LoadConfig: 加载配置
+- SaveConfig: 保存配置
+- UpdateUI: 更新界面
+- AddSyncFolder: 添加同步文件夹
+- RemoveSyncFolder: 移除同步文件夹
+*/
+
 package viewmodels
 
 import (
@@ -10,9 +33,9 @@ import (
 
 	"github.com/lxn/walk"
 
-	"synctools/internal/model"
 	"synctools/internal/network"
 	"synctools/internal/service"
+	"synctools/pkg/common"
 )
 
 // LineEditIface 定义 LineEdit 接口
@@ -30,10 +53,21 @@ type TableViewIface interface {
 	Columns() *walk.TableViewColumnList
 }
 
+// ViewModelLogger 日志接口
+type ViewModelLogger interface {
+	Log(format string, v ...interface{})
+	Error(format string, v ...interface{})
+	DebugLog(format string, v ...interface{})
+	Info(msg string, keyvals ...interface{})
+	SetDebugMode(enabled bool)
+	GetDebugMode() bool
+	Close() error
+}
+
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
 	syncService *service.SyncService
-	logger      Logger
+	logger      ViewModelLogger
 
 	// UI 组件
 	window          *walk.MainWindow
@@ -54,14 +88,14 @@ type ConfigViewModel struct {
 	ignoreEdit  *walk.TextEdit
 
 	// 缓存
-	currentConfig *model.Config
+	currentConfig *common.Config
 
 	// 移除进度回调
 	lastLoggedProgress int // 上次记录的进度百分比
 }
 
 // NewConfigViewModel 创建新的配置视图模型
-func NewConfigViewModel(syncService *service.SyncService, logger Logger) *ConfigViewModel {
+func NewConfigViewModel(syncService *service.SyncService, logger ViewModelLogger) *ConfigViewModel {
 	return &ConfigViewModel{
 		syncService: syncService,
 		logger:      logger,
@@ -213,16 +247,16 @@ func (vm *ConfigViewModel) SaveConfig() error {
 		vm.nameEdit.Text(), vm.versionEdit.Text(), vm.hostEdit.Text(), vm.portEdit.Text(), vm.syncDirEdit.Text())
 
 	// 创建一个新的配置对象，以避免引用问题
-	newConfig := &model.Config{
+	newConfig := &common.Config{
 		UUID:            config.UUID,
-		Type:            model.ConfigTypeServer, // 设置为服务器配置
+		Type:            common.ConfigTypeServer, // 设置为服务器配置
 		Name:            vm.nameEdit.Text(),
 		Version:         vm.versionEdit.Text(),
 		Host:            vm.hostEdit.Text(),
 		SyncDir:         vm.syncDirEdit.Text(),
-		SyncFolders:     make([]model.SyncFolder, len(config.SyncFolders)),
+		SyncFolders:     make([]common.SyncFolder, len(config.SyncFolders)),
 		IgnoreList:      make([]string, 0),
-		FolderRedirects: make([]model.FolderRedirect, len(config.FolderRedirects)),
+		FolderRedirects: make([]common.FolderRedirect, len(config.FolderRedirects)),
 	}
 
 	// 解析端口号
@@ -360,15 +394,15 @@ func (vm *ConfigViewModel) IsServerRunning() bool {
 type ConfigListModel struct {
 	walk.TableModelBase
 	syncService   *service.SyncService
-	logger        Logger
+	logger        ViewModelLogger
 	sortColumn    int
 	sortOrder     walk.SortOrder
 	filter        string
-	cachedConfigs []*model.Config
+	cachedConfigs []*common.Config
 }
 
 // NewConfigListModel 创建新的配置列表模型
-func NewConfigListModel(syncService *service.SyncService, logger Logger) *ConfigListModel {
+func NewConfigListModel(syncService *service.SyncService, logger ViewModelLogger) *ConfigListModel {
 	model := &ConfigListModel{
 		syncService: syncService,
 		logger:      logger,
@@ -394,9 +428,9 @@ func (m *ConfigListModel) refreshCache() {
 	}
 
 	// 只保留服务器配置
-	serverConfigs := make([]*model.Config, 0)
+	serverConfigs := make([]*common.Config, 0)
 	for _, config := range configs {
-		if config.Type == model.ConfigTypeServer {
+		if config.Type == common.ConfigTypeServer {
 			serverConfigs = append(serverConfigs, config)
 			m.logger.DebugLog("添加服务器配置: UUID=%s, Name=%s", config.UUID, config.Name)
 		} else {
@@ -470,7 +504,7 @@ func (m *ConfigListModel) PublishRowsReset() {
 type RedirectListModel struct {
 	walk.TableModelBase
 	syncService   *service.SyncService
-	currentConfig *model.Config
+	currentConfig *common.Config
 }
 
 // NewRedirectListModel 创建新的重定向列表模型
@@ -525,7 +559,7 @@ func (m *RedirectListModel) PublishRowsReset() {
 type SyncFolderListModel struct {
 	walk.TableModelBase
 	syncService   *service.SyncService
-	currentConfig *model.Config
+	currentConfig *common.Config
 }
 
 // NewSyncFolderListModel 创建新的同步文件夹列表模型
@@ -583,7 +617,7 @@ func (m *SyncFolderListModel) PublishRowsReset() {
 }
 
 // GetCurrentConfig 获取当前配置（使用缓存）
-func (vm *ConfigViewModel) GetCurrentConfig() *model.Config {
+func (vm *ConfigViewModel) GetCurrentConfig() *common.Config {
 	if vm.currentConfig == nil {
 		// 只在缓存为空时记录日志
 		vm.currentConfig = vm.syncService.GetCurrentConfig()
@@ -662,7 +696,7 @@ func (vm *ConfigViewModel) UpdateRedirect(index int, serverPath, clientPath stri
 }
 
 // ListConfigs 获取配置列表
-func (vm *ConfigViewModel) ListConfigs() ([]*model.Config, error) {
+func (vm *ConfigViewModel) ListConfigs() ([]*common.Config, error) {
 	return vm.syncService.ListConfigs()
 }
 
@@ -681,30 +715,30 @@ func (vm *ConfigViewModel) LoadConfig(uuid string) error {
 
 // CreateConfig 创建新的配置
 func (vm *ConfigViewModel) CreateConfig(name, version string) error {
-	uuid, err := model.NewUUID()
+	uuid, err := common.NewUUID()
 	if err != nil {
 		return fmt.Errorf("生成UUID失败: %v", err)
 	}
 
-	config := &model.Config{
+	config := &common.Config{
 		UUID:    uuid,
 		Name:    name,
 		Version: version,
 		Host:    "0.0.0.0",
 		Port:    6666,
-		Type:    model.ConfigTypeServer, // 设置为服务器配置
+		Type:    common.ConfigTypeServer, // 设置为服务器配置
 		IgnoreList: []string{
 			".clientconfig",
 			".DS_Store",
 			"thumbs.db",
 		},
-		FolderRedirects: []model.FolderRedirect{
+		FolderRedirects: []common.FolderRedirect{
 			{ServerPath: "clientmods", ClientPath: "mods"},
 		},
-		SyncFolders: []model.SyncFolder{
+		SyncFolders: []common.SyncFolder{
 			{
 				Path:     "mods",
-				SyncMode: model.SyncModePack,
+				SyncMode: common.SyncModePack,
 			},
 		},
 	}
@@ -736,7 +770,7 @@ func (vm *ConfigViewModel) AddRedirect(serverPath, clientPath string) error {
 	}
 
 	// 添加新的重定向
-	config.FolderRedirects = append(config.FolderRedirects, model.FolderRedirect{
+	config.FolderRedirects = append(config.FolderRedirects, common.FolderRedirect{
 		ServerPath: serverPath,
 		ClientPath: clientPath,
 	})
@@ -791,7 +825,7 @@ func (vm *ConfigViewModel) AddSyncFolder(path, mode string) error {
 	}
 
 	// 添加新的同步文件夹
-	config.SyncFolders = append(config.SyncFolders, model.SyncFolder{
+	config.SyncFolders = append(config.SyncFolders, common.SyncFolder{
 		Path:     path,
 		SyncMode: mode,
 	})

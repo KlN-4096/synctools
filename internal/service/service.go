@@ -1,16 +1,25 @@
 /*
-Package service 实现了同步工具的业务逻辑层。
+Package service 实现了同步服务的业务逻辑。
 
-主要功能：
-- 同步服务管理
-- 配置管理
-- 状态追踪
-- 进度报告
+文件作用：
+- 实现核心同步逻辑
+- 管理同步状态
+- 处理配置变更
+- 提供服务管理功能
 
-支持的同步模式：
-- mirror: 镜像模式，完全同步
-- push: 推送模式，单向同步
-- pack: 压缩包模式，整体同步
+主要类型：
+- SyncService: 同步服务
+- ServiceState: 服务状态
+- SyncResult: 同步结果
+
+主要方法：
+- NewSyncService: 创建新的同步服务
+- Start: 启动同步服务
+- Stop: 停止同步服务
+- HandleSync: 处理同步请求
+- GetStatus: 获取服务状态
+- UpdateConfig: 更新服务配置
+- CleanupOldPacks: 清理旧的压缩包
 */
 
 package service
@@ -21,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"synctools/internal/model"
 	"synctools/pkg/common"
 )
 
@@ -86,23 +94,23 @@ func (p *SyncProgress) GetPercentage() float64 {
 
 // SyncService 同步服务
 type SyncService struct {
-	configManager    model.ConfigManager
-	server           model.Server
-	logger           model.Logger
+	configManager    common.ConfigManager
+	server           common.Server
+	logger           common.Logger
 	running          bool
 	runningMux       sync.RWMutex
 	progressCallback func(*SyncProgress)
 	onConfigChanged  func()
-	clientStates     map[string]*model.ClientState
+	clientStates     map[string]*common.ClientState
 	statesMux        sync.RWMutex
 }
 
 // NewSyncService 创建新的同步服务
-func NewSyncService(configManager model.ConfigManager, logger model.Logger) *SyncService {
+func NewSyncService(configManager common.ConfigManager, logger common.Logger) *SyncService {
 	s := &SyncService{
 		configManager: configManager,
 		logger:        logger,
-		clientStates:  make(map[string]*model.ClientState),
+		clientStates:  make(map[string]*common.ClientState),
 	}
 
 	// 设置配置管理器的变更回调
@@ -190,7 +198,7 @@ func (s *SyncService) IsRunning() bool {
 }
 
 // ListConfigs 获取配置列表
-func (s *SyncService) ListConfigs() ([]*model.Config, error) {
+func (s *SyncService) ListConfigs() ([]*common.Config, error) {
 	s.logger.DebugLog("获取配置列表")
 	configs, err := s.configManager.ListConfigs()
 	if err != nil {
@@ -230,7 +238,7 @@ func (s *SyncService) DeleteConfig(uuid string) error {
 }
 
 // GetCurrentConfig 获取当前配置
-func (s *SyncService) GetCurrentConfig() *model.Config {
+func (s *SyncService) GetCurrentConfig() *common.Config {
 	config := s.configManager.GetCurrentConfig()
 	if config == nil {
 		s.logger.DebugLog("当前没有选中的配置")
@@ -241,7 +249,7 @@ func (s *SyncService) GetCurrentConfig() *model.Config {
 }
 
 // ValidateConfig 验证配置
-func (s *SyncService) ValidateConfig(config *model.Config) error {
+func (s *SyncService) ValidateConfig(config *common.Config) error {
 	s.logger.DebugLog("验证配置: %s", config.UUID)
 	if err := s.configManager.ValidateConfig(config); err != nil {
 		s.logger.Error("配置验证失败: %v", err)
@@ -251,7 +259,7 @@ func (s *SyncService) ValidateConfig(config *model.Config) error {
 }
 
 // Save 保存指定配置
-func (s *SyncService) Save(config *model.Config) error {
+func (s *SyncService) Save(config *common.Config) error {
 	s.logger.DebugLog("保存配置: %s", config.UUID)
 	if err := s.configManager.Save(config); err != nil {
 		s.logger.Error("保存配置失败: %v", err)
@@ -261,7 +269,7 @@ func (s *SyncService) Save(config *model.Config) error {
 }
 
 // SetServer 设置服务器实例
-func (s *SyncService) SetServer(server model.Server) {
+func (s *SyncService) SetServer(server common.Server) {
 	s.server = server
 }
 
@@ -271,7 +279,7 @@ func (s *SyncService) SetOnConfigChanged(callback func()) {
 }
 
 // GetClientState 获取客户端状态
-func (s *SyncService) GetClientState(uuid string) *model.ClientState {
+func (s *SyncService) GetClientState(uuid string) *common.ClientState {
 	s.statesMux.RLock()
 	defer s.statesMux.RUnlock()
 
@@ -279,10 +287,10 @@ func (s *SyncService) GetClientState(uuid string) *model.ClientState {
 		return state
 	}
 
-	state := &model.ClientState{
+	state := &common.ClientState{
 		UUID:         uuid,
 		LastSyncTime: time.Now().Unix(),
-		FolderStates: make(map[string]model.PackState),
+		FolderStates: make(map[string]common.PackState),
 		IsOnline:     false,
 	}
 	s.clientStates[uuid] = state
@@ -290,7 +298,7 @@ func (s *SyncService) GetClientState(uuid string) *model.ClientState {
 }
 
 // UpdateClientState 更新客户端状态
-func (s *SyncService) UpdateClientState(state *model.ClientState) error {
+func (s *SyncService) UpdateClientState(state *common.ClientState) error {
 	s.statesMux.Lock()
 	defer s.statesMux.Unlock()
 
@@ -308,11 +316,11 @@ func (s *SyncService) RemoveClientState(uuid string) error {
 }
 
 // ListClientStates 列出所有客户端状态
-func (s *SyncService) ListClientStates() ([]*model.ClientState, error) {
+func (s *SyncService) ListClientStates() ([]*common.ClientState, error) {
 	s.statesMux.RLock()
 	defer s.statesMux.RUnlock()
 
-	states := make([]*model.ClientState, 0, len(s.clientStates))
+	states := make([]*common.ClientState, 0, len(s.clientStates))
 	for _, state := range s.clientStates {
 		states = append(states, state)
 	}

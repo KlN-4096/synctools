@@ -1,3 +1,24 @@
+/*
+Package storage 实现了数据持久化存储功能。
+
+文件作用：
+- 提供统一的存储接口
+- 实现基于文件系统的存储
+- 支持多种数据类型的存储和加载
+- 管理配置文件的持久化
+
+主要类型：
+- Storage: 存储接口定义
+- FileStorage: 基于文件系统的存储实现
+
+主要方法：
+- NewFileStorage: 创建新的文件存储实例
+- Save: 保存数据到存储
+- Load: 从存储加载数据
+- Delete: 删除存储的数据
+- List: 列出所有存储的数据项
+*/
+
 package storage
 
 import (

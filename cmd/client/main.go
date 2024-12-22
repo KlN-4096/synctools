@@ -1,25 +1,31 @@
 /*
 Package main 实现了文件同步工具的客户端程序。
 
-主要功能：
-1. GUI界面：使用walk库实现Windows图形界面
-2. 配置管理：读取和保存客户端配置
-3. 同步模式：
-   - pack模式：整包压缩传输
-   - mirror模式：镜像同步
-   - push模式：推送同步
-4. 错误处理：
-   - 自动重试机制
-   - 异常恢复
-5. 进度显示：
-   - 文件传输进度
-   - 同步状态显示
-6. 文件校验：
-   - MD5校验
-   - 完整性验证
+文件作用：
+- 实现客户端的主程序入口
+- 初始化GUI界面和各种组件
+- 管理客户端配置和同步状态
+- 处理与服务器的通信
+- 提供文件同步功能
+- 实现用户界面交互
 
-作者：[作者名]
-版本：1.0.0
+主要类型：
+- ClientMessage: 客户端消息结构
+- RetryConfig: 重试配置结构
+- ValidationResult: 文件校验结果结构
+- SyncClient: 同步客户端结构
+
+主要方法：
+- NewSyncClient: 创建新的同步客户端
+- connect: 连接到同步服务器
+- syncWithServer: 执行文件同步操作
+- handlePackSync: 处理打包同步模式
+- handleMirrorSync: 处理镜像同步模式
+- handlePushSync: 处理推送同步模式
+- receiveFile: 接收单个文件
+- validatePackage: 验证压缩包完整性
+- SaveConfig: 保存客户端配置
+- disconnect: 断开服务器连接
 */
 
 package main
@@ -36,8 +42,7 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
 
-	"synctools/internal/model"
-	pkgcommon "synctools/pkg/common"
+	"synctools/pkg/common"
 )
 
 // ClientMessage 客户端消息
@@ -62,11 +67,11 @@ type ValidationResult struct {
 
 // SyncClient 同步客户端
 type SyncClient struct {
-	config      *model.Config
-	logger      *pkgcommon.Logger
+	config      *common.Config
+	logger      *common.GUILogger
 	status      *walk.StatusBarItem
 	conn        net.Conn
-	syncStatus  model.SyncStatus
+	syncStatus  common.SyncStatus
 	version     *walk.LineEdit
 	name        *walk.LineEdit
 	uuid        string
@@ -78,13 +83,13 @@ type SyncClient struct {
 // NewSyncClient 创建同步客户端
 func NewSyncClient(configPath string) (*SyncClient, error) {
 	// 加载配置
-	config, err := model.LoadConfig(configPath)
+	config, err := common.LoadConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("加载配置失败: %v", err)
 	}
 
 	// 创建日志记录器
-	logger := pkgcommon.NewLogger(func(msg string) {
+	logger := common.NewGUILogger(func(msg string) {
 		fmt.Println(msg) // 临时使用控制台输出
 	})
 
@@ -105,7 +110,7 @@ func NewSyncClient(configPath string) (*SyncClient, error) {
 
 // SaveConfig 保存配置
 func (c *SyncClient) SaveConfig() error {
-	if err := model.SaveConfig(c.configPath, c.config); err != nil {
+	if err := common.SaveConfig(c.configPath, c.config); err != nil {
 		return fmt.Errorf("保存配置失败: %v", err)
 	}
 	return nil
@@ -137,7 +142,7 @@ func (c *SyncClient) connect() error {
 
 	// 确保UUID存在
 	if c.uuid == "" {
-		uuid, err := model.NewUUID()
+		uuid, err := common.NewUUID()
 		if err != nil {
 			return fmt.Errorf("生成UUID失败: %v", err)
 		}
@@ -187,9 +192,9 @@ func (c *SyncClient) connect() error {
 	var response struct {
 		Type    string `json:"type"`
 		Payload struct {
-			Success bool          `json:"success"`
-			Message string        `json:"message"`
-			Config  *model.Config `json:"config"`
+			Success bool           `json:"success"`
+			Message string         `json:"message"`
+			Config  *common.Config `json:"config"`
 		} `json:"payload"`
 	}
 
@@ -300,13 +305,13 @@ func (c *SyncClient) syncWithServer() error {
 
 	// 根据服务器指定的模式处理同步
 	switch syncConfig.Payload.SyncMode {
-	case model.SyncModePack:
+	case common.SyncModePack:
 		c.logger.DebugLog("开始处理pack模式同步...")
 		return c.handlePackSync(syncConfig.Payload.PackMD5)
-	case model.SyncModeMirror:
+	case common.SyncModeMirror:
 		c.logger.DebugLog("开始处理mirror模式同步...")
 		return c.handleMirrorSync(syncConfig.Payload.ServerFiles)
-	case model.SyncModePush:
+	case common.SyncModePush:
 		c.logger.DebugLog("开始处理push模式同步...")
 		return c.handlePushSync(syncConfig.Payload.ServerFiles)
 	default:
@@ -353,12 +358,13 @@ func (c *SyncClient) handlePackSync(packMD5 string) error {
 	c.logger.DebugLog("压缩包验证成功,开始解压...")
 
 	// 解压文件
-	if err := pkgcommon.ExtractZipPackage(packPath, c.config.SyncDir); err != nil {
+	progress, err := common.DecompressFiles(packPath, c.config.SyncDir)
+	if err != nil {
 		c.logger.DebugLog("解压文件失败: %v", err)
 		return fmt.Errorf("解压文件失败: %v", err)
 	}
 
-	c.logger.DebugLog("文件解压完成")
+	c.logger.DebugLog("文件解压完成，共处理 %d 个文件，总大小 %d 字节", progress.ProcessedNum, progress.ProcessedSize)
 	c.logger.Log("同步完成")
 	return nil
 }
@@ -388,7 +394,7 @@ func (c *SyncClient) handleMirrorSync(serverFiles []struct {
 			if err != nil {
 				return err
 			}
-			hash, err := pkgcommon.CalculateFileHash(path)
+			hash, err := common.CalculateFileHash(path)
 			if err != nil {
 				return err
 			}
@@ -554,7 +560,7 @@ func (c *SyncClient) validatePackage(packPath string, expectedMD5 string) Valida
 	result := ValidationResult{IsValid: false}
 
 	// 计算文件MD5
-	hash, err := model.CalculateFileHash(packPath)
+	hash, err := common.CalculateFileHash(packPath)
 	if err != nil {
 		result.Error = fmt.Errorf("计算文件hash失败: %v", err)
 		return result
@@ -748,7 +754,7 @@ func main() {
 	}
 
 	// 创建日志记录器
-	logger := pkgcommon.NewLogger(func(msg string) {
+	logger := common.NewGUILogger(func(msg string) {
 		logBox.AppendText(msg + "\n")
 	})
 	client.logger = logger

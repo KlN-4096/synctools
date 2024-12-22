@@ -11,6 +11,24 @@ import (
 	"synctools/internal/ui/views"
 )
 
+/*
+Package ui 实现了图形用户界面。
+
+文件作用：
+- 实现主窗口界面
+- 管理界面布局
+- 处理用户交互
+- 集成各个功能模块
+
+主要方法：
+- NewMainWindow: 创建主窗口
+- Run: 运行窗口程序
+- InitMenus: 初始化菜单
+- InitTabs: 初始化标签页
+- ShowError: 显示错误信息
+- ShowMessage: 显示消息提示
+*/
+
 // CreateMainWindow 创建主窗口
 func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	// 设置panic处理
