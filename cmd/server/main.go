@@ -16,107 +16,136 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"runtime/debug"
-	"time"
+	"syscall"
 
-	"synctools/internal/config"
-	"synctools/internal/network"
-	"synctools/internal/service"
-	"synctools/internal/ui"
-	"synctools/internal/ui/viewmodels"
-	"synctools/pkg/common"
+	"synctools/internal/container"
+	"synctools/internal/interfaces"
 )
 
+var (
+	baseDir     string
+	configFile  string
+	defaultPort = 8080
+)
+
+func init() {
+	// 获取可执行文件所在目录
+	exe, err := os.Executable()
+	if err != nil {
+		panic(fmt.Sprintf("获取可执行文件路径失败: %v", err))
+	}
+	baseDir = filepath.Dir(exe)
+
+	// 解析命令行参数
+	flag.StringVar(&configFile, "config", "", "配置文件路径")
+	flag.Parse()
+}
+
 func main() {
-	// 获取程序所在目录
-	exePath, err := os.Executable()
+	// 创建依赖注入容器
+	c, err := container.New(baseDir)
 	if err != nil {
-		fmt.Printf("获取程序路径失败: %v\n", err)
-		return
+		fmt.Printf("初始化容器失败: %v\n", err)
+		os.Exit(1)
 	}
-	workDir := filepath.Dir(exePath)
-	os.Chdir(workDir)
-	fmt.Printf("工作目录: %s\n", workDir)
 
-	// 创建日志目录
-	logDir := "logs"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		fmt.Printf("创建日志目录失败: %v\n", err)
-		return
+	// 获取日志服务
+	logger := c.GetLogger()
+	logger.Info("服务器启动", interfaces.Fields{
+		"base_dir": baseDir,
+	})
+
+	// 加载或创建默认配置
+	cfg, err := loadOrCreateConfig(c, configFile)
+	if err != nil {
+		logger.Fatal("加载配置失败", interfaces.Fields{
+			"error": err,
+		})
 	}
-	fmt.Printf("日志目录: %s\n", logDir)
 
-	// 创建日志记录器
-	logger := common.NewDefaultLogger()
-	logger.SetDebugMode(true)
-	logger.Log("日志记录器初始化完成")
+	// 初始化所有服务
+	if err := c.InitializeServices(baseDir, cfg); err != nil {
+		logger.Fatal("初始化服务失败", interfaces.Fields{
+			"error": err,
+		})
+	}
 
-	// 设置panic处理
-	defer func() {
-		if r := recover(); r != nil {
-			logPath := filepath.Join(logDir, "crash.log")
-			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-			if err == nil {
-				fmt.Fprintf(f, "[%s] 程序崩溃: %v\n堆栈信息:\n%s\n",
-					time.Now().Format("2006-01-02 15:04:05"),
-					r,
-					string(debug.Stack()))
-				f.Close()
-			}
-			logger.Error("程序崩溃: %v", r)
-			debug.PrintStack()
+	// 启动网络服务器
+	server := c.GetNetworkServer()
+	if err := server.Start(); err != nil {
+		logger.Fatal("启动网络服务器失败", interfaces.Fields{
+			"error": err,
+		})
+	}
+
+	// 启动同步服务
+	syncService := c.GetSyncService()
+	if err := syncService.Start(); err != nil {
+		logger.Fatal("启动同步服务失败", interfaces.Fields{
+			"error": err,
+		})
+	}
+
+	// 等待中断信号
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	// 优雅关闭
+	logger.Info("开始关闭服务器...", nil)
+	if err := c.Shutdown(); err != nil {
+		logger.Error("关闭服务失败", interfaces.Fields{
+			"error": err,
+		})
+	}
+	logger.Info("服务器已关闭", nil)
+}
+
+// loadOrCreateConfig 加载或创建默认配置
+func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.Config, error) {
+	cfgManager := c.GetConfigManager()
+	storage := c.GetStorage()
+	logger := c.GetLogger()
+
+	// 如果指定了配置文件，尝试加载
+	if configFile != "" {
+		if err := cfgManager.LoadConfig(configFile); err != nil {
+			return nil, fmt.Errorf("加载配置文件失败: %v", err)
 		}
-	}()
-
-	// 创建配置目录
-	configDir := "./configs"
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		logger.Error("创建配置目录失败: %v", err)
-		return
-	}
-	logger.Log("配置目录创建成功: %s", configDir)
-
-	// 创建配置管理器
-	logger.Log("正在创建配置管理器")
-	configManager, err := config.NewManager(configDir, logger)
-	if err != nil {
-		logger.Error("创建配置管理器失败: %v", err)
-		return
-	}
-	logger.Log("配置管理器创建成功")
-
-	// 创建同步服务
-	logger.Log("正在创建同步服务")
-	syncService := service.NewSyncService(common.ConfigManager(configManager), logger)
-	if syncService == nil {
-		logger.Error("同步服务创建失败: %v", nil)
-		return
+		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil
 	}
 
-	// 创建网络服务器
-	logger.Log("正在创建网络服务器")
-	if config := configManager.GetCurrentConfig(); config != nil {
-		server := network.NewServer(config, logger)
-		syncService.SetServer(server)
+	// 检查是否存在默认配置
+	if storage.Exists("default.json") {
+		if err := cfgManager.LoadConfig("default"); err != nil {
+			return nil, fmt.Errorf("加载默认配置失败: %v", err)
+		}
+		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil
 	}
-	logger.Log("同步服务创建成功")
 
-	// 创建主视图模型
-	logger.Log("正在创建主视图模型")
-	mainViewModel := viewmodels.NewMainViewModel(syncService, logger)
-	if mainViewModel == nil {
-		logger.Error("主视图模型创建失败: %v", nil)
-		return
+	// 创建默认配置
+	cfg := &interfaces.Config{
+		UUID:    "default",
+		Type:    interfaces.ConfigTypeServer,
+		Name:    "SyncTools Server",
+		Version: "1.0.0",
+		Host:    "0.0.0.0",
+		Port:    defaultPort,
+		SyncDir: filepath.Join(baseDir, "sync"),
 	}
-	logger.Log("主视图模型创建成功")
 
-	// 创建并显示主窗口
-	logger.Log("正在创建主窗口")
-	if err := ui.CreateMainWindow(mainViewModel); err != nil {
-		logger.Error("创建主窗口失败: %v", err)
-		return
+	logger.Info("创建默认配置", interfaces.Fields{
+		"config": cfg,
+	})
+
+	if err := cfgManager.SaveConfig(cfg); err != nil {
+		return nil, fmt.Errorf("保存默认配置失败: %v", err)
 	}
+
+	return cfg, nil
 }

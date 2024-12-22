@@ -1,4 +1,4 @@
-package common
+package archive
 
 import (
 	"archive/zip"
@@ -9,30 +9,8 @@ import (
 	"time"
 )
 
-/*
-Package common 的压缩工具模块。
-
-文件作用：
-- 提供文件压缩功能
-- 提供文件解压功能
-- 处理压缩包操作
-- 提供错误处理功能
-
-主要类型：
-- ZipError: 压缩操作错误
-- ZipProgress: 压缩进度信息
-
-主要方法：
-- CompressFiles: 压缩文件到ZIP
-- DecompressFiles: 解压ZIP文件
-- AddFileToZip: 添加文件到压缩包
-- ExtractFile: 从压缩包提取文件
-- GetZipEntries: 获取压缩包内容列表
-- ValidateZip: 验证压缩包完整性
-*/
-
-// ZipError 压缩操作错误
-type ZipError struct {
+// Error 压缩操作错误
+type Error struct {
 	Op      string // 操作名称
 	Path    string // 文件路径
 	Message string // 错误消息
@@ -40,15 +18,15 @@ type ZipError struct {
 }
 
 // Error 实现error接口
-func (e *ZipError) Error() string {
+func (e *Error) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s [%s]: %s: %v", e.Op, e.Path, e.Message, e.Err)
 	}
 	return fmt.Sprintf("%s [%s]: %s", e.Op, e.Path, e.Message)
 }
 
-// ZipProgress 压缩进度信息
-type ZipProgress struct {
+// Progress 压缩进度信息
+type Progress struct {
 	CurrentFile   string    // 当前处理的文件
 	TotalFiles    int       // 总文件数
 	ProcessedNum  int       // 已处理文件数
@@ -59,10 +37,10 @@ type ZipProgress struct {
 }
 
 // CompressFiles 压缩文件到ZIP
-func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, error) {
+func CompressFiles(srcPath, zipPath string, ignoreList []string) (*Progress, error) {
 	// 验证源路径
-	if err := ValidatePath(srcPath, true); err != nil {
-		return nil, &ZipError{
+	if _, err := os.Stat(srcPath); err != nil {
+		return nil, &Error{
 			Op:      "CompressFiles",
 			Path:    srcPath,
 			Message: "源路径无效",
@@ -73,7 +51,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 	// 创建ZIP文件
 	zipFile, err := os.Create(zipPath)
 	if err != nil {
-		return nil, &ZipError{
+		return nil, &Error{
 			Op:      "CompressFiles",
 			Path:    zipPath,
 			Message: "创建ZIP文件失败",
@@ -87,14 +65,14 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 	defer zipWriter.Close()
 
 	// 创建进度信息
-	progress := &ZipProgress{
+	progress := &Progress{
 		StartTime: time.Now(),
 	}
 
 	// 遍历源目录
 	err = filepath.Walk(srcPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "CompressFiles",
 				Path:    path,
 				Message: "遍历目录失败",
@@ -105,7 +83,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 		// 获取相对路径
 		relPath, err := filepath.Rel(srcPath, path)
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "CompressFiles",
 				Path:    path,
 				Message: "获取相对路径失败",
@@ -117,7 +95,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 		for _, ignore := range ignoreList {
 			matched, err := filepath.Match(ignore, relPath)
 			if err != nil {
-				return &ZipError{
+				return &Error{
 					Op:      "CompressFiles",
 					Path:    path,
 					Message: "匹配忽略规则失败",
@@ -145,7 +123,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 		// 创建文件头
 		header, err := zip.FileInfoHeader(info)
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "CompressFiles",
 				Path:    path,
 				Message: "创建文件头失败",
@@ -161,7 +139,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 		// 创建文件写入器
 		writer, err := zipWriter.CreateHeader(header)
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "CompressFiles",
 				Path:    path,
 				Message: "创建文件写入器失败",
@@ -172,7 +150,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 		// 打开源文件
 		file, err := os.Open(path)
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "CompressFiles",
 				Path:    path,
 				Message: "打开源文件失败",
@@ -184,7 +162,7 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 		// 复制文件内容
 		written, err := io.Copy(writer, file)
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "CompressFiles",
 				Path:    path,
 				Message: "写入文件内容失败",
@@ -208,10 +186,10 @@ func CompressFiles(srcPath, zipPath string, ignoreList []string) (*ZipProgress, 
 }
 
 // DecompressFiles 解压ZIP文件
-func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
+func DecompressFiles(zipPath, destPath string) (*Progress, error) {
 	// 验证ZIP文件
-	if err := ValidatePath(zipPath, false); err != nil {
-		return nil, &ZipError{
+	if _, err := os.Stat(zipPath); err != nil {
+		return nil, &Error{
 			Op:      "DecompressFiles",
 			Path:    zipPath,
 			Message: "ZIP文件无效",
@@ -222,7 +200,7 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 	// 打开ZIP文件
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return nil, &ZipError{
+		return nil, &Error{
 			Op:      "DecompressFiles",
 			Path:    zipPath,
 			Message: "打开ZIP文件失败",
@@ -232,7 +210,7 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 	defer reader.Close()
 
 	// 创建进度信息
-	progress := &ZipProgress{
+	progress := &Progress{
 		StartTime:  time.Now(),
 		TotalFiles: len(reader.File),
 	}
@@ -244,7 +222,7 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 
 	// 确保目标目录存在
 	if err := os.MkdirAll(destPath, 0755); err != nil {
-		return nil, &ZipError{
+		return nil, &Error{
 			Op:      "DecompressFiles",
 			Path:    destPath,
 			Message: "创建目标目录失败",
@@ -252,18 +230,17 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 		}
 	}
 
-	// 遍历ZIP文件中的所有文件
+	// 遍历压缩文件
 	for _, file := range reader.File {
-		// 更新进度信息
 		progress.CurrentFile = file.Name
 
-		// 构建完整的目标路径
+		// 构建完整路径
 		path := filepath.Join(destPath, file.Name)
 
 		// 如果是目录，创建它
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(path, file.Mode()); err != nil {
-				return progress, &ZipError{
+				return nil, &Error{
 					Op:      "DecompressFiles",
 					Path:    path,
 					Message: "创建目录失败",
@@ -275,7 +252,7 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 
 		// 确保父目录存在
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return progress, &ZipError{
+			return nil, &Error{
 				Op:      "DecompressFiles",
 				Path:    path,
 				Message: "创建父目录失败",
@@ -283,45 +260,42 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 			}
 		}
 
-		// 创建目标文件
-		dstFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
+		// 创建文件
+		outFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
 		if err != nil {
-			return progress, &ZipError{
+			return nil, &Error{
 				Op:      "DecompressFiles",
 				Path:    path,
-				Message: "创建目标文件失败",
+				Message: "创建文件失败",
 				Err:     err,
 			}
 		}
 
-		// 打开源文件
-		srcFile, err := file.Open()
+		// 打开压缩文件
+		rc, err := file.Open()
 		if err != nil {
-			dstFile.Close()
-			return progress, &ZipError{
+			outFile.Close()
+			return nil, &Error{
 				Op:      "DecompressFiles",
-				Path:    path,
-				Message: "打开源文件失败",
+				Path:    file.Name,
+				Message: "打开压缩文件失败",
 				Err:     err,
 			}
 		}
 
 		// 复制文件内容
-		written, err := io.Copy(dstFile, srcFile)
+		written, err := io.Copy(outFile, rc)
+		rc.Close()
+		outFile.Close()
+
 		if err != nil {
-			dstFile.Close()
-			srcFile.Close()
-			return progress, &ZipError{
+			return nil, &Error{
 				Op:      "DecompressFiles",
 				Path:    path,
-				Message: "复制文件内容失败",
+				Message: "写入文件内容失败",
 				Err:     err,
 			}
 		}
-
-		// 关闭文件
-		dstFile.Close()
-		srcFile.Close()
 
 		// 更新进度信息
 		progress.ProcessedNum++
@@ -332,55 +306,11 @@ func DecompressFiles(zipPath, destPath string) (*ZipProgress, error) {
 	return progress, nil
 }
 
-// GetZipEntries 获取压缩包内容列表
-func GetZipEntries(zipPath string) ([]string, error) {
-	// 验证ZIP文件
-	if err := ValidatePath(zipPath, false); err != nil {
-		return nil, &ZipError{
-			Op:      "GetZipEntries",
-			Path:    zipPath,
-			Message: "ZIP文件无效",
-			Err:     err,
-		}
-	}
-
-	// 打开ZIP文件
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, &ZipError{
-			Op:      "GetZipEntries",
-			Path:    zipPath,
-			Message: "打开ZIP文件失败",
-			Err:     err,
-		}
-	}
-	defer reader.Close()
-
-	// 获取文件列表
-	var entries []string
-	for _, file := range reader.File {
-		entries = append(entries, file.Name)
-	}
-
-	return entries, nil
-}
-
-// ValidateZip 验证压缩包完整性
+// ValidateZip 验证ZIP文件完整性
 func ValidateZip(zipPath string) error {
-	// 验证ZIP文件
-	if err := ValidatePath(zipPath, false); err != nil {
-		return &ZipError{
-			Op:      "ValidateZip",
-			Path:    zipPath,
-			Message: "ZIP文件无效",
-			Err:     err,
-		}
-	}
-
-	// 打开ZIP文件
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return &ZipError{
+		return &Error{
 			Op:      "ValidateZip",
 			Path:    zipPath,
 			Message: "打开ZIP文件失败",
@@ -389,27 +319,25 @@ func ValidateZip(zipPath string) error {
 	}
 	defer reader.Close()
 
-	// 验证每个文件
 	for _, file := range reader.File {
-		// 打开文件
 		rc, err := file.Open()
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "ValidateZip",
 				Path:    file.Name,
-				Message: "打开文件失败",
+				Message: "打开压缩文件失败",
 				Err:     err,
 			}
 		}
 
-		// 读取文件内容
 		_, err = io.Copy(io.Discard, rc)
 		rc.Close()
+
 		if err != nil {
-			return &ZipError{
+			return &Error{
 				Op:      "ValidateZip",
 				Path:    file.Name,
-				Message: "读取文件失败",
+				Message: "读取文件内容失败",
 				Err:     err,
 			}
 		}

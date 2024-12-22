@@ -1,6 +1,12 @@
 package viewmodels
 
-import "github.com/lxn/walk"
+import (
+	"fmt"
+	"synctools/internal/interfaces"
+
+	"github.com/lxn/walk"
+	"github.com/lxn/walk/declarative"
+)
 
 /*
 文件作用:
@@ -47,15 +53,120 @@ type TableModel interface {
 
 // MainWindow 主窗口接口
 type MainWindow interface {
-	MsgBox(title, message string, style walk.MsgBoxStyle) int
+	MsgBox(title, message string, style walk.MsgBoxStyle) (int, error)
 }
 
-// Logger 日志记录器接口
+// Logger 视图模型日志接口
 type Logger interface {
-	Log(format string, v ...interface{})
-	Info(msg string, args ...interface{})
-	Error(msg string, args ...interface{})
-	DebugLog(format string, v ...interface{})
+	interfaces.Logger
 	SetDebugMode(enabled bool)
 	GetDebugMode() bool
+}
+
+// LoggerAdapter 日志适配器
+type LoggerAdapter struct {
+	interfaces.Logger
+	debugMode bool
+}
+
+// NewLoggerAdapter 创建新的日志适配器
+func NewLoggerAdapter(logger interfaces.Logger) Logger {
+	return &LoggerAdapter{
+		Logger:    logger,
+		debugMode: false,
+	}
+}
+
+// SetDebugMode 设置调试模式
+func (l *LoggerAdapter) SetDebugMode(enabled bool) {
+	l.debugMode = enabled
+	if enabled {
+		l.Logger.SetLevel(interfaces.DEBUG)
+	} else {
+		l.Logger.SetLevel(interfaces.INFO)
+	}
+}
+
+// GetDebugMode 获取调试模式状态
+func (l *LoggerAdapter) GetDebugMode() bool {
+	return l.debugMode
+}
+
+// ViewModel 视图模型基础接口
+type ViewModel interface {
+	Initialize() error
+	Shutdown() error
+}
+
+// DataBinder 数据绑定接口
+type DataBinder interface {
+	Bind(target interface{}) error
+	Reset() error
+	Submit() error
+}
+
+// EventHandler 事件处理接口
+type EventHandler interface {
+	HandleEvent(eventName string, data interface{}) error
+}
+
+// ListModel 列表模型接口
+type ListModel interface {
+	ItemCount() int
+	Item(index int) interface{}
+	ItemsReset()
+	ItemChanged(index int)
+	ItemsInserted(from, count int)
+	ItemsRemoved(from, count int)
+}
+
+// ItemViewModel 列表项视图模型接口
+type ItemViewModel interface {
+	ID() string
+	Title() string
+	Description() string
+	IsSelected() bool
+	SetSelected(selected bool)
+}
+
+// WindowAdapter walk.MainWindow 适配器
+type WindowAdapter struct {
+	*walk.MainWindow
+}
+
+// NewWindowAdapter 创建新的窗口适配器
+func NewWindowAdapter(window *walk.MainWindow) MainWindow {
+	return &WindowAdapter{MainWindow: window}
+}
+
+// MsgBox 显示消息框
+func (w *WindowAdapter) MsgBox(title, message string, style walk.MsgBoxStyle) (int, error) {
+	result := walk.MsgBox(w.MainWindow, title, message, style)
+	return result, nil
+}
+
+// CreateMainWindow 创建主窗口
+func CreateMainWindow(vm *MainViewModel) error {
+	var mainWindow *walk.MainWindow
+
+	if err := (declarative.MainWindow{
+		AssignTo: &mainWindow,
+		Title:    "SyncTools Client",
+		MinSize:  declarative.Size{Width: 600, Height: 400},
+		Layout:   declarative.VBox{},
+		Children: []declarative.Widget{
+			// TODO: 添加UI组件
+		},
+	}.Create()); err != nil {
+		return fmt.Errorf("创建主窗口失败: %v", err)
+	}
+
+	vm.SetMainWindow(NewWindowAdapter(mainWindow))
+
+	result := mainWindow.Run()
+	if result != 0 {
+		return fmt.Errorf("窗口运行异常，返回值: %d", result)
+	}
+
+	return nil
 }

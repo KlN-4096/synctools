@@ -1,9 +1,11 @@
 package viewmodels
 
 import (
-	"github.com/lxn/walk"
+	"fmt"
 
-	"synctools/internal/service"
+	"synctools/internal/interfaces"
+
+	"github.com/lxn/walk"
 )
 
 /*
@@ -21,37 +23,109 @@ import (
 - ShowDialog: 显示对话框
 */
 
-// MainViewModel 主视图模型
+// MainViewModel 主窗口视图模型
 type MainViewModel struct {
-	ConfigViewModel *ConfigViewModel
-	logger          ViewModelLogger
-	mainWindow      *walk.MainWindow
+	syncService interfaces.SyncService
+	logger      Logger
+	window      MainWindow
+	status      string
 }
 
-// NewMainViewModel 创建新的主视图模型
-func NewMainViewModel(syncService *service.SyncService, logger ViewModelLogger) *MainViewModel {
+// NewMainViewModel 创建主视图模型
+func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logger) *MainViewModel {
 	return &MainViewModel{
-		ConfigViewModel: NewConfigViewModel(syncService, logger),
-		logger:          logger,
+		syncService: syncService,
+		logger:      NewLoggerAdapter(logger),
+		status:      "就绪",
 	}
 }
 
 // Initialize 初始化视图模型
-func (vm *MainViewModel) Initialize(mainWindow *walk.MainWindow) error {
-	vm.mainWindow = mainWindow
-	return vm.ConfigViewModel.Initialize(mainWindow)
+func (vm *MainViewModel) Initialize() error {
+	vm.logger.Info("初始化主视图模型", interfaces.Fields{
+		"status": vm.status,
+	})
+	return nil
 }
 
-// LogDebug 记录调试日志
-func (vm *MainViewModel) LogDebug(msg string) {
-	vm.logger.DebugLog(msg)
+// Shutdown 关闭视图模型
+func (vm *MainViewModel) Shutdown() error {
+	vm.logger.Info("关闭主视图模型", nil)
+	return nil
 }
 
-// LogError 记录错误日志
-func (vm *MainViewModel) LogError(msg string, err error) {
-	if err != nil {
-		vm.logger.Error(msg, "error", err)
-	} else {
-		vm.logger.Error(msg)
+// SetMainWindow 设置主窗口
+func (vm *MainViewModel) SetMainWindow(window MainWindow) {
+	vm.window = window
+}
+
+// GetStatus 获取状态
+func (vm *MainViewModel) GetStatus() string {
+	if vm.syncService != nil {
+		return vm.syncService.GetSyncStatus()
+	}
+	return vm.status
+}
+
+// SetStatus 设置状态
+func (vm *MainViewModel) SetStatus(status string) {
+	vm.status = status
+	vm.logger.Info("状态更新", interfaces.Fields{
+		"status": status,
+	})
+}
+
+// StartSync 开始同步
+func (vm *MainViewModel) StartSync(path string) error {
+	vm.logger.Info("开始同步", interfaces.Fields{
+		"path": path,
+	})
+
+	if vm.syncService == nil {
+		return fmt.Errorf("同步服务未初始化")
+	}
+
+	if err := vm.syncService.SyncFiles(path); err != nil {
+		vm.logger.Error("同步失败", interfaces.Fields{
+			"error": err,
+		})
+		if vm.window != nil {
+			_, _ = vm.window.MsgBox("同步失败", err.Error(), walk.MsgBoxIconError)
+		}
+		return err
+	}
+
+	vm.logger.Info("同步完成", nil)
+	return nil
+}
+
+// HandleSyncRequest 处理同步请求
+func (vm *MainViewModel) HandleSyncRequest(request interface{}) error {
+	vm.logger.Info("处理同步请求", interfaces.Fields{
+		"request": fmt.Sprintf("%+v", request),
+	})
+
+	if vm.syncService == nil {
+		return fmt.Errorf("同步服务未初始化")
+	}
+
+	if err := vm.syncService.HandleSyncRequest(request); err != nil {
+		vm.logger.Error("处理同步请求失败", interfaces.Fields{
+			"error": err,
+		})
+		if vm.window != nil {
+			_, _ = vm.window.MsgBox("处理请求失败", err.Error(), walk.MsgBoxIconError)
+		}
+		return err
+	}
+
+	vm.logger.Info("请求处理完成", nil)
+	return nil
+}
+
+// showError 显示错误消息
+func (vm *MainViewModel) showError(title, message string) {
+	if vm.window != nil {
+		_, _ = vm.window.MsgBox(title, message, walk.MsgBoxIconError)
 	}
 }
