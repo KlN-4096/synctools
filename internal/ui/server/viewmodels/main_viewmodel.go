@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"synctools/internal/interfaces"
+	"synctools/internal/ui/common/logger"
 
 	"github.com/lxn/walk"
 )
@@ -26,17 +27,17 @@ import (
 // MainViewModel 主窗口视图模型
 type MainViewModel struct {
 	syncService     interfaces.SyncService
-	logger          ViewModelLogger
+	logger          *logger.LoggerAdapter
 	window          *walk.MainWindow
 	status          string
 	ConfigViewModel *ConfigViewModel
 }
 
 // NewMainViewModel 创建主视图模型
-func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logger) *MainViewModel {
+func NewMainViewModel(syncService interfaces.SyncService, log interfaces.Logger) *MainViewModel {
 	vm := &MainViewModel{
 		syncService: syncService,
-		logger:      NewLoggerAdapter(logger),
+		logger:      logger.NewLoggerAdapter(log),
 		status:      "就绪",
 	}
 

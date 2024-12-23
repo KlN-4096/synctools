@@ -21,7 +21,8 @@ import (
 
 	"synctools/internal/container"
 	"synctools/internal/interfaces"
-	"synctools/internal/ui/viewmodels"
+	"synctools/internal/ui/client/viewmodels"
+	"synctools/internal/ui/client/windows"
 )
 
 var (
@@ -85,7 +86,7 @@ func main() {
 	}
 
 	// 创建并运行主窗口
-	if err := viewmodels.CreateMainWindow(mainViewModel); err != nil {
+	if err := windows.CreateMainWindow(mainViewModel); err != nil {
 		logger.Fatal("创建主窗口失败", interfaces.Fields{
 			"error": err,
 		})

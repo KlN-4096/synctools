@@ -14,7 +14,7 @@
 - ShowMessage: 显示消息提示
 */
 
-package ui
+package windows
 
 import (
 	"fmt"
@@ -23,8 +23,8 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
 
-	"synctools/internal/ui/viewmodels"
-	"synctools/internal/ui/views"
+	"synctools/internal/ui/server/viewmodels"
+	"synctools/internal/ui/server/views"
 )
 
 // handleWindowClosing 处理窗口关闭事件

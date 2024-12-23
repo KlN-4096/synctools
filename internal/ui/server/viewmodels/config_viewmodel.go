@@ -536,7 +536,6 @@ func NewConfigListModel(syncService interfaces.SyncService, logger ViewModelLogg
 	return model
 }
 
-// refreshCache 刷新配置缓存
 func (m *ConfigListModel) refreshCache() {
 	m.logger.Debug("开始刷新配置缓存", nil)
 	configs, err := m.syncService.ListConfigs()

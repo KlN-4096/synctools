@@ -1,59 +1,23 @@
-package viewmodels
+/*
+文件作用:
+- 提供UI层通用的日志适配器
+- 实现日志接口的包装
+- 提供调试模式支持
+- 统一日志格式化
+
+主要类型:
+- Logger: UI层通用日志接口
+- LoggerAdapter: 日志适配器实现
+*/
+
+package logger
 
 import (
 	"fmt"
 	"synctools/internal/interfaces"
-
-	"github.com/lxn/walk"
-	"github.com/lxn/walk/declarative"
 )
 
-/*
-文件作用:
-- 定义视图模型接口
-- 定义数据绑定接口
-- 定义事件处理接口
-- 提供通用接口约束
-
-主要接口:
-- ViewModel: 视图模型基础接口
-- DataBinder: 数据绑定接口
-- EventHandler: 事件处理接口
-- ListModel: 列表模型接口
-- ItemViewModel: 列表项视图模型接口
-*/
-
-// ViewModel 视图模型基础接口
-type ViewModel interface {
-	Initialize() error
-	Shutdown() error
-}
-
-// DataBinder 数据绑定接口
-type DataBinder interface {
-	Bind(target interface{}) error
-	Reset() error
-	Submit() error
-}
-
-// EventHandler 事件处理接口
-type EventHandler interface {
-	HandleEvent(eventName string, data interface{}) error
-}
-
-// ListModel 列表模型接口
-type ListModel interface {
-	ItemCount() int
-	Value(index int) interface{}
-}
-
-// ItemViewModel 列表项视图模型接口
-type ItemViewModel interface {
-	GetText() string
-	GetIcon() interface{}
-}
-
-// Logger 日志接口
+// Logger UI层通用日志接口
 type Logger interface {
 	Debug(message string, fields interfaces.Fields)
 	Info(message string, fields interfaces.Fields)
@@ -138,32 +102,4 @@ func (l *LoggerAdapter) SetDebugMode(enabled bool) {
 // GetDebugMode 获取调试模式状态
 func (l *LoggerAdapter) GetDebugMode() bool {
 	return l.debugMode
-}
-
-// CreateMainWindow 创建主窗口
-func CreateMainWindow(vm *MainViewModel) error {
-	var mainWindow *walk.MainWindow
-
-	if err := (declarative.MainWindow{
-		AssignTo: &mainWindow,
-		Title:    "SyncTools Client",
-		MinSize:  declarative.Size{Width: 600, Height: 400},
-		Layout:   declarative.VBox{},
-		Children: []declarative.Widget{
-			// TODO: 添加UI组件
-		},
-	}.Create()); err != nil {
-		return fmt.Errorf("创建主窗口失败: %v", err)
-	}
-
-	if err := vm.Initialize(mainWindow); err != nil {
-		return fmt.Errorf("初始化视图模型失败: %v", err)
-	}
-
-	result := mainWindow.Run()
-	if result != 0 {
-		return fmt.Errorf("窗口运行异常，返回值: %d", result)
-	}
-
-	return nil
 }

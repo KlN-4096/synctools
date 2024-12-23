@@ -25,8 +25,8 @@ import (
 
 	"synctools/internal/container"
 	"synctools/internal/interfaces"
-	"synctools/internal/ui"
-	"synctools/internal/ui/viewmodels"
+	"synctools/internal/ui/server/viewmodels"
+	"synctools/internal/ui/server/windows"
 )
 
 var (
@@ -89,7 +89,7 @@ func main() {
 
 	// 创建并运行主窗口（在新的 goroutine 中）
 	go func() {
-		if err := ui.CreateMainWindow(mainViewModel); err != nil {
+		if err := windows.CreateMainWindow(mainViewModel); err != nil {
 			logger.Error("窗口创建失败", interfaces.Fields{
 				"error": err,
 			})

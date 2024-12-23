@@ -24,7 +24,7 @@ import (
 	. "github.com/lxn/walk/declarative"
 
 	"synctools/internal/interfaces"
-	"synctools/internal/ui/viewmodels"
+	"synctools/internal/ui/server/viewmodels"
 )
 
 // ConfigTab 配置界面
