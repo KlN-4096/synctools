@@ -182,15 +182,6 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.logger.Debug("开始设置表格模型", nil)
 	// 设置表格模型
 	if configTable != nil {
-		vm.logger.Debug("设置配置列表模型", interfaces.Fields{
-			"model": vm.configList != nil,
-			"rows":  vm.configList.RowCount(),
-		})
-		// 先刷新缓存
-		vm.configList.refreshCache()
-		vm.logger.Debug("刷新缓存后的配置列表", interfaces.Fields{
-			"rows": vm.configList.RowCount(),
-		})
 		// 设置模型
 		if err := configTable.SetModel(vm.configList); err != nil {
 			vm.logger.Error("设置配置列表模型失败", interfaces.Fields{

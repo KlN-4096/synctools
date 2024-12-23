@@ -313,6 +313,7 @@ func (t *ConfigTab) onNewConfig() {
 						return
 					}
 					dlg.Accept()
+					t.viewModel.UpdateUI()
 				},
 			},
 			PushButton{
@@ -352,6 +353,7 @@ func (t *ConfigTab) onDeleteConfig() {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 			return
 		}
+		t.viewModel.UpdateUI()
 	}
 }
 
@@ -359,14 +361,18 @@ func (t *ConfigTab) onDeleteConfig() {
 func (t *ConfigTab) onBrowseDir() {
 	if err := t.viewModel.BrowseSyncDir(); err != nil {
 		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
 	}
+	t.viewModel.UpdateUI()
 }
 
 // onSave 保存配置
 func (t *ConfigTab) onSave() {
 	if err := t.viewModel.SaveConfig(); err != nil {
 		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
 	}
+	t.viewModel.UpdateUI()
 }
 
 // onServerControl 服务器控制
@@ -374,12 +380,15 @@ func (t *ConfigTab) onServerControl() {
 	if t.viewModel.IsServerRunning() {
 		if err := t.viewModel.StopServer(); err != nil {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+			return
 		}
 	} else {
 		if err := t.viewModel.StartServer(); err != nil {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+			return
 		}
 	}
+	t.viewModel.UpdateUI()
 }
 
 // onAddSyncFolder 添加同步文件夹
@@ -435,6 +444,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 						return
 					}
 					dlg.Accept()
+					t.viewModel.UpdateUI()
 				},
 			},
 			PushButton{
@@ -473,6 +483,7 @@ func (t *ConfigTab) onDeleteSyncFolder() {
 			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 			return
 		}
+		t.viewModel.UpdateUI()
 	}
 }
 
@@ -599,6 +610,7 @@ func (t *ConfigTab) onSyncFolderEdit() {
 						return
 					}
 					dlg.Accept()
+					t.viewModel.UpdateUI()
 				},
 			},
 			PushButton{

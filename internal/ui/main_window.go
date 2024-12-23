@@ -27,6 +27,39 @@ import (
 	"synctools/internal/ui/views"
 )
 
+// handleWindowClosing 处理窗口关闭事件
+func handleWindowClosing(viewModel *viewmodels.MainViewModel) {
+	// 安全检查
+	if viewModel == nil {
+		return
+	}
+
+	// 记录关闭事件
+	viewModel.LogDebug("窗口正在关闭")
+
+	// 如果服务器正在运行，尝试停止它
+	if viewModel.ConfigViewModel != nil && viewModel.ConfigViewModel.IsServerRunning() {
+		if err := viewModel.ConfigViewModel.StopServer(); err != nil {
+			// 记录错误但继续关闭过程
+			viewModel.LogError("停止服务器失败", err)
+		}
+	}
+
+	// 保存配置（如果有选中的配置）
+	if viewModel.ConfigViewModel != nil {
+		if config := viewModel.ConfigViewModel.GetCurrentConfig(); config != nil {
+			if err := viewModel.ConfigViewModel.SaveConfig(); err != nil {
+				// 记录错误但继续关闭过程
+				viewModel.LogError("保存配置失败", err)
+			}
+		} else {
+			viewModel.LogDebug("没有选中的配置，跳过保存")
+		}
+	}
+
+	viewModel.LogDebug("应用程序正在退出")
+}
+
 // CreateMainWindow 创建主窗口
 func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	// 设置panic处理
@@ -72,8 +105,11 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 				Text: "文件(&F)",
 				Items: []declarative.MenuItem{
 					declarative.Action{
-						Text:        "退出(&X)",
-						OnTriggered: func() { mainWindow.Close() },
+						Text: "退出(&X)",
+						OnTriggered: func() {
+							handleWindowClosing(viewModel)
+							mainWindow.Close()
+						},
 					},
 				},
 			},
@@ -167,35 +203,7 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 
 	// 设置关闭事件处理
 	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		// 安全检查
-		if viewModel == nil {
-			return
-		}
-
-		// 记录关闭事件
-		viewModel.LogDebug("窗口正在关闭")
-
-		// 如果服务器正在运行，尝试停止它
-		if viewModel.ConfigViewModel != nil && viewModel.ConfigViewModel.IsServerRunning() {
-			if err := viewModel.ConfigViewModel.StopServer(); err != nil {
-				// 记录错误但继续关闭过程
-				viewModel.LogError("停止服务器失败", err)
-			}
-		}
-
-		// 保存配置（如果有选中的配置）
-		if viewModel.ConfigViewModel != nil {
-			if config := viewModel.ConfigViewModel.GetCurrentConfig(); config != nil {
-				if err := viewModel.ConfigViewModel.SaveConfig(); err != nil {
-					// 记录错误但继续关闭过程
-					viewModel.LogError("保存配置失败", err)
-				}
-			} else {
-				viewModel.LogDebug("没有选中的配置，跳过保存")
-			}
-		}
-
-		viewModel.LogDebug("应用程序正在退出")
+		handleWindowClosing(viewModel)
 	})
 
 	// 显示窗口
