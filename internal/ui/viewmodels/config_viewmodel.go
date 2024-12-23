@@ -110,29 +110,22 @@ func NewConfigViewModel(syncService interfaces.SyncService, logger ViewModelLogg
 
 // Initialize 初始化视图模型
 func (vm *ConfigViewModel) Initialize() error {
-	vm.logger.Debug("开始初始化配置视图模型", nil)
-
-	// 初始化配置列表模型
-	vm.configList = NewConfigListModel(vm.syncService, vm.logger)
-	vm.redirectList = NewRedirectListModel(vm.syncService, vm.logger)
-	vm.syncFolderList = NewSyncFolderListModel(vm.syncService, vm.logger)
-
-	// 加载默认配置
-	config := vm.syncService.GetCurrentConfig()
-	vm.logger.Debug("获取当前配置", interfaces.Fields{
-		"config": config,
+	vm.logger.Info("视图操作", interfaces.Fields{
+		"action": "initialize",
+		"type":   "config",
 	})
 
-	if config == nil {
-		vm.logger.Info("没有默认配置", interfaces.Fields{})
-		return nil
+	// 获取当前配置
+	cfg := vm.syncService.GetCurrentConfig()
+	if cfg == nil {
+		vm.logger.Info("配置状态", interfaces.Fields{
+			"status": "empty",
+			"reason": "no_default",
+		})
 	}
 
 	// 更新UI
-	vm.logger.Debug("开始更新UI", nil)
 	vm.UpdateUI()
-	vm.logger.Debug("UI更新完成", nil)
-
 	return nil
 }
 
@@ -151,7 +144,10 @@ func (vm *ConfigViewModel) SetupUI(
 	startServerButton *walk.PushButton,
 	saveButton *walk.PushButton,
 ) {
-	vm.logger.Debug("开始设置UI组件", nil)
+	vm.logger.Info("视图操作", interfaces.Fields{
+		"action": "setup",
+		"type":   "config",
+	})
 
 	// 检查必要的 UI 控件
 	if nameEdit == nil || versionEdit == nil || hostEdit == nil || portEdit == nil || syncDirEdit == nil {
@@ -215,63 +211,61 @@ func (vm *ConfigViewModel) SetupUI(
 
 // UpdateUI 更新 UI 显示
 func (vm *ConfigViewModel) UpdateUI() {
-	vm.logger.Debug("开始更新UI组件", nil)
-
-	config := vm.syncService.GetCurrentConfig()
-	vm.logger.Debug("获取当前配置用于更新UI", interfaces.Fields{
-		"config": config,
+	vm.logger.Info("视图操作", interfaces.Fields{
+		"action": "update",
+		"type":   "config",
 	})
 
-	if config == nil {
-		vm.logger.Warn("更新UI时配置为空", nil)
+	// 获取当前配置
+	cfg := vm.syncService.GetCurrentConfig()
+	if cfg == nil {
+		vm.logger.Warn("UI更新", interfaces.Fields{
+			"status": "empty_config",
+		})
 		return
 	}
 
-	// 强制所有表格重新加载数据
+	// 更新配置表格
 	if vm.configTable != nil {
-		vm.logger.Debug("更新配置表格", interfaces.Fields{
-			"before_rows": vm.configList.RowCount(),
-		})
+		vm.configList.refreshCache()
 		vm.configTable.SetModel(nil)
 		vm.configTable.SetModel(vm.configList)
 		vm.configList.PublishRowsReset()
-		vm.logger.Debug("配置表格更新完成", interfaces.Fields{
-			"after_rows": vm.configList.RowCount(),
-		})
 	} else {
-		vm.logger.Warn("配置表格为空", nil)
+		vm.logger.Warn("UI状态", interfaces.Fields{
+			"component": "config_table",
+			"status":    "empty",
+		})
 	}
 
 	// 更新同步文件夹表格
 	if vm.syncFolderTable != nil {
-		vm.logger.Debug("更新同步文件夹表格", interfaces.Fields{
-			"before_rows": vm.syncFolderList.RowCount(),
-		})
+		vm.syncFolderList.refreshCache()
 		vm.syncFolderTable.SetModel(nil)
 		vm.syncFolderTable.SetModel(vm.syncFolderList)
 		vm.syncFolderList.PublishRowsReset()
-		vm.logger.Debug("同步文件夹表格更新完成", interfaces.Fields{
-			"after_rows": vm.syncFolderList.RowCount(),
-		})
 	} else {
-		vm.logger.Warn("同步文件夹表格为空", nil)
+		vm.logger.Warn("UI状态", interfaces.Fields{
+			"component": "sync_folder_table",
+			"status":    "empty",
+		})
 	}
 
 	// 更新基本信息
 	vm.logger.Debug("更新基本信息", interfaces.Fields{
-		"name":     config.Name,
-		"version":  config.Version,
-		"host":     config.Host,
-		"port":     config.Port,
-		"sync_dir": config.SyncDir,
+		"name":     cfg.Name,
+		"version":  cfg.Version,
+		"host":     cfg.Host,
+		"port":     cfg.Port,
+		"sync_dir": cfg.SyncDir,
 	})
 
-	vm.nameEdit.SetText(config.Name)
-	vm.versionEdit.SetText(config.Version)
-	vm.hostEdit.SetText(config.Host)
-	vm.portEdit.SetText(strconv.Itoa(config.Port))
-	vm.syncDirEdit.SetText(config.SyncDir)
-	vm.ignoreEdit.SetText(strings.Join(config.IgnoreList, "\n"))
+	vm.nameEdit.SetText(cfg.Name)
+	vm.versionEdit.SetText(cfg.Version)
+	vm.hostEdit.SetText(cfg.Host)
+	vm.portEdit.SetText(strconv.Itoa(cfg.Port))
+	vm.syncDirEdit.SetText(cfg.SyncDir)
+	vm.ignoreEdit.SetText(strings.Join(cfg.IgnoreList, "\n"))
 
 	// 更新按钮状态
 	vm.updateButtonStates()
@@ -402,26 +396,25 @@ func (vm *ConfigViewModel) getIgnoreListFromUI() []string {
 
 // updateButtonStates 更新按钮状态
 func (vm *ConfigViewModel) updateButtonStates() {
-	// 服务器按钮
-	if vm.startServerButton != nil {
-		isRunning := vm.syncService.IsRunning()
-		vm.logger.Debug("检查服务器运行状态", interfaces.Fields{
-			"isRunning": isRunning,
-		})
+	vm.logger.Debug("UI操作", interfaces.Fields{
+		"action":         "update_buttons",
+		"server_running": vm.syncService.IsRunning(),
+	})
 
-		if isRunning {
+	if vm.startServerButton != nil {
+		if vm.syncService.IsRunning() {
 			vm.startServerButton.SetText("停止服务器")
-			vm.logger.Debug("设置按钮文本为: 停止服务器", nil)
 		} else {
 			vm.startServerButton.SetText("启动服务器")
-			vm.logger.Debug("设置按钮文本为: 启动服务器", nil)
 		}
 		vm.startServerButton.SetEnabled(true)
 	} else {
-		vm.logger.Warn("服务器按钮为空", nil)
+		vm.logger.Warn("UI状态", interfaces.Fields{
+			"component": "server_button",
+			"status":    "empty",
+		})
 	}
 
-	// 保存按钮
 	if vm.saveButton != nil {
 		vm.saveButton.SetEnabled(!vm.isEditing)
 	}

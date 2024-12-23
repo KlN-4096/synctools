@@ -80,7 +80,9 @@ func (s *SyncService) Start() error {
 	s.running = true
 	s.setStatus("运行中")
 
-	s.logger.Info("同步服务已启动", interfaces.Fields{
+	s.logger.Info("服务状态变更", interfaces.Fields{
+		"status": "started",
+		"type":   "sync",
 		"config": s.config.Name,
 	})
 
@@ -101,16 +103,19 @@ func (s *SyncService) StartServer() error {
 
 	// 启动网络服务器
 	if err := s.server.Start(); err != nil {
-		s.logger.Error("启动网络服务器失败", interfaces.Fields{
-			"error": err,
+		s.logger.Error("服务操作失败", interfaces.Fields{
+			"operation": "start_server",
+			"error":     err,
 		})
 		return err
 	}
 
 	s.setStatus("服务器运行中")
-	s.logger.Info("网络服务器已启动", interfaces.Fields{
-		"host": s.config.Host,
-		"port": s.config.Port,
+	s.logger.Info("服务状态变更", interfaces.Fields{
+		"status": "started",
+		"type":   "network",
+		"host":   s.config.Host,
+		"port":   s.config.Port,
 	})
 
 	return nil
@@ -124,8 +129,9 @@ func (s *SyncService) StopServer() error {
 
 	// 停止网络服务器
 	if err := s.server.Stop(); err != nil {
-		s.logger.Error("停止网络服务器失败", interfaces.Fields{
-			"error": err,
+		s.logger.Error("服务操作失败", interfaces.Fields{
+			"operation": "stop_server",
+			"error":     err,
 		})
 		return err
 	}
@@ -134,7 +140,10 @@ func (s *SyncService) StopServer() error {
 	s.server = nil
 
 	s.setStatus("服务器已停止")
-	s.logger.Info("网络服务器已停止", nil)
+	s.logger.Info("服务状态变更", interfaces.Fields{
+		"status": "stopped",
+		"type":   "network",
+	})
 
 	return nil
 }
@@ -147,15 +156,20 @@ func (s *SyncService) Stop() error {
 
 	// 确保先停止网络服务器
 	if err := s.StopServer(); err != nil {
-		s.logger.Error("停止网络服务器失败", interfaces.Fields{
-			"error": err,
+		s.logger.Error("服务操作失败", interfaces.Fields{
+			"operation": "stop_server",
+			"error":     err,
 		})
+		return err
 	}
 
 	s.running = false
 	s.setStatus("已停止")
 
-	s.logger.Info("同步服务已停止", nil)
+	s.logger.Info("服务状态变更", interfaces.Fields{
+		"status": "stopped",
+		"type":   "sync",
+	})
 	return nil
 }
 

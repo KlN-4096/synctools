@@ -74,8 +74,10 @@ func (s *Server) Start() error {
 	s.running = true
 	s.status = "运行中"
 
-	s.logger.Info("服务器已启动", interfaces.Fields{
-		"addr": addr,
+	s.logger.Info("服务状态变更", interfaces.Fields{
+		"status":  "started",
+		"type":    "network",
+		"address": s.listener.Addr().String(),
 	})
 
 	go s.acceptLoop()
@@ -102,12 +104,23 @@ func (s *Server) Stop() error {
 	s.clients = make(map[string]*Client)
 	s.status = "已停止"
 
-	s.logger.Info("服务器已停止", nil)
+	s.logger.Info("服务状态变更", interfaces.Fields{
+		"status": "stopped",
+		"type":   "network",
+	})
 	return nil
 }
 
 // HandleClient 实现 interfaces.NetworkServer 接口
 func (s *Server) HandleClient(conn net.Conn) {
+	defer func() {
+		conn.Close()
+		s.logger.Info("网络连接", interfaces.Fields{
+			"action":  "client_disconnected",
+			"address": conn.RemoteAddr().String(),
+		})
+	}()
+
 	client := NewClient(conn, s)
 	s.addClient(client)
 	go client.Start()
@@ -129,14 +142,24 @@ func (s *Server) acceptLoop() {
 		conn, err := s.listener.Accept()
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				s.logger.Warn("临时接受连接错误", interfaces.Fields{"error": err})
+				s.logger.Warn("网络操作", interfaces.Fields{
+					"action": "accept_temporary_error",
+					"error":  err,
+				})
 				continue
 			}
 			if s.running {
-				s.logger.Error("接受连接失败", interfaces.Fields{"error": err})
+				s.logger.Error("网络操作失败", interfaces.Fields{
+					"operation": "accept",
+					"error":     err,
+				})
 			}
 			return
 		}
+		s.logger.Info("网络连接", interfaces.Fields{
+			"action":  "client_connected",
+			"address": conn.RemoteAddr().String(),
+		})
 		s.HandleClient(conn)
 	}
 }

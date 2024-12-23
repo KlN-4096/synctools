@@ -59,23 +59,26 @@ func main() {
 	// 获取日志服务
 	logger := c.GetLogger()
 	logger.SetLevel(interfaces.DEBUG)
-	logger.Info("服务器启动", interfaces.Fields{
+	logger.Info("服务状态变更", interfaces.Fields{
+		"status":   "starting",
 		"base_dir": baseDir,
 	})
 
 	// 加载配置（如果有）
 	cfg, err := loadOrCreateConfig(c, configFile)
 	if err != nil {
-		logger.Fatal("加载配置失败", interfaces.Fields{
+		logger.Error("配置加载失败", interfaces.Fields{
 			"error": err,
 		})
+		os.Exit(1)
 	}
 
 	// 初始化所有服务
 	if err := c.InitializeServices(baseDir, cfg); err != nil {
-		logger.Fatal("初始化服务失败", interfaces.Fields{
+		logger.Error("服务初始化失败", interfaces.Fields{
 			"error": err,
 		})
+		os.Exit(1)
 	}
 
 	// 创建主视图模型
@@ -87,9 +90,10 @@ func main() {
 	// 创建并运行主窗口（在新的 goroutine 中）
 	go func() {
 		if err := ui.CreateMainWindow(mainViewModel); err != nil {
-			logger.Fatal("创建主窗口失败", interfaces.Fields{
+			logger.Error("窗口创建失败", interfaces.Fields{
 				"error": err,
 			})
+			os.Exit(1)
 		}
 		// 窗口关闭时发送退出信号
 		close(exitChan)
@@ -101,19 +105,31 @@ func main() {
 
 	select {
 	case <-sigChan:
-		logger.Info("收到中断信号", nil)
+		logger.Info("服务状态变更", interfaces.Fields{
+			"status": "interrupted",
+			"reason": "signal",
+		})
 	case <-exitChan:
-		logger.Info("窗口已关闭", nil)
+		logger.Info("服务状态变更", interfaces.Fields{
+			"status": "interrupted",
+			"reason": "window_closed",
+		})
 	}
 
 	// 优雅关闭
-	logger.Info("开始关闭服务器...", nil)
+	logger.Info("服务状态变更", interfaces.Fields{
+		"status": "stopping",
+	})
+
 	if err := c.Shutdown(); err != nil {
-		logger.Error("关闭服务失败", interfaces.Fields{
+		logger.Error("服务关闭失败", interfaces.Fields{
 			"error": err,
 		})
 	}
-	logger.Info("服务器已关闭", nil)
+
+	logger.Info("服务状态变更", interfaces.Fields{
+		"status": "stopped",
+	})
 	os.Exit(0)
 }
 
@@ -122,14 +138,16 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 	cfgManager := c.GetConfigManager()
 	logger := c.GetLogger()
 
-	logger.Debug("开始加载配置", interfaces.Fields{
-		"configFile": configFile,
+	logger.Debug("配置操作", interfaces.Fields{
+		"action": "load",
+		"file":   configFile,
 	})
 
 	// 如果指定了配置文件，尝试加载
 	if configFile != "" {
-		logger.Debug("尝试加载指定的配置文件", interfaces.Fields{
-			"configFile": configFile,
+		logger.Debug("配置操作", interfaces.Fields{
+			"action": "load_specified",
+			"file":   configFile,
 		})
 		if err := cfgManager.LoadConfig(configFile); err != nil {
 			return nil, fmt.Errorf("加载配置文件失败: %v", err)
@@ -138,6 +156,9 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 	}
 
 	// 不创建默认配置，返回空配置
-	logger.Info("未指定配置文件，使用空配置", nil)
+	logger.Info("配置操作", interfaces.Fields{
+		"action": "use_empty",
+		"reason": "no_file_specified",
+	})
 	return nil, nil
 }
