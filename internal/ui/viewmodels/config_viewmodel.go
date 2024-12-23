@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lxn/walk"
 
@@ -780,7 +781,7 @@ func NewSyncFolderListModel(syncService interfaces.SyncService, logger ViewModel
 	}
 }
 
-// refreshCache 刷新缓��
+// refreshCache 刷新缓存
 func (m *SyncFolderListModel) refreshCache() {
 	m.currentConfig = m.syncService.GetCurrentConfig()
 }
@@ -973,9 +974,9 @@ func (vm *ConfigViewModel) LoadConfig(uuid string) error {
 func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 	// 创建新的配置
 	config := &interfaces.Config{
-		UUID:            fmt.Sprintf("cfg-%s", name),
+		UUID:            fmt.Sprintf("cfg-%d", time.Now().UnixNano()), // 使用时间戳生成唯一ID
 		Type:            interfaces.ConfigTypeServer,
-		Name:            name,
+		Name:            name, // 使用用户输入的名称
 		Version:         version,
 		Host:            "0.0.0.0",
 		Port:            8080,
@@ -995,12 +996,24 @@ func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 		return fmt.Errorf("保存配置失败: %v", err)
 	}
 
+	// 刷新配置列表
+	vm.configList.refreshCache()
+	vm.configList.PublishRowsReset()
+	vm.UpdateUI()
+
 	return nil
 }
 
 // DeleteConfig 删除配置
 func (vm *ConfigViewModel) DeleteConfig(uuid string) error {
-	return vm.syncService.DeleteConfig(uuid)
+	if err := vm.syncService.DeleteConfig(uuid); err != nil {
+		return err
+	}
+	// 刷新配置列表
+	vm.configList.refreshCache()
+	vm.configList.PublishRowsReset()
+	vm.UpdateUI()
+	return nil
 }
 
 // AddRedirect 添加重定向配置

@@ -63,7 +63,7 @@ func main() {
 		"base_dir": baseDir,
 	})
 
-	// 加载或创建配置
+	// 加载配置（如果有）
 	cfg, err := loadOrCreateConfig(c, configFile)
 	if err != nil {
 		logger.Fatal("加载配置失败", interfaces.Fields{
@@ -120,7 +120,6 @@ func main() {
 // loadOrCreateConfig 加载或创建默认配置
 func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.Config, error) {
 	cfgManager := c.GetConfigManager()
-	storage := c.GetStorage()
 	logger := c.GetLogger()
 
 	logger.Debug("开始加载配置", interfaces.Fields{
@@ -138,39 +137,7 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil
 	}
 
-	// 检查是否存在默认配置
-	logger.Debug("检查默认配置文件", interfaces.Fields{
-		"exists": storage.Exists("default.json"),
-	})
-	if storage.Exists("default.json") {
-		if err := cfgManager.LoadConfig("default"); err != nil {
-			return nil, fmt.Errorf("加载默认配置失败: %v", err)
-		}
-		cfg := cfgManager.GetCurrentConfig().(*interfaces.Config)
-		logger.Debug("已加载默认配置", interfaces.Fields{
-			"config": cfg,
-		})
-		return cfg, nil
-	}
-
-	// 创建默认配置
-	cfg := &interfaces.Config{
-		UUID:    "default",
-		Type:    interfaces.ConfigTypeServer,
-		Name:    "SyncTools Server",
-		Version: "1.0.0",
-		Host:    "0.0.0.0",
-		Port:    defaultPort,
-		SyncDir: filepath.Join(baseDir, "sync"),
-	}
-
-	logger.Info("创建默认配置", interfaces.Fields{
-		"config": cfg,
-	})
-
-	if err := cfgManager.SaveConfig(cfg); err != nil {
-		return nil, fmt.Errorf("保存默认配置失败: %v", err)
-	}
-
-	return cfg, nil
+	// 不创建默认配置，返回空配置
+	logger.Info("未指定配置文件，使用空配置", nil)
+	return nil, nil
 }
