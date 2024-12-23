@@ -33,7 +33,6 @@ type ConfigTab struct {
 
 	// UI 组件
 	configTable       *walk.TableView
-	redirectTable     *walk.TableView
 	StatusBar         *walk.StatusBarItem
 	nameEdit          *walk.LineEdit
 	versionEdit       *walk.LineEdit
@@ -140,11 +139,7 @@ func (t *ConfigTab) Setup() error {
 									PushButton{
 										Text:      "启动服务器",
 										AssignTo:  &t.startServerButton,
-										OnClicked: t.onStartServer,
-									},
-									PushButton{
-										Text:      "停止服务器",
-										OnClicked: t.onStopServer,
+										OnClicked: t.onServerControl,
 									},
 								},
 							},
@@ -171,11 +166,12 @@ func (t *ConfigTab) Setup() error {
 										Columns: []TableViewColumn{
 											{Title: "文件夹名称", Width: 150},
 											{Title: "同步模式", Width: 100},
+											{Title: "重定向路径", Width: 150},
 											{Title: "是否有效", Width: 80},
 										},
 										OnItemActivated: func() {
 											// 调整列宽
-											t.adjustTableColumns(t.syncFolderTable, []float64{0.45, 0.25, 0.25})
+											t.adjustTableColumns(t.syncFolderTable, []float64{0.35, 0.2, 0.3, 0.15})
 
 											// 处理双击编辑
 											if t.syncFolderTable != nil {
@@ -201,9 +197,10 @@ func (t *ConfigTab) Setup() error {
 
 												var pathEdit *walk.LineEdit
 												var modeComboBox *walk.ComboBox
+												var redirectPathEdit *walk.LineEdit
 
 												if err := (Composite{
-													Layout: Grid{Columns: 2},
+													Layout: Grid{Columns: 3},
 													Children: []Widget{
 														Label{Text: "文件夹路径:"},
 														LineEdit{
@@ -223,6 +220,19 @@ func (t *ConfigTab) Setup() error {
 																return 0
 															}(),
 														},
+														Label{Text: "重定向路径:"},
+														LineEdit{
+															AssignTo: &redirectPathEdit,
+															Text: func() string {
+																// 查找对应的重定向配置
+																for _, redirect := range config.FolderRedirects {
+																	if redirect.ServerPath == config.SyncFolders[index].Path {
+																		return redirect.ClientPath
+																	}
+																}
+																return ""
+															}(),
+														},
 													},
 												}.Create(NewBuilder(dlg))); err != nil {
 													walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
@@ -236,7 +246,7 @@ func (t *ConfigTab) Setup() error {
 														PushButton{
 															Text: "确定",
 															OnClicked: func() {
-																if err := t.viewModel.UpdateSyncFolder(index, pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text())); err != nil {
+																if err := t.viewModel.UpdateSyncFolder(index, pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text()), redirectPathEdit.Text()); err != nil {
 																	walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 																	return
 																}
@@ -258,7 +268,7 @@ func (t *ConfigTab) Setup() error {
 										},
 										OnSizeChanged: func() {
 											// 调整列宽
-											t.adjustTableColumns(t.syncFolderTable, []float64{0.45, 0.25, 0.25})
+											t.adjustTableColumns(t.syncFolderTable, []float64{0.35, 0.2, 0.3, 0.15})
 										},
 									},
 									Composite{
@@ -279,9 +289,10 @@ func (t *ConfigTab) Setup() error {
 
 													var pathEdit *walk.LineEdit
 													var modeComboBox *walk.ComboBox
+													var redirectPathEdit *walk.LineEdit
 
 													if err := (Composite{
-														Layout: Grid{Columns: 2},
+														Layout: Grid{Columns: 3},
 														Children: []Widget{
 															Label{Text: "文件夹路径:"},
 															LineEdit{AssignTo: &pathEdit},
@@ -290,6 +301,8 @@ func (t *ConfigTab) Setup() error {
 																AssignTo: &modeComboBox,
 																Model:    []string{"mirror", "push", "pack"},
 															},
+															Label{Text: "重定向路径:"},
+															LineEdit{AssignTo: &redirectPathEdit},
 														},
 													}.Create(NewBuilder(dlg))); err != nil {
 														walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
@@ -303,7 +316,7 @@ func (t *ConfigTab) Setup() error {
 															PushButton{
 																Text: "确定",
 																OnClicked: func() {
-																	if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text())); err != nil {
+																	if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text()), redirectPathEdit.Text()); err != nil {
 																		walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 																		return
 																	}
@@ -364,7 +377,7 @@ func (t *ConfigTab) Setup() error {
 	// 设置UI组件
 	t.viewModel.SetupUI(
 		t.configTable,
-		t.redirectTable,
+		nil,
 		t.StatusBar,
 		t.nameEdit,
 		t.versionEdit,
@@ -492,88 +505,6 @@ func (t *ConfigTab) onBrowseDir() {
 	}
 }
 
-// onAddRedirect 添加重定向
-func (t *ConfigTab) onAddRedirect() {
-	dlg, err := walk.NewDialog(t.Form())
-	if err != nil {
-		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-		return
-	}
-	defer dlg.Dispose()
-
-	dlg.SetTitle("添加重定向")
-	dlg.SetLayout(walk.NewVBoxLayout())
-
-	var serverEdit *walk.LineEdit
-	var clientEdit *walk.LineEdit
-
-	if err := (Composite{
-		Layout: Grid{Columns: 2},
-		Children: []Widget{
-			Label{Text: "服务器路径:"},
-			LineEdit{AssignTo: &serverEdit},
-			Label{Text: "客户端路径:"},
-			LineEdit{AssignTo: &clientEdit},
-		},
-	}.Create(NewBuilder(dlg))); err != nil {
-		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-		return
-	}
-
-	if err := (Composite{
-		Layout: HBox{},
-		Children: []Widget{
-			HSpacer{},
-			PushButton{
-				Text: "确定",
-				OnClicked: func() {
-					if err := t.viewModel.AddRedirect(serverEdit.Text(), clientEdit.Text()); err != nil {
-						walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
-						return
-					}
-					dlg.Accept()
-				},
-			},
-			PushButton{
-				Text:      "取消",
-				OnClicked: dlg.Cancel,
-			},
-		},
-	}.Create(NewBuilder(dlg))); err != nil {
-		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-		return
-	}
-
-	dlg.Run()
-}
-
-// onDeleteRedirect 删除重定向
-func (t *ConfigTab) onDeleteRedirect() {
-	index := t.redirectTable.CurrentIndex()
-	if index < 0 {
-		return
-	}
-
-	config := t.viewModel.GetCurrentConfig()
-	if config == nil {
-		return
-	}
-
-	if walk.MsgBox(
-		t.Form(),
-		"确认删除",
-		fmt.Sprintf("确定要删除重定向 '%s -> %s' 吗？",
-			config.FolderRedirects[index].ServerPath,
-			config.FolderRedirects[index].ClientPath),
-		walk.MsgBoxYesNo,
-	) == walk.DlgCmdYes {
-		if err := t.viewModel.DeleteRedirect(index); err != nil {
-			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-			return
-		}
-	}
-}
-
 // onSave 保存配置
 func (t *ConfigTab) onSave() {
 	if err := t.viewModel.SaveConfig(); err != nil {
@@ -581,17 +512,16 @@ func (t *ConfigTab) onSave() {
 	}
 }
 
-// onStartServer 启动服务器
-func (t *ConfigTab) onStartServer() {
-	if err := t.viewModel.StartServer(); err != nil {
-		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
-	}
-}
-
-// onStopServer 停止服务器
-func (t *ConfigTab) onStopServer() {
-	if err := t.viewModel.StopServer(); err != nil {
-		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+// onServerControl 服务器控制
+func (t *ConfigTab) onServerControl() {
+	if t.viewModel.IsServerRunning() {
+		if err := t.viewModel.StopServer(); err != nil {
+			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		}
+	} else {
+		if err := t.viewModel.StartServer(); err != nil {
+			walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		}
 	}
 }
 
@@ -609,9 +539,10 @@ func (t *ConfigTab) onAddSyncFolder() {
 
 	var pathEdit *walk.LineEdit
 	var modeComboBox *walk.ComboBox
+	var redirectPathEdit *walk.LineEdit
 
 	if err := (Composite{
-		Layout: Grid{Columns: 2},
+		Layout: Grid{Columns: 3},
 		Children: []Widget{
 			Label{Text: "文件夹路径:"},
 			LineEdit{AssignTo: &pathEdit},
@@ -620,6 +551,8 @@ func (t *ConfigTab) onAddSyncFolder() {
 				AssignTo: &modeComboBox,
 				Model:    []string{"mirror", "push", "pack"},
 			},
+			Label{Text: "重定向路径:"},
+			LineEdit{AssignTo: &redirectPathEdit},
 		},
 	}.Create(NewBuilder(dlg))); err != nil {
 		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
@@ -633,7 +566,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 			PushButton{
 				Text: "确定",
 				OnClicked: func() {
-					if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text())); err != nil {
+					if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text()), redirectPathEdit.Text()); err != nil {
 						walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 						return
 					}

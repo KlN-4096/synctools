@@ -89,8 +89,11 @@ func (s *SyncService) Start() error {
 
 // StartServer 启动网络服务器
 func (s *SyncService) StartServer() error {
+	// 如果服务未运行，先启动服务
 	if !s.running {
-		return errors.ErrServiceNotRunning
+		if err := s.Start(); err != nil {
+			return err
+		}
 	}
 
 	// 创建新的网络服务器实例
@@ -594,7 +597,7 @@ func (s *SyncService) ListConfigs() ([]*interfaces.Config, error) {
 
 // LoadConfig 实现配置加载功能
 func (s *SyncService) LoadConfig(id string) error {
-	// 构造配置��件名
+	// 构造配置文件名
 	filename := fmt.Sprintf("%s.json", id)
 
 	// 读取配置文件

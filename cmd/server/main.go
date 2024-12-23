@@ -78,16 +78,8 @@ func main() {
 		})
 	}
 
-	// 启动同步服务
-	syncService := c.GetSyncService()
-	if err := syncService.Start(); err != nil {
-		logger.Fatal("启动同步服务失败", interfaces.Fields{
-			"error": err,
-		})
-	}
-
 	// 创建主视图模型
-	mainViewModel := viewmodels.NewMainViewModel(syncService, logger)
+	mainViewModel := viewmodels.NewMainViewModel(c.GetSyncService(), logger)
 
 	// 创建退出通道
 	exitChan := make(chan struct{})
