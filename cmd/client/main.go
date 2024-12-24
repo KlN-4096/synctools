@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"synctools/internal/container"
 	"synctools/internal/interfaces"
@@ -111,8 +112,12 @@ func main() {
 // loadOrCreateConfig 加载或创建默认配置
 func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.Config, error) {
 	cfgManager := c.GetConfigManager()
-	storage := c.GetStorage()
 	logger := c.GetLogger()
+
+	logger.Debug("配置操作", interfaces.Fields{
+		"action": "load",
+		"file":   configFile,
+	})
 
 	// 如果指定了配置文件，尝试加载
 	if configFile != "" {
@@ -122,32 +127,44 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil
 	}
 
-	// 检查是否存在默认配置
-	if storage.Exists("client.json") {
-		if err := cfgManager.LoadConfig("client"); err != nil {
-			return nil, fmt.Errorf("加载默认配置失败: %v", err)
+	// 尝试从configs文件夹加载client类型的配置
+	configsDir := filepath.Join(baseDir, "configs")
+	files, err := os.ReadDir(configsDir)
+	if err != nil {
+		logger.Error("读取configs目录失败", interfaces.Fields{
+			"error": err,
+			"path":  configsDir,
+		})
+		return nil, fmt.Errorf("读取configs目录失败: %v", err)
+	}
+
+	// 遍历configs目录下的所有文件
+	for _, file := range files {
+		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
+			continue
 		}
-		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil
+
+		// 尝试加载配置文件，只使用文件名（不包含.json后缀）
+		configName := strings.TrimSuffix(file.Name(), ".json")
+		if err := cfgManager.LoadConfig(configName); err != nil {
+			logger.Debug("加载配置文件失败", interfaces.Fields{
+				"error": err,
+				"file":  configName,
+			})
+			continue
+		}
+
+		// 检查是否为client类型的配置
+		if cfg, ok := cfgManager.GetCurrentConfig().(*interfaces.Config); ok && cfg.Type == interfaces.ConfigTypeClient {
+			logger.Info("找到client配置文件", interfaces.Fields{
+				"file": configName,
+			})
+			return cfg, nil
+		}
 	}
 
-	// 创建默认配置
-	cfg := &interfaces.Config{
-		UUID:    "default",
-		Type:    interfaces.ConfigTypeClient,
-		Name:    "SyncTools Client",
-		Version: "1.0.0",
-		Host:    "127.0.0.1",
-		Port:    8080,
-		SyncDir: filepath.Join(baseDir, "sync"),
-	}
-
-	logger.Info("创建默认配置", interfaces.Fields{
-		"config": cfg,
+	logger.Info("未找到client配置文件", interfaces.Fields{
+		"path": configsDir,
 	})
-
-	if err := cfgManager.SaveConfig(cfg); err != nil {
-		return nil, fmt.Errorf("保存默认配置失败: %v", err)
-	}
-
-	return cfg, nil
+	return nil, fmt.Errorf("在configs目录下未找到client类型的配置文件")
 }

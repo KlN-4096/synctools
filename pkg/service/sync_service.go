@@ -41,7 +41,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"synctools/internal/interfaces"
 	"synctools/pkg/errors"
@@ -171,13 +170,11 @@ func (s *SyncService) Stop() error {
 	return nil
 }
 
-// SyncFiles 实现 interfaces.SyncService 接口
+// SyncFiles 同步指定目录的文件
 func (s *SyncService) SyncFiles(path string) error {
 	if !s.running {
 		return errors.ErrServiceNotRunning
 	}
-
-	s.setStatus(fmt.Sprintf("正在同步: %s", path))
 
 	// 验证路径
 	absPath := filepath.Join(s.config.SyncDir, path)
@@ -302,7 +299,7 @@ func (s *SyncService) handleFileSync(file string, info *interfaces.FileInfo, mod
 		// 打包同步：将文件添加到压缩包
 		return s.packSync(file, info)
 	case interfaces.PushSync:
-		// 推送同步：将文件推送到目标
+		// 推��同步：将文件推送到目标
 		return s.pushSync(file, info)
 	case interfaces.AutoSync:
 		// 自动同步：根据文件类型选择同步方式
@@ -317,100 +314,16 @@ func (s *SyncService) handleFileSync(file string, info *interfaces.FileInfo, mod
 
 // mirrorSync 执行镜像同步
 func (s *SyncService) mirrorSync(file string, info *interfaces.FileInfo) error {
-	// 直接保存文件
-	var data []byte
-	if err := s.storage.Load(file, &data); err != nil {
-		return fmt.Errorf("读取源文件失败: %v", err)
-	}
-
-	targetPath := filepath.Join(s.config.SyncDir, file)
-	if err := s.storage.Save(targetPath, data); err != nil {
-		return fmt.Errorf("保存目标文件失败: %v", err)
-	}
-
-	return nil
-}
-
-// packSync 执行打包同步
-func (s *SyncService) packSync(file string, info *interfaces.FileInfo) error {
-	// 获取打包目录
-	packDir := filepath.Join(s.config.SyncDir, "packages")
-	if err := os.MkdirAll(packDir, 0755); err != nil {
-		return fmt.Errorf("创建打包目录失败: %v", err)
-	}
-
-	// 生成打包文件名
-	packName := fmt.Sprintf("%s_%s.zip", filepath.Base(file), time.Now().Format("20060102150405"))
-	packPath := filepath.Join(packDir, packName)
-
 	// 读取源文件
 	var data []byte
 	if err := s.storage.Load(file, &data); err != nil {
 		return fmt.Errorf("读取源文件失败: %v", err)
 	}
 
-	// 创建临时目录
-	tempDir, err := os.MkdirTemp("", "sync_pack_*")
-	if err != nil {
-		return fmt.Errorf("创建临时目录失败: %v", err)
+	// 保存文件
+	if err := s.storage.Save(file, data); err != nil {
+		return fmt.Errorf("保存目标文件失败: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
-
-	// 复制文件到临时目录
-	tempFile := filepath.Join(tempDir, filepath.Base(file))
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		return fmt.Errorf("写入临时文件失败: %v", err)
-	}
-
-	// 创建压缩文件
-	zipFile, err := os.Create(packPath)
-	if err != nil {
-		return fmt.Errorf("创建压缩文件失败: %v", err)
-	}
-	defer zipFile.Close()
-
-	// 创建 zip writer
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
-
-	// 添加文件到压缩包
-	fileToZip, err := os.Open(tempFile)
-	if err != nil {
-		return fmt.Errorf("打开临时文件失败: %v", err)
-	}
-	defer fileToZip.Close()
-
-	// 获取文件信息
-	fileInfo, err := fileToZip.Stat()
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %v", err)
-	}
-
-	// 创建 zip 文件头
-	header, err := zip.FileInfoHeader(fileInfo)
-	if err != nil {
-		return fmt.Errorf("创建文件头失败: %v", err)
-	}
-
-	// 设置压缩方法
-	header.Method = zip.Deflate
-
-	// 创建 zip 文件
-	writer, err := zipWriter.CreateHeader(header)
-	if err != nil {
-		return fmt.Errorf("创建压缩文件失败: %v", err)
-	}
-
-	// 写入文件内容
-	if _, err := io.Copy(writer, fileToZip); err != nil {
-		return fmt.Errorf("写入压缩文件失败: %v", err)
-	}
-
-	s.logger.Info("文件打包完成", interfaces.Fields{
-		"file":     file,
-		"packFile": packPath,
-		"size":     info.Size,
-	})
 
 	return nil
 }
@@ -423,15 +336,11 @@ func (s *SyncService) pushSync(file string, info *interfaces.FileInfo) error {
 		return fmt.Errorf("读取源文件失败: %v", err)
 	}
 
-	// 获取目标路径
-	targetPath := filepath.Join(s.config.SyncDir, file)
-
 	// 检查目标文件是否存在
-	targetExists := s.storage.Exists(targetPath)
-	if targetExists {
+	if s.storage.Exists(file) {
 		// 如果目标文件存在，检查是否需要更新
 		var targetData []byte
-		if err := s.storage.Load(targetPath, &targetData); err != nil {
+		if err := s.storage.Load(file, &targetData); err != nil {
 			return fmt.Errorf("读取目标文件失败: %v", err)
 		}
 
@@ -447,21 +356,88 @@ func (s *SyncService) pushSync(file string, info *interfaces.FileInfo) error {
 		}
 	}
 
-	// 创建目标目录
-	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %v", err)
-	}
-
 	// 保存文件
-	if err := s.storage.Save(targetPath, data); err != nil {
+	if err := s.storage.Save(file, data); err != nil {
 		return fmt.Errorf("保存目标文件失败: %v", err)
 	}
 
 	s.logger.Info("文件推送完成", interfaces.Fields{
-		"file":   file,
-		"target": targetPath,
-		"size":   info.Size,
+		"file": file,
+		"size": info.Size,
+	})
+
+	return nil
+}
+
+// packSync 执行打包同步
+func (s *SyncService) packSync(file string, info *interfaces.FileInfo) error {
+	// 读取源文件
+	var data []byte
+	if err := s.storage.Load(file, &data); err != nil {
+		return fmt.Errorf("读取源文件失败: %v", err)
+	}
+
+	// 创建临时目录
+	tempDir := filepath.Join(os.TempDir(), "synctools_pack")
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return fmt.Errorf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// 创建临时文件
+	tempFile := filepath.Join(tempDir, filepath.Base(file))
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return fmt.Errorf("写入临时文件失败: %v", err)
+	}
+
+	// 创建zip文件
+	zipFile, err := os.Create(filepath.Join(s.config.SyncDir, file))
+	if err != nil {
+		return fmt.Errorf("创建zip文件失败: %v", err)
+	}
+	defer zipFile.Close()
+
+	// 创建zip写入器
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// 添加文件到zip
+	fileToZip, err := os.Open(tempFile)
+	if err != nil {
+		return fmt.Errorf("打开临时文件失败: %v", err)
+	}
+	defer fileToZip.Close()
+
+	// 获取文件信息
+	fileInfo, err := fileToZip.Stat()
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %v", err)
+	}
+
+	// 创建zip文件头
+	header, err := zip.FileInfoHeader(fileInfo)
+	if err != nil {
+		return fmt.Errorf("创建文件头失败: %v", err)
+	}
+
+	// 设置压缩方法
+	header.Method = zip.Deflate
+
+	// 创建zip文件
+	writer, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		return fmt.Errorf("创建压缩文件失败: %v", err)
+	}
+
+	// 写入文件内容
+	if _, err := io.Copy(writer, fileToZip); err != nil {
+		return fmt.Errorf("写入压缩文件失败: %v", err)
+	}
+
+	s.logger.Info("文件打包完成", interfaces.Fields{
+		"file":     file,
+		"packFile": filepath.Join(s.config.SyncDir, file),
+		"size":     info.Size,
 	})
 
 	return nil
@@ -569,12 +545,8 @@ func (s *SyncService) setStatus(status string) {
 
 // IsRunning 实现 interfaces.SyncService 接口
 func (s *SyncService) IsRunning() bool {
-	// 如果服务器实例存在，返回服务器状态
-	if s.server != nil {
-		return s.server.IsRunning()
-	}
-	// 如果没有服务器实例，返回false
-	return false
+	// 返回服务的运行状态
+	return s.running
 }
 
 // GetCurrentConfig 实现 interfaces.SyncService 接口

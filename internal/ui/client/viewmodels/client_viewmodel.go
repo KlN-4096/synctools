@@ -16,6 +16,7 @@ package viewmodels
 
 import (
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/lxn/walk"
@@ -68,10 +69,7 @@ func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logg
 		if config := syncService.GetCurrentConfig(); config != nil {
 			vm.serverAddr = config.Host
 			vm.serverPort = fmt.Sprintf("%d", config.Port)
-			// 如果有重定向配置，使用第一个作为默认同步路径
-			if len(config.FolderRedirects) > 0 {
-				vm.syncPath = config.FolderRedirects[0].ClientPath
-			}
+			vm.syncPath = config.SyncDir
 		}
 	}
 
@@ -92,9 +90,11 @@ func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
 		if config := vm.syncService.GetCurrentConfig(); config != nil {
 			vm.serverAddr = config.Host
 			vm.serverPort = fmt.Sprintf("%d", config.Port)
+			vm.syncPath = config.SyncDir
 			vm.logger.Debug("从配置加载服务器信息", interfaces.Fields{
-				"host": config.Host,
-				"port": config.Port,
+				"host":     config.Host,
+				"port":     config.Port,
+				"syncPath": config.SyncDir,
 			})
 		}
 	}
@@ -232,9 +232,71 @@ func (vm *MainViewModel) Connect() error {
 		"remoteAddr": conn.RemoteAddr().String(),
 	})
 
+	// 发送初始化消息
+	initMsg := &interfaces.Message{
+		Type: "init",
+		Data: map[string]interface{}{
+			"clientId": conn.LocalAddr().String(),
+			"version":  "1.0.0",
+			"syncPath": vm.syncPath,
+		},
+	}
+
+	if err := vm.networkOps.WriteJSON(conn, initMsg); err != nil {
+		vm.logger.Error("发送初始化消息失败", interfaces.Fields{
+			"error": err,
+		})
+		vm.Disconnect()
+		return fmt.Errorf("发送初始化消息失败: %v", err)
+	}
+
+	// 启动消息接收协程
+	go vm.receiveMessages()
+
 	// 更新UI状态
 	vm.updateUIState()
 	return nil
+}
+
+// receiveMessages 接收服务器消息
+func (vm *MainViewModel) receiveMessages() {
+	defer vm.Disconnect()
+
+	for vm.IsConnected() {
+		var msg interfaces.Message
+		if err := vm.networkOps.ReadJSON(vm.conn, &msg); err != nil {
+			if err != io.EOF {
+				vm.logger.Error("接收消息失败", interfaces.Fields{
+					"error": err,
+				})
+			}
+			return
+		}
+
+		vm.handleMessage(&msg)
+	}
+}
+
+// handleMessage 处理服务器消息
+func (vm *MainViewModel) handleMessage(msg *interfaces.Message) {
+	vm.logger.Debug("收到服务器消息", interfaces.Fields{
+		"type": msg.Type,
+	})
+
+	switch msg.Type {
+	case "sync_progress":
+		if progress, ok := msg.Data.(map[string]interface{}); ok {
+			vm.handleSyncProgress(progress)
+		}
+	case "sync_complete":
+		vm.logger.Info("同步完成", interfaces.Fields{})
+	case "error":
+		if errMsg, ok := msg.Data.(string); ok {
+			vm.logger.Error("服务器错误", interfaces.Fields{
+				"error": errMsg,
+			})
+		}
+	}
 }
 
 // Disconnect 断开服务器连接
@@ -336,10 +398,7 @@ func (vm *MainViewModel) SaveConfig() error {
 	// 保存原始值
 	originalHost := config.Host
 	originalPort := config.Port
-	originalSyncPath := ""
-	if len(config.FolderRedirects) > 0 {
-		originalSyncPath = config.FolderRedirects[0].ClientPath
-	}
+	originalSyncPath := config.SyncDir
 
 	// 更新配置
 	newPort := vm.parsePort()
@@ -366,22 +425,7 @@ func (vm *MainViewModel) SaveConfig() error {
 	// 更新配置
 	config.Host = vm.serverAddr
 	config.Port = newPort
-
-	// 更新重定向配置
-	if vm.syncPath != "" {
-		if len(config.FolderRedirects) == 0 {
-			// 如果没有重定向配置，创建一个新的
-			config.FolderRedirects = []interfaces.FolderRedirect{
-				{
-					ServerPath: "/", // 使用根路径作为服务器路径
-					ClientPath: vm.syncPath,
-				},
-			}
-		} else {
-			// 更新第一个重定向配置
-			config.FolderRedirects[0].ClientPath = vm.syncPath
-		}
-	}
+	config.SyncDir = vm.syncPath
 
 	// 保存配置
 	if err := vm.syncService.SaveConfig(config); err != nil {
@@ -443,6 +487,16 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 	vm.logger.Info("开始同步文件", interfaces.Fields{
 		"path": path,
 	})
+
+	// 确保服务已启动
+	if !vm.syncService.IsRunning() {
+		if err := vm.syncService.Start(); err != nil {
+			vm.logger.Error("启动同步服务失败", interfaces.Fields{
+				"error": err,
+			})
+			return fmt.Errorf("启动同步服务失败: %v", err)
+		}
+	}
 
 	// 调用同步服务进行同步
 	if err := vm.syncService.SyncFiles(path); err != nil {
