@@ -138,7 +138,6 @@ func (s *SyncService) StopServer() error {
 
 	// 清理服务器实例
 	s.server = nil
-
 	s.setStatus("服务器已停止")
 	s.logger.Info("服务状态变更", interfaces.Fields{
 		"status": "stopped",
@@ -165,7 +164,6 @@ func (s *SyncService) Stop() error {
 
 	s.running = false
 	s.setStatus("已停止")
-
 	s.logger.Info("服务状态变更", interfaces.Fields{
 		"status": "stopped",
 		"type":   "sync",
@@ -571,7 +569,12 @@ func (s *SyncService) setStatus(status string) {
 
 // IsRunning 实现 interfaces.SyncService 接口
 func (s *SyncService) IsRunning() bool {
-	return s.running
+	// 如果服务器实例存在，返回服务器状态
+	if s.server != nil {
+		return s.server.IsRunning()
+	}
+	// 如果没有服务器实例，返回false
+	return false
 }
 
 // GetCurrentConfig 实现 interfaces.SyncService 接口

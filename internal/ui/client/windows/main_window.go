@@ -95,7 +95,56 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 			},
 		},
 		Children: []declarative.Widget{
-			// TODO: 添加客户端特有的UI组件
+			declarative.Composite{
+				Layout:  declarative.VBox{},
+				MaxSize: declarative.Size{Width: 0, Height: 0},
+				Children: []declarative.Widget{
+					declarative.GroupBox{
+						Title:  "服务器连接",
+						Layout: declarative.Grid{Columns: 2},
+						Children: []declarative.Widget{
+							declarative.Label{Text: "服务器地址:"},
+							declarative.LineEdit{},
+							declarative.Label{Text: "端口:"},
+							declarative.LineEdit{},
+							declarative.PushButton{
+								Text: "连接",
+								OnClicked: func() {
+									if !viewModel.IsConnected() {
+										if err := viewModel.Connect(); err != nil {
+											walk.MsgBox(mainWindow, "错误",
+												"连接服务器失败: "+err.Error(),
+												walk.MsgBoxIconError)
+										}
+									}
+								},
+							},
+							declarative.PushButton{
+								Text: "断开",
+								OnClicked: func() {
+									if viewModel.IsConnected() {
+										if err := viewModel.Disconnect(); err != nil {
+											walk.MsgBox(mainWindow, "错误",
+												"断开连接失败: "+err.Error(),
+												walk.MsgBoxIconError)
+										}
+									}
+								},
+							},
+						},
+					},
+					declarative.GroupBox{
+						Title:  "同步状态",
+						Layout: declarative.VBox{},
+						Children: []declarative.Widget{
+							declarative.ProgressBar{
+								MinValue: 0,
+								MaxValue: 100,
+							},
+						},
+					},
+				},
+			},
 		},
 		StatusBarItems: []declarative.StatusBarItem{
 			{
@@ -105,6 +154,12 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 		},
 	}.Create()); err != nil {
 		viewModel.LogError("创建窗口失败", err)
+		return err
+	}
+
+	// 初始化视图模型
+	if err := viewModel.Initialize(mainWindow); err != nil {
+		viewModel.LogError("初始化视图模型失败", err)
 		return err
 	}
 
