@@ -433,3 +433,28 @@ func (vm *MainViewModel) SetSyncPath(path string) {
 func (vm *MainViewModel) GetSyncPath() string {
 	return vm.syncPath
 }
+
+// SyncFiles 同步指定目录的文件
+func (vm *MainViewModel) SyncFiles(path string) error {
+	if !vm.IsConnected() {
+		return fmt.Errorf("未连接到服务器")
+	}
+
+	vm.logger.Info("开始同步文件", interfaces.Fields{
+		"path": path,
+	})
+
+	// 调用同步服务进行同步
+	if err := vm.syncService.SyncFiles(path); err != nil {
+		vm.logger.Error("同步失败", interfaces.Fields{
+			"path":  path,
+			"error": err,
+		})
+		return fmt.Errorf("同步失败: %v", err)
+	}
+
+	vm.logger.Info("同步完成", interfaces.Fields{
+		"path": path,
+	})
+	return nil
+}

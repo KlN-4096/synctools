@@ -31,6 +31,7 @@ type ClientTab struct {
 	syncPathEdit  *walk.LineEdit
 	browseButton  *walk.PushButton
 	connectButton *walk.PushButton // 合并后的连接/断开按钮
+	syncButton    *walk.PushButton // 添加同步按钮
 	progressBar   *walk.ProgressBar
 	StatusBar     *walk.StatusBarItem
 	saveButton    *walk.PushButton
@@ -114,6 +115,14 @@ func (t *ClientTab) Setup() error {
 									t.onConnectOrDisconnect()
 								},
 							},
+							PushButton{
+								AssignTo: &t.syncButton,
+								Text:     "开始同步",
+								MinSize:  Size{Width: 80},
+								OnClicked: func() {
+									t.onSync()
+								},
+							},
 						},
 					},
 				},
@@ -183,6 +192,24 @@ func (t *ClientTab) onConnectOrDisconnect() {
 	}
 }
 
+// onSync 处理同步按钮点击
+func (t *ClientTab) onSync() {
+	if !t.viewModel.IsConnected() {
+		walk.MsgBox(t.Form(), "错误", "请先连接到服务器", walk.MsgBoxIconError)
+		return
+	}
+
+	if t.syncPathEdit.Text() == "" {
+		walk.MsgBox(t.Form(), "错误", "请选择同步目录", walk.MsgBoxIconError)
+		return
+	}
+
+	if err := t.viewModel.SyncFiles(t.syncPathEdit.Text()); err != nil {
+		walk.MsgBox(t.Form(), "错误", "同步失败: "+err.Error(), walk.MsgBoxIconError)
+		return
+	}
+}
+
 // Activating 实现 walk.Form 接口
 func (t *ClientTab) Activating() bool {
 	return true
@@ -215,6 +242,9 @@ func (t *ClientTab) UpdateUI() {
 	}
 	if t.browseButton != nil {
 		t.browseButton.SetEnabled(!isConnected)
+	}
+	if t.syncButton != nil {
+		t.syncButton.SetEnabled(isConnected)
 	}
 
 	// 更新输入框状态
