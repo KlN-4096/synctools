@@ -33,16 +33,20 @@ type MainViewModel struct {
 	serverAddr  string
 	serverPort  string
 
-	// UI 控件
+	// UI 组件
 	connectButton    *walk.PushButton
 	disconnectButton *walk.PushButton
 	addressEdit      *walk.LineEdit
 	portEdit         *walk.LineEdit
 	progressBar      *walk.ProgressBar
+	saveButton       *walk.PushButton
 
 	// 网络连接
 	conn       net.Conn
 	networkOps interfaces.NetworkOperations
+
+	// UI 更新回调
+	onUIUpdate func()
 }
 
 // NewMainViewModel 创建新的主视图模型
@@ -55,6 +59,15 @@ func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logg
 		serverPort:  "9527",
 		networkOps:  network.NewOperations(logger),
 	}
+
+	// 从配置中读取服务器地址和端口
+	if syncService != nil {
+		if config := syncService.GetCurrentConfig(); config != nil {
+			vm.serverAddr = config.Host
+			vm.serverPort = fmt.Sprintf("%d", config.Port)
+		}
+	}
+
 	vm.logger.Debug("创建主视图模型", interfaces.Fields{
 		"defaultAddr": vm.serverAddr,
 		"defaultPort": vm.serverPort,
@@ -65,6 +78,19 @@ func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logg
 // Initialize 初始化视图模型
 func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
 	vm.window = window
+
+	// 从配置中读取服务器地址和端口
+	if vm.syncService != nil {
+		if config := vm.syncService.GetCurrentConfig(); config != nil {
+			vm.serverAddr = config.Host
+			vm.serverPort = fmt.Sprintf("%d", config.Port)
+			vm.logger.Debug("从配置加载服务器信息", interfaces.Fields{
+				"host": config.Host,
+				"port": config.Port,
+			})
+		}
+	}
+
 	vm.logger.Debug("视图模型初始化完成", interfaces.Fields{})
 	vm.updateUIState()
 	return nil
@@ -112,13 +138,19 @@ func (vm *MainViewModel) GetServerPort() string {
 }
 
 // SetUIControls 设置UI控件引用
-func (vm *MainViewModel) SetUIControls(connectBtn, disconnectBtn *walk.PushButton, addrEdit, portEdit *walk.LineEdit, progress *walk.ProgressBar) {
+func (vm *MainViewModel) SetUIControls(connectBtn, disconnectBtn *walk.PushButton, addrEdit, portEdit *walk.LineEdit, progress *walk.ProgressBar, saveBtn *walk.PushButton) {
 	vm.connectButton = connectBtn
 	vm.disconnectButton = disconnectBtn
 	vm.addressEdit = addrEdit
 	vm.portEdit = portEdit
 	vm.progressBar = progress
+	vm.saveButton = saveBtn
 	vm.updateUIState()
+}
+
+// SetUIUpdateCallback 设置UI更新回调
+func (vm *MainViewModel) SetUIUpdateCallback(callback func()) {
+	vm.onUIUpdate = callback
 }
 
 // updateUIState 更新UI状态
@@ -130,37 +162,12 @@ func (vm *MainViewModel) updateUIState() {
 
 	vm.logger.Debug("开始更新UI状态", interfaces.Fields{
 		"isConnected": vm.connected,
-		"hasControls": vm.connectButton != nil && vm.disconnectButton != nil,
 	})
 
 	// 在UI线程中执行
 	vm.window.Synchronize(func() {
-		// 更新按钮状态
-		if vm.connectButton != nil {
-			vm.connectButton.SetEnabled(!vm.connected)
-		}
-		if vm.disconnectButton != nil {
-			vm.disconnectButton.SetEnabled(vm.connected)
-		}
-
-		// 更新输入框状态
-		if vm.addressEdit != nil {
-			vm.addressEdit.SetEnabled(!vm.connected)
-		}
-		if vm.portEdit != nil {
-			vm.portEdit.SetEnabled(!vm.connected)
-		}
-
-		// 更新状态栏
-		if statusBar := vm.window.StatusBar(); statusBar != nil {
-			if vm.connected {
-				status := fmt.Sprintf("已连接到 %s:%s", vm.serverAddr, vm.serverPort)
-				statusBar.Items().At(0).SetText(status)
-				vm.logger.Debug("更新状态栏", interfaces.Fields{"status": status})
-			} else {
-				statusBar.Items().At(0).SetText("未连接")
-				vm.logger.Debug("更新状态栏", interfaces.Fields{"status": "未连接"})
-			}
+		if vm.onUIUpdate != nil {
+			vm.onUIUpdate()
 		}
 	})
 }
@@ -304,4 +311,79 @@ func (vm *MainViewModel) UpdateProgress(progress interfaces.Progress) {
 			}
 		}
 	})
+}
+
+// SaveConfig 保存配置
+func (vm *MainViewModel) SaveConfig() error {
+	if vm.syncService == nil {
+		return fmt.Errorf("同步服务未初始化")
+	}
+
+	// 获取当前配置
+	config := vm.syncService.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("没有当前配置")
+	}
+
+	// 保存原始值
+	originalHost := config.Host
+	originalPort := config.Port
+
+	// 更新配置
+	newPort := vm.parsePort()
+
+	vm.logger.Debug("检查配置变更", interfaces.Fields{
+		"originalHost": originalHost,
+		"newHost":      vm.serverAddr,
+		"originalPort": originalPort,
+		"newPort":      newPort,
+	})
+
+	// 检查是否有变更
+	if originalHost == vm.serverAddr && originalPort == newPort {
+		vm.logger.Debug("配置未发生变化，无需保存", interfaces.Fields{
+			"host": originalHost,
+			"port": originalPort,
+		})
+		return nil
+	}
+
+	// 更新配置
+	config.Host = vm.serverAddr
+	config.Port = newPort
+
+	// 保存配置
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		vm.logger.Error("保存配置失败", interfaces.Fields{
+			"error": err,
+		})
+		return fmt.Errorf("保存配置失败: %v", err)
+	}
+
+	vm.logger.Info("配置已保存", interfaces.Fields{
+		"host": config.Host,
+		"port": config.Port,
+	})
+
+	return nil
+}
+
+// parsePort 解析端口号
+func (vm *MainViewModel) parsePort() int {
+	port := 0
+	if _, err := fmt.Sscanf(vm.serverPort, "%d", &port); err != nil {
+		vm.logger.Debug("端口号解析失败，使用默认端口", interfaces.Fields{
+			"input": vm.serverPort,
+			"error": err,
+		})
+		port = 9527 // 默认端口
+	}
+	if port <= 0 || port > 65535 {
+		vm.logger.Debug("端口号超出范围，使用默认端口", interfaces.Fields{
+			"input": vm.serverPort,
+			"port":  port,
+		})
+		port = 9527 // 默认端口
+	}
+	return port
 }

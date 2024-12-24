@@ -32,6 +32,7 @@ type ClientTab struct {
 	disconnectButton *walk.PushButton
 	progressBar      *walk.ProgressBar
 	StatusBar        *walk.StatusBarItem
+	saveButton       *walk.PushButton
 
 	viewModel *viewmodels.MainViewModel
 }
@@ -51,48 +52,63 @@ func (t *ClientTab) Setup() error {
 		Children: []Widget{
 			GroupBox{
 				Title:  "服务器连接",
-				Layout: Grid{Columns: 2, Spacing: 10},
+				Layout: VBox{},
 				Children: []Widget{
-					Label{Text: "服务器地址:"},
-					LineEdit{
-						AssignTo: &t.addressEdit,
-						Text:     t.viewModel.GetServerAddr(),
-						OnTextChanged: func() {
-							t.viewModel.SetServerAddr(t.addressEdit.Text())
+					Composite{
+						Layout: Grid{Columns: 2, Spacing: 10},
+						Children: []Widget{
+							Label{Text: "服务器地址:"},
+							LineEdit{
+								AssignTo: &t.addressEdit,
+								OnTextChanged: func() {
+									t.viewModel.SetServerAddr(t.addressEdit.Text())
+								},
+							},
+							Label{Text: "端口:"},
+							LineEdit{
+								AssignTo: &t.portEdit,
+								OnTextChanged: func() {
+									t.viewModel.SetServerPort(t.portEdit.Text())
+								},
+							},
 						},
 					},
-					Label{Text: "端口:"},
-					LineEdit{
-						AssignTo: &t.portEdit,
-						Text:     t.viewModel.GetServerPort(),
-						OnTextChanged: func() {
-							t.viewModel.SetServerPort(t.portEdit.Text())
-						},
-					},
-					PushButton{
-						AssignTo: &t.connectButton,
-						Text:     "连接",
-						OnClicked: func() {
-							if !t.viewModel.IsConnected() {
-								if err := t.viewModel.Connect(); err != nil {
-									walk.MsgBox(t.Form(), "错误",
-										"连接服务器失败: "+err.Error(),
-										walk.MsgBoxIconError)
-								}
-							}
-						},
-					},
-					PushButton{
-						AssignTo: &t.disconnectButton,
-						Text:     "断开",
-						OnClicked: func() {
-							if t.viewModel.IsConnected() {
-								if err := t.viewModel.Disconnect(); err != nil {
-									walk.MsgBox(t.Form(), "错误",
-										"断开连接失败: "+err.Error(),
-										walk.MsgBoxIconError)
-								}
-							}
+					Composite{
+						Layout: HBox{Spacing: 5},
+						Children: []Widget{
+							HSpacer{},
+							PushButton{
+								AssignTo: &t.saveButton,
+								Text:     "保存配置",
+								MinSize:  Size{Width: 80},
+								OnClicked: func() {
+									t.onSave()
+								},
+							},
+							PushButton{
+								AssignTo: &t.connectButton,
+								Text:     "连接",
+								MinSize:  Size{Width: 80},
+								OnClicked: func() {
+									if err := t.viewModel.Connect(); err != nil {
+										walk.MsgBox(t.Form(), "错误",
+											"连接服务器失败: "+err.Error(),
+											walk.MsgBoxIconError)
+									}
+								},
+							},
+							PushButton{
+								AssignTo: &t.disconnectButton,
+								Text:     "断开",
+								MinSize:  Size{Width: 80},
+								OnClicked: func() {
+									if err := t.viewModel.Disconnect(); err != nil {
+										walk.MsgBox(t.Form(), "错误",
+											"断开连接失败: "+err.Error(),
+											walk.MsgBoxIconError)
+									}
+								},
+							},
 						},
 					},
 				},
@@ -114,12 +130,67 @@ func (t *ClientTab) Setup() error {
 	}
 
 	// 设置UI控件引用
-	t.viewModel.SetUIControls(t.connectButton, t.disconnectButton, t.addressEdit, t.portEdit, t.progressBar)
+	t.viewModel.SetUIControls(t.connectButton, t.disconnectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton)
+
+	// 设置UI更新回调
+	t.viewModel.SetUIUpdateCallback(t.UpdateUI)
+
+	// 初始更新UI状态
+	t.UpdateUI()
 
 	return nil
+}
+
+// onSave 保存配置
+func (t *ClientTab) onSave() {
+	if err := t.viewModel.SaveConfig(); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+	walk.MsgBox(t.Form(), "提示", "配置已保存", walk.MsgBoxIconInformation)
 }
 
 // Activating 实现 walk.Form 接口
 func (t *ClientTab) Activating() bool {
 	return true
+}
+
+// UpdateUI 更新界面状态
+func (t *ClientTab) UpdateUI() {
+	// 更新地址和端口
+	if t.addressEdit != nil {
+		t.addressEdit.SetText(t.viewModel.GetServerAddr())
+	}
+	if t.portEdit != nil {
+		t.portEdit.SetText(t.viewModel.GetServerPort())
+	}
+
+	// 更新按钮状态
+	isConnected := t.viewModel.IsConnected()
+	if t.connectButton != nil {
+		t.connectButton.SetEnabled(!isConnected)
+	}
+	if t.disconnectButton != nil {
+		t.disconnectButton.SetEnabled(isConnected)
+	}
+	if t.saveButton != nil {
+		t.saveButton.SetEnabled(!isConnected)
+	}
+
+	// 更新输入框状态
+	if t.addressEdit != nil {
+		t.addressEdit.SetEnabled(!isConnected)
+	}
+	if t.portEdit != nil {
+		t.portEdit.SetEnabled(!isConnected)
+	}
+
+	// 更新状态栏
+	if t.StatusBar != nil {
+		if isConnected {
+			t.StatusBar.SetText(fmt.Sprintf("已连接到 %s:%s", t.viewModel.GetServerAddr(), t.viewModel.GetServerPort()))
+		} else {
+			t.StatusBar.SetText("未连接")
+		}
+	}
 }

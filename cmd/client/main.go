@@ -123,8 +123,8 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 	}
 
 	// 检查是否存在默认配置
-	if storage.Exists("default.json") {
-		if err := cfgManager.LoadConfig("default"); err != nil {
+	if storage.Exists("client.json") {
+		if err := cfgManager.LoadConfig("client"); err != nil {
 			return nil, fmt.Errorf("加载默认配置失败: %v", err)
 		}
 		return cfgManager.GetCurrentConfig().(*interfaces.Config), nil

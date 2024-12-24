@@ -77,8 +77,8 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	if err := (declarative.MainWindow{
 		AssignTo: &mainWindow,
 		Title:    "同步工具客户端",
-		MinSize:  declarative.Size{Width: 800, Height: 600},
-		Size:     declarative.Size{Width: 1024, Height: 768},
+		MinSize:  declarative.Size{Width: 40, Height: 30},
+		Size:     declarative.Size{Width: 400, Height: 300},
 		Layout:   declarative.VBox{},
 		MenuItems: []declarative.MenuItem{
 			declarative.Menu{
@@ -194,17 +194,4 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	viewModel.LogDebug("正在显示主窗口")
 	mainWindow.Run()
 	return nil
-}
-
-// ShowError 显示错误对话框
-func ShowError(owner walk.Form, title string, err error) {
-	walk.MsgBox(owner, title,
-		fmt.Sprintf("发生错误: %v", err),
-		walk.MsgBoxIconError)
-}
-
-// ShowMessage 显示消息对话框
-func ShowMessage(owner walk.Form, title string, message string) {
-	walk.MsgBox(owner, title, message,
-		walk.MsgBoxIconInformation)
 }
