@@ -53,6 +53,7 @@ func main() {
 
 	// 获取日志服务
 	logger := c.GetLogger()
+	logger.SetLevel(interfaces.DEBUG)
 	logger.Info("客户端启动", interfaces.Fields{
 		"base_dir": baseDir,
 	})

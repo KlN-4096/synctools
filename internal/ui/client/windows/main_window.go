@@ -56,7 +56,14 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 
 	viewModel.LogDebug("开始创建主窗口")
 
-	var mainWindow *walk.MainWindow
+	var (
+		mainWindow       *walk.MainWindow
+		addressEdit      *walk.LineEdit
+		portEdit         *walk.LineEdit
+		connectButton    *walk.PushButton
+		disconnectButton *walk.PushButton
+		progressBar      *walk.ProgressBar
+	)
 
 	// 设置窗口属性
 	if err := (declarative.MainWindow{
@@ -104,11 +111,24 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 						Layout: declarative.Grid{Columns: 2},
 						Children: []declarative.Widget{
 							declarative.Label{Text: "服务器地址:"},
-							declarative.LineEdit{},
+							declarative.LineEdit{
+								AssignTo: &addressEdit,
+								Text:     viewModel.GetServerAddr(),
+								OnTextChanged: func() {
+									viewModel.SetServerAddr(addressEdit.Text())
+								},
+							},
 							declarative.Label{Text: "端口:"},
-							declarative.LineEdit{},
+							declarative.LineEdit{
+								AssignTo: &portEdit,
+								Text:     viewModel.GetServerPort(),
+								OnTextChanged: func() {
+									viewModel.SetServerPort(portEdit.Text())
+								},
+							},
 							declarative.PushButton{
-								Text: "连接",
+								AssignTo: &connectButton,
+								Text:     "连接",
 								OnClicked: func() {
 									if !viewModel.IsConnected() {
 										if err := viewModel.Connect(); err != nil {
@@ -120,7 +140,8 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 								},
 							},
 							declarative.PushButton{
-								Text: "断开",
+								AssignTo: &disconnectButton,
+								Text:     "断开",
 								OnClicked: func() {
 									if viewModel.IsConnected() {
 										if err := viewModel.Disconnect(); err != nil {
@@ -138,6 +159,7 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 						Layout: declarative.VBox{},
 						Children: []declarative.Widget{
 							declarative.ProgressBar{
+								AssignTo: &progressBar,
 								MinValue: 0,
 								MaxValue: 100,
 							},
@@ -148,7 +170,7 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 		},
 		StatusBarItems: []declarative.StatusBarItem{
 			{
-				Text:  "就绪",
+				Text:  "未连接",
 				Width: 200,
 			},
 		},
@@ -162,6 +184,9 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 		viewModel.LogError("初始化视图模型失败", err)
 		return err
 	}
+
+	// 设置UI控件引用
+	viewModel.SetUIControls(connectButton, disconnectButton, addressEdit, portEdit, progressBar)
 
 	// 设置关闭事件处理
 	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
