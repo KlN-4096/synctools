@@ -25,6 +25,7 @@ Client结构体方法:
 package network
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -308,11 +309,30 @@ func (c *Client) handleMessage(msg *interfaces.Message) error {
 			"uuid":   c.UUID,
 		})
 
+		// 准备配置响应
+		configResponse := struct {
+			Success bool               `json:"success"`
+			Config  *interfaces.Config `json:"config"`
+		}{
+			Success: true,
+			Config:  c.server.config,
+		}
+
+		// 序列化配置响应
+		payload, err := json.Marshal(configResponse)
+		if err != nil {
+			c.server.logger.Error("序列化配置响应失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+			})
+			return err
+		}
+
 		// 发送初始化响应
 		response := &interfaces.Message{
 			Type:    "init_response",
 			UUID:    c.UUID,
-			Payload: []byte(`{"success": true}`),
+			Payload: payload,
 		}
 
 		if err := c.server.networkOps.WriteJSON(c.conn, response); err != nil {

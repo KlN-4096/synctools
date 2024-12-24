@@ -35,6 +35,7 @@ type ClientTab struct {
 	progressBar   *walk.ProgressBar
 	StatusBar     *walk.StatusBarItem
 	saveButton    *walk.PushButton
+	serverInfo    *walk.TextLabel // 添加服务器信息标签
 
 	viewModel *viewmodels.MainViewModel
 }
@@ -92,6 +93,11 @@ func (t *ClientTab) Setup() error {
 										},
 									},
 								},
+							},
+							Label{Text: "服务器信息:"},
+							TextLabel{
+								AssignTo: &t.serverInfo,
+								Text:     "未连接",
 							},
 						},
 					},
@@ -256,6 +262,20 @@ func (t *ClientTab) UpdateUI() {
 	}
 	if t.syncPathEdit != nil {
 		t.syncPathEdit.SetEnabled(!isConnected)
+	}
+
+	// 更新服务器信息
+	if t.serverInfo != nil {
+		if isConnected {
+			config := t.viewModel.GetCurrentConfig()
+			if config != nil {
+				t.serverInfo.SetText(fmt.Sprintf("%s (v%s)", config.Name, config.Version))
+			} else {
+				t.serverInfo.SetText("已连接")
+			}
+		} else {
+			t.serverInfo.SetText("未连接")
+		}
 	}
 
 	// 更新状态栏

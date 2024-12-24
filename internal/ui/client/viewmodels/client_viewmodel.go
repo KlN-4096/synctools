@@ -15,6 +15,7 @@
 package viewmodels
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"time"
@@ -263,6 +264,35 @@ func (vm *MainViewModel) Connect() error {
 		})
 		conn.Close()
 		return fmt.Errorf("收到意外的响应类型: %s", response.Type)
+	}
+
+	// 解析配置响应
+	var configResponse struct {
+		Success bool               `json:"success"`
+		Config  *interfaces.Config `json:"config"`
+	}
+	if err := json.Unmarshal(response.Payload, &configResponse); err != nil {
+		vm.logger.Error("解析配置响应失败", interfaces.Fields{
+			"error": err,
+		})
+		conn.Close()
+		return fmt.Errorf("解析配置响应失败: %v", err)
+	}
+
+	if !configResponse.Success {
+		vm.logger.Error("服务器拒绝连接", interfaces.Fields{})
+		conn.Close()
+		return fmt.Errorf("服务器拒绝连接")
+	}
+
+	// 更新服务器配置
+	if configResponse.Config != nil {
+		vm.logger.Info("收到服务器配置", interfaces.Fields{
+			"name":    configResponse.Config.Name,
+			"version": configResponse.Config.Version,
+		})
+		// 更新同步服务的配置
+		vm.syncService.SaveConfig(configResponse.Config)
 	}
 
 	// 设置连接状态
@@ -532,7 +562,7 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 	// 确保服务已启动
 	if !vm.syncService.IsRunning() {
 		if err := vm.syncService.Start(); err != nil {
-			vm.logger.Error("启动同步服务失败", interfaces.Fields{
+			vm.logger.Error("启动同步服务��败", interfaces.Fields{
 				"error": err,
 			})
 			return fmt.Errorf("启动同步服务失败: %v", err)
@@ -552,4 +582,12 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 		"path": path,
 	})
 	return nil
+}
+
+// GetCurrentConfig 获取当前配置
+func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
+	if vm.syncService == nil {
+		return nil
+	}
+	return vm.syncService.GetCurrentConfig()
 }
