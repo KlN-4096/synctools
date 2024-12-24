@@ -25,7 +25,6 @@ Client结构体方法:
 package network
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -45,15 +44,17 @@ type Server struct {
 	logger     interfaces.Logger
 	running    bool
 	status     string
+	networkOps interfaces.NetworkOperations
 }
 
 // NewServer 创建新的网络服务器
 func NewServer(config *interfaces.Config, logger interfaces.Logger) *Server {
 	return &Server{
-		config:  config,
-		clients: make(map[string]*Client),
-		logger:  logger,
-		status:  "初始化",
+		config:     config,
+		clients:    make(map[string]*Client),
+		logger:     logger,
+		status:     "初始化",
+		networkOps: NewOperations(logger),
 	}
 }
 
@@ -80,7 +81,34 @@ func (s *Server) Start() error {
 		"address": s.listener.Addr().String(),
 	})
 
-	go s.acceptLoop()
+	// 在新的 goroutine 中处理客户端连接
+	go func() {
+		for s.running {
+			conn, err := s.listener.Accept()
+			if err != nil {
+				if ne, ok := err.(net.Error); ok && ne.Temporary() {
+					s.logger.Warn("网络操作", interfaces.Fields{
+						"action": "accept_temporary_error",
+						"error":  err,
+					})
+					continue
+				}
+				if s.running {
+					s.logger.Error("网络操作失败", interfaces.Fields{
+						"operation": "accept",
+						"error":     err,
+					})
+				}
+				return
+			}
+			s.logger.Info("网络连接", interfaces.Fields{
+				"action":  "client_connected",
+				"address": conn.RemoteAddr().String(),
+			})
+			go s.HandleClient(conn)
+		}
+	}()
+
 	return nil
 }
 
@@ -113,6 +141,10 @@ func (s *Server) Stop() error {
 
 // HandleClient 实现 interfaces.NetworkServer 接口
 func (s *Server) HandleClient(conn net.Conn) {
+	// 设置连接超时
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+
 	defer func() {
 		conn.Close()
 		s.logger.Info("网络连接", interfaces.Fields{
@@ -123,7 +155,7 @@ func (s *Server) HandleClient(conn net.Conn) {
 
 	client := NewClient(conn, s)
 	s.addClient(client)
-	go client.Start()
+	client.Start() // 直接调用，不使用 goroutine
 }
 
 // GetStatus 实现 interfaces.NetworkServer 接口
@@ -196,11 +228,36 @@ type Client struct {
 
 // NewClient 创建新的客户端
 func NewClient(conn net.Conn, server *Server) *Client {
-	return &Client{
+	client := &Client{
 		ID:           fmt.Sprintf("client-%s", conn.RemoteAddr()),
 		conn:         conn,
 		server:       server,
 		lastActivity: time.Now(),
+	}
+
+	// 启动超时检查
+	go client.checkTimeout()
+
+	return client
+}
+
+// checkTimeout 检查客户端是否超时
+func (c *Client) checkTimeout() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if time.Since(c.lastActivity) > 90*time.Second {
+				c.server.logger.Warn("客户端超时", interfaces.Fields{
+					"client":       c.ID,
+					"lastActivity": c.lastActivity,
+				})
+				c.Close()
+				return
+			}
+		}
 	}
 }
 
@@ -211,10 +268,9 @@ func (c *Client) Start() {
 		c.server.removeClient(c)
 	}()
 
-	decoder := json.NewDecoder(c.conn)
 	for {
 		var msg interfaces.Message
-		if err := decoder.Decode(&msg); err != nil {
+		if err := c.server.networkOps.ReadJSON(c.conn, &msg); err != nil {
 			if err != io.EOF {
 				c.server.logger.Error("读取客户端消息失败", interfaces.Fields{
 					"error":  err,
@@ -237,8 +293,62 @@ func (c *Client) Start() {
 
 // handleMessage 处理客户端消息
 func (c *Client) handleMessage(msg *interfaces.Message) error {
-	// 具体消息处理逻辑将在后续实现
-	return nil
+	c.server.logger.Debug("收到客户端消息", interfaces.Fields{
+		"client": c.ID,
+		"type":   msg.Type,
+		"uuid":   msg.UUID,
+	})
+
+	switch msg.Type {
+	case "init":
+		// 处理初始化消息
+		c.UUID = msg.UUID
+		c.server.logger.Info("客户端初始化", interfaces.Fields{
+			"client": c.ID,
+			"uuid":   c.UUID,
+		})
+
+		// 发送初始化响应
+		response := &interfaces.Message{
+			Type:    "init_response",
+			UUID:    c.UUID,
+			Payload: []byte(`{"success": true}`),
+		}
+
+		if err := c.server.networkOps.WriteJSON(c.conn, response); err != nil {
+			c.server.logger.Error("发送初始化响应失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+			})
+			return err
+		}
+
+		return nil
+	case "heartbeat":
+		// 处理心跳消息
+		c.lastActivity = time.Now()
+
+		// 发送心跳响应
+		response := &interfaces.Message{
+			Type: "heartbeat_response",
+			UUID: c.UUID,
+		}
+
+		if err := c.server.networkOps.WriteJSON(c.conn, response); err != nil {
+			c.server.logger.Error("发送心跳响应失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+			})
+			return err
+		}
+
+		c.server.logger.Debug("心跳响应已发送", interfaces.Fields{
+			"client": c.ID,
+		})
+		return nil
+	default:
+		return fmt.Errorf("未知的消息类型: %s", msg.Type)
+	}
 }
 
 // Close 关闭客户端连接

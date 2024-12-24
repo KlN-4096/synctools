@@ -16,8 +16,8 @@ package viewmodels
 
 import (
 	"fmt"
-	"io"
 	"net"
+	"time"
 
 	"github.com/lxn/walk"
 
@@ -214,7 +214,11 @@ func (vm *MainViewModel) Connect() error {
 		"fullAddr": addr,
 	})
 
-	conn, err := net.Dial("tcp", addr)
+	// 设置连接超时
+	dialer := net.Dialer{
+		Timeout: 30 * time.Second,
+	}
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		vm.logger.Error("连接服务器失败", interfaces.Fields{
 			"error":    err,
@@ -223,7 +227,45 @@ func (vm *MainViewModel) Connect() error {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
+	// 设置读写超时
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+
 	vm.conn = conn
+
+	// 发送初始化消息
+	initMsg := &interfaces.Message{
+		Type: "init",
+		UUID: vm.syncService.GetCurrentConfig().UUID,
+	}
+
+	if err := vm.networkOps.WriteJSON(conn, initMsg); err != nil {
+		vm.logger.Error("发送初始化消息失败", interfaces.Fields{
+			"error": err,
+		})
+		conn.Close()
+		return fmt.Errorf("发送初始化消息失败: %v", err)
+	}
+
+	// 等待初始化响应
+	var response interfaces.Message
+	if err := vm.networkOps.ReadJSON(conn, &response); err != nil {
+		vm.logger.Error("读取初始化响应失败", interfaces.Fields{
+			"error": err,
+		})
+		conn.Close()
+		return fmt.Errorf("读取初始化响应失败: %v", err)
+	}
+
+	if response.Type != "init_response" {
+		vm.logger.Error("收到意外的响应类型", interfaces.Fields{
+			"type": response.Type,
+		})
+		conn.Close()
+		return fmt.Errorf("收到意外的响应类型: %s", response.Type)
+	}
+
+	// 设置连接状态
 	vm.connected = true
 	vm.logger.Info("已连接到服务器", interfaces.Fields{
 		"address":    vm.serverAddr,
@@ -232,69 +274,68 @@ func (vm *MainViewModel) Connect() error {
 		"remoteAddr": conn.RemoteAddr().String(),
 	})
 
-	// 发送初始化消息
-	initMsg := &interfaces.Message{
-		Type: "init",
-		Data: map[string]interface{}{
-			"clientId": conn.LocalAddr().String(),
-			"version":  "1.0.0",
-			"syncPath": vm.syncPath,
-		},
-	}
-
-	if err := vm.networkOps.WriteJSON(conn, initMsg); err != nil {
-		vm.logger.Error("发送初始化消息失败", interfaces.Fields{
-			"error": err,
-		})
-		vm.Disconnect()
-		return fmt.Errorf("发送初始化消息失败: %v", err)
-	}
-
-	// 启动消息接收协程
-	go vm.receiveMessages()
+	// 启动心跳协程
+	go vm.heartbeat()
 
 	// 更新UI状态
 	vm.updateUIState()
 	return nil
 }
 
-// receiveMessages 接收服务器消息
-func (vm *MainViewModel) receiveMessages() {
-	defer vm.Disconnect()
+// heartbeat 发送心跳包保持连接
+func (vm *MainViewModel) heartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
-	for vm.IsConnected() {
-		var msg interfaces.Message
-		if err := vm.networkOps.ReadJSON(vm.conn, &msg); err != nil {
-			if err != io.EOF {
-				vm.logger.Error("接收消息失败", interfaces.Fields{
+	for {
+		select {
+		case <-ticker.C:
+			if !vm.connected || vm.conn == nil {
+				return
+			}
+
+			// 设置写入超时
+			vm.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+
+			heartbeatMsg := &interfaces.Message{
+				Type: "heartbeat",
+				UUID: vm.syncService.GetCurrentConfig().UUID,
+			}
+
+			if err := vm.networkOps.WriteJSON(vm.conn, heartbeatMsg); err != nil {
+				vm.logger.Error("发送心跳消息失败", interfaces.Fields{
 					"error": err,
 				})
+				vm.Disconnect()
+				return
 			}
-			return
-		}
 
-		vm.handleMessage(&msg)
-	}
-}
+			// 设置读取超时
+			vm.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
-// handleMessage 处理服务器消息
-func (vm *MainViewModel) handleMessage(msg *interfaces.Message) {
-	vm.logger.Debug("收到服务器消息", interfaces.Fields{
-		"type": msg.Type,
-	})
+			// 等待心跳响应
+			var response interfaces.Message
+			if err := vm.networkOps.ReadJSON(vm.conn, &response); err != nil {
+				vm.logger.Error("读取心跳响应失败", interfaces.Fields{
+					"error": err,
+				})
+				vm.Disconnect()
+				return
+			}
 
-	switch msg.Type {
-	case "sync_progress":
-		if progress, ok := msg.Data.(map[string]interface{}); ok {
-			vm.handleSyncProgress(progress)
-		}
-	case "sync_complete":
-		vm.logger.Info("同步完成", interfaces.Fields{})
-	case "error":
-		if errMsg, ok := msg.Data.(string); ok {
-			vm.logger.Error("服务器错误", interfaces.Fields{
-				"error": errMsg,
-			})
+			if response.Type != "heartbeat_response" {
+				vm.logger.Error("收到意外的心跳响应类型", interfaces.Fields{
+					"type": response.Type,
+				})
+				vm.Disconnect()
+				return
+			}
+
+			// 重置超时
+			vm.conn.SetReadDeadline(time.Time{})
+			vm.conn.SetWriteDeadline(time.Time{})
+
+			vm.logger.Debug("心跳成功", interfaces.Fields{})
 		}
 	}
 }
