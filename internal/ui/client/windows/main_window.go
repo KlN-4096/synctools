@@ -19,7 +19,9 @@ import (
 	"github.com/lxn/walk"
 	"github.com/lxn/walk/declarative"
 
+	"synctools/internal/interfaces"
 	"synctools/internal/ui/client/viewmodels"
+	"synctools/internal/ui/client/views"
 )
 
 // handleWindowClosing 处理窗口关闭事件
@@ -56,14 +58,20 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 
 	viewModel.LogDebug("开始创建主窗口")
 
-	var (
-		mainWindow       *walk.MainWindow
-		addressEdit      *walk.LineEdit
-		portEdit         *walk.LineEdit
-		connectButton    *walk.PushButton
-		disconnectButton *walk.PushButton
-		progressBar      *walk.ProgressBar
-	)
+	// 创建客户端标签页
+	viewModel.LogDebug("正在创建客户端标签页")
+	clientTab, err := views.NewClientTab(viewModel)
+	if err != nil {
+		viewModel.LogError("创建客户端标签页失败", err)
+		return err
+	}
+	if clientTab == nil {
+		viewModel.LogError("客户端标签页为空", nil)
+		return fmt.Errorf("客户端标签页为空")
+	}
+	viewModel.LogDebug("客户端标签页创建成功")
+
+	var mainWindow *walk.MainWindow
 
 	// 设置窗口属性
 	if err := (declarative.MainWindow{
@@ -91,102 +99,91 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 					declarative.Action{
 						Text: "关于(&A)",
 						OnTriggered: func() {
-							walk.MsgBox(mainWindow, "关于",
-								"同步工具客户端 v1.0\n\n"+
-									"用于文件同步的客户端软件\n"+
-									"支持多目录同步和自动同步",
-								walk.MsgBoxIconInformation)
+							dlg, err := walk.NewDialog(mainWindow)
+							if err != nil {
+								return
+							}
+							defer dlg.Dispose()
+
+							dlg.SetTitle("关于")
+							dlg.SetLayout(walk.NewVBoxLayout())
+
+							var debugCheckBox *walk.CheckBox
+							if err := (declarative.Composite{
+								Layout: declarative.VBox{},
+								Children: []declarative.Widget{
+									declarative.Label{
+										Text: "同步工具客户端 v1.0\n\n" +
+											"用于文件同步的客户端软件\n" +
+											"支持多目录同步和自动同步",
+									},
+									declarative.HSpacer{},
+									declarative.CheckBox{
+										AssignTo: &debugCheckBox,
+										Text:     "调试模式",
+										Checked:  viewModel.GetLogger().GetLevel() == interfaces.DEBUG,
+										OnCheckedChanged: func() {
+											if debugCheckBox.Checked() {
+												viewModel.GetLogger().SetLevel(interfaces.DEBUG)
+											} else {
+												viewModel.GetLogger().SetLevel(interfaces.INFO)
+											}
+										},
+									},
+								},
+							}.Create(declarative.NewBuilder(dlg))); err != nil {
+								return
+							}
+
+							dlg.Run()
 						},
 					},
 				},
 			},
 		},
 		Children: []declarative.Widget{
-			declarative.Composite{
-				Layout:  declarative.VBox{},
-				MaxSize: declarative.Size{Width: 0, Height: 0},
-				Children: []declarative.Widget{
-					declarative.GroupBox{
-						Title:  "服务器连接",
-						Layout: declarative.Grid{Columns: 2},
-						Children: []declarative.Widget{
-							declarative.Label{Text: "服务器地址:"},
-							declarative.LineEdit{
-								AssignTo: &addressEdit,
-								Text:     viewModel.GetServerAddr(),
-								OnTextChanged: func() {
-									viewModel.SetServerAddr(addressEdit.Text())
-								},
-							},
-							declarative.Label{Text: "端口:"},
-							declarative.LineEdit{
-								AssignTo: &portEdit,
-								Text:     viewModel.GetServerPort(),
-								OnTextChanged: func() {
-									viewModel.SetServerPort(portEdit.Text())
-								},
-							},
-							declarative.PushButton{
-								AssignTo: &connectButton,
-								Text:     "连接",
-								OnClicked: func() {
-									if !viewModel.IsConnected() {
-										if err := viewModel.Connect(); err != nil {
-											walk.MsgBox(mainWindow, "错误",
-												"连接服务器失败: "+err.Error(),
-												walk.MsgBoxIconError)
-										}
-									}
-								},
-							},
-							declarative.PushButton{
-								AssignTo: &disconnectButton,
-								Text:     "断开",
-								OnClicked: func() {
-									if viewModel.IsConnected() {
-										if err := viewModel.Disconnect(); err != nil {
-											walk.MsgBox(mainWindow, "错误",
-												"断开连接失败: "+err.Error(),
-												walk.MsgBoxIconError)
-										}
-									}
-								},
-							},
-						},
-					},
-					declarative.GroupBox{
-						Title:  "同步状态",
-						Layout: declarative.VBox{},
-						Children: []declarative.Widget{
-							declarative.ProgressBar{
-								AssignTo: &progressBar,
-								MinValue: 0,
-								MaxValue: 100,
-							},
-						},
+			declarative.TabWidget{
+				Pages: []declarative.TabPage{
+					{
+						AssignTo: &clientTab.TabPage,
+						Title:    "客户端",
+						Layout:   declarative.VBox{},
 					},
 				},
 			},
 		},
 		StatusBarItems: []declarative.StatusBarItem{
 			{
-				Text:  "未连接",
-				Width: 200,
+				AssignTo: &clientTab.StatusBar,
+				Text:     "未连接",
+				Width:    200,
 			},
 		},
 	}.Create()); err != nil {
 		viewModel.LogError("创建窗口失败", err)
 		return err
 	}
+	if mainWindow == nil {
+		viewModel.LogError("主窗口为空", nil)
+		return fmt.Errorf("主窗口为空")
+	}
+	viewModel.LogDebug("主窗口创建成功")
 
 	// 初始化视图模型
+	viewModel.LogDebug("正在初始化视图模型")
 	if err := viewModel.Initialize(mainWindow); err != nil {
 		viewModel.LogError("初始化视图模型失败", err)
 		return err
 	}
+	viewModel.LogDebug("视图模型初始化成功")
 
-	// 设置UI控件引用
-	viewModel.SetUIControls(connectButton, disconnectButton, addressEdit, portEdit, progressBar)
+	// 设置客户端标签页的UI
+	viewModel.LogDebug("正在设置客户端标签页UI")
+	if err := clientTab.Setup(); err != nil {
+		viewModel.LogError("设置客户端标签页UI失败", err)
+		return err
+	}
+	viewModel.LogDebug("客户端标签页UI设置成功")
 
 	// 设置关闭事件处理
 	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
@@ -194,6 +191,20 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 	})
 
 	// 显示窗口
+	viewModel.LogDebug("正在显示主窗口")
 	mainWindow.Run()
 	return nil
+}
+
+// ShowError 显示错误对话框
+func ShowError(owner walk.Form, title string, err error) {
+	walk.MsgBox(owner, title,
+		fmt.Sprintf("发生错误: %v", err),
+		walk.MsgBoxIconError)
+}
+
+// ShowMessage 显示消息对话框
+func ShowMessage(owner walk.Form, title string, message string) {
+	walk.MsgBox(owner, title, message,
+		walk.MsgBoxIconInformation)
 }
