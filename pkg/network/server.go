@@ -38,24 +38,26 @@ import (
 
 // Server 网络服务器实现
 type Server struct {
-	config     *interfaces.Config
-	listener   net.Listener
-	clients    map[string]*Client
-	clientsMux sync.RWMutex
-	logger     interfaces.Logger
-	running    bool
-	status     string
-	networkOps interfaces.NetworkOperations
+	config      *interfaces.Config
+	syncService interfaces.SyncService
+	listener    net.Listener
+	clients     map[string]*Client
+	clientsMux  sync.RWMutex
+	logger      interfaces.Logger
+	running     bool
+	status      string
+	networkOps  interfaces.NetworkOperations
 }
 
 // NewServer 创建新的网络服务器
-func NewServer(config *interfaces.Config, logger interfaces.Logger) *Server {
+func NewServer(config *interfaces.Config, syncService interfaces.SyncService, logger interfaces.Logger) *Server {
 	return &Server{
-		config:     config,
-		clients:    make(map[string]*Client),
-		logger:     logger,
-		status:     "初始化",
-		networkOps: NewOperations(logger),
+		config:      config,
+		syncService: syncService,
+		clients:     make(map[string]*Client),
+		logger:      logger,
+		status:      "初始化",
+		networkOps:  NewOperations(logger),
 	}
 }
 
@@ -344,6 +346,114 @@ func (c *Client) handleMessage(msg *interfaces.Message) error {
 		}
 
 		return nil
+
+	case "sync_request":
+		// 处理同步请求
+		c.server.logger.Info("收到同步请求", interfaces.Fields{
+			"client": c.ID,
+		})
+
+		// 解析同步请求数据
+		var syncRequestData interfaces.SyncRequest
+		if err := json.Unmarshal(msg.Payload, &syncRequestData); err != nil {
+			c.server.logger.Error("解析同步请求失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+			})
+
+			// 准备错误响应
+			syncResponse := struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			}{
+				Success: false,
+				Error:   fmt.Sprintf("解析同步请求失败: %v", err),
+			}
+
+			// 序列化响应
+			payload, err := json.Marshal(syncResponse)
+			if err != nil {
+				return err
+			}
+
+			// 发送错误响应
+			response := &interfaces.Message{
+				Type:    "sync_response",
+				UUID:    c.UUID,
+				Payload: payload,
+			}
+
+			return c.server.networkOps.WriteJSON(c.conn, response)
+		}
+
+		// 处理同步请求
+		if err := c.server.syncService.HandleSyncRequest(&syncRequestData); err != nil {
+			c.server.logger.Error("处理同步请求失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+				"path":   syncRequestData.Path,
+			})
+
+			// 准备错误响应
+			syncResponse := struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			}{
+				Success: false,
+				Error:   err.Error(),
+			}
+
+			// 序列化响应
+			payload, err := json.Marshal(syncResponse)
+			if err != nil {
+				return err
+			}
+
+			// 发送错误响应
+			response := &interfaces.Message{
+				Type:    "sync_response",
+				UUID:    c.UUID,
+				Payload: payload,
+			}
+
+			return c.server.networkOps.WriteJSON(c.conn, response)
+		}
+
+		// 准备成功响应
+		syncResponse := struct {
+			Success bool `json:"success"`
+		}{
+			Success: true,
+		}
+
+		// 序列化响应
+		payload, err := json.Marshal(syncResponse)
+		if err != nil {
+			return err
+		}
+
+		// 发送成功响应
+		response := &interfaces.Message{
+			Type:    "sync_response",
+			UUID:    c.UUID,
+			Payload: payload,
+		}
+
+		if err := c.server.networkOps.WriteJSON(c.conn, response); err != nil {
+			c.server.logger.Error("发送同步响应失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+			})
+			return err
+		}
+
+		c.server.logger.Info("同步请求处理完成", interfaces.Fields{
+			"client": c.ID,
+			"path":   syncRequestData.Path,
+		})
+
+		return nil
+
 	case "heartbeat":
 		// 处理心跳消息
 		c.lastActivity = time.Now()
@@ -366,6 +476,7 @@ func (c *Client) handleMessage(msg *interfaces.Message) error {
 			"client": c.ID,
 		})
 		return nil
+
 	default:
 		return fmt.Errorf("未知的消息类型: %s", msg.Type)
 	}

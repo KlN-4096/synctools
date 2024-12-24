@@ -12,30 +12,23 @@ const (
 	ConfigTypeClient ConfigType = "client"
 )
 
-// SyncMode defines the synchronization mode
-type SyncMode string
-
-const (
-	// MirrorSync indicates mirror synchronization mode
-	MirrorSync SyncMode = "mirror"
-	// PackSync indicates pack synchronization mode
-	PackSync SyncMode = "pack"
-	// PushSync indicates push synchronization mode
-	PushSync SyncMode = "push"
-	// AutoSync indicates auto synchronization mode
-	AutoSync SyncMode = "auto"
-	// ManualSync indicates manual synchronization mode
-	ManualSync SyncMode = "manual"
-)
-
-// SyncDirection defines the synchronization direction
+// SyncDirection 同步方向
 type SyncDirection string
 
 const (
-	// Upload indicates upload direction
-	Upload SyncDirection = "upload"
-	// Download indicates download direction
-	Download SyncDirection = "download"
+	DirectionPush SyncDirection = "push" // 推送到服务器
+	DirectionPull SyncDirection = "pull" // 从服务器拉取
+)
+
+// SyncMode 同步模式
+type SyncMode string
+
+const (
+	AutoSync   SyncMode = "auto"   // 自动选择同步模式
+	MirrorSync SyncMode = "mirror" // 镜像同步
+	PushSync   SyncMode = "push"   // 推送同步
+	PackSync   SyncMode = "pack"   // 打包同步
+	ManualSync SyncMode = "manual" // 手动同步
 )
 
 // Config represents configuration information
@@ -122,6 +115,7 @@ type SyncRequest struct {
 	Direction SyncDirection `json:"direction"`       // 同步方向
 	Path      string        `json:"path"`            // 文件路径
 	Files     []string      `json:"files,omitempty"` // 文件列表
+	Storage   Storage       `json:"-"`               // 目标存储接口
 }
 
 // SyncResponse represents synchronization response

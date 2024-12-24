@@ -9,12 +9,17 @@
 package test
 
 import (
+	"bytes"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"synctools/internal/interfaces"
+	"synctools/internal/ui/client/viewmodels"
+	"synctools/pkg/network"
 	"synctools/pkg/service"
 	"synctools/pkg/storage"
 )
@@ -57,16 +62,16 @@ func TestSyncModes(t *testing.T) {
 		}
 	}
 
-	// 创建存储服务
-	fileStorage, err := storage.NewFileStorage(dstDir)
-	if err != nil {
-		t.Fatalf("创建文件存储失败: %v", err)
-	}
-
 	// 创建日志记录器
 	logger := &TestLogger{
 		t:     t,
 		level: interfaces.DEBUG,
+	}
+
+	// 创建存储服务
+	fileStorage, err := storage.NewFileStorage(dstDir, logger)
+	if err != nil {
+		t.Fatalf("创建文件存储失败: %v", err)
 	}
 
 	// 创建同步服务
@@ -193,16 +198,16 @@ func TestServiceStartStop(t *testing.T) {
 	testDir := filepath.Join(os.TempDir(), "synctools_test")
 	defer os.RemoveAll(testDir)
 
-	// 创建存储服务
-	fileStorage, err := storage.NewFileStorage(testDir)
-	if err != nil {
-		t.Fatalf("创建文件存储失败: %v", err)
-	}
-
 	// 创建日志记录器
 	logger := &TestLogger{
 		t:     t,
 		level: interfaces.DEBUG,
+	}
+
+	// 创建存储服务
+	fileStorage, err := storage.NewFileStorage(testDir, logger)
+	if err != nil {
+		t.Fatalf("创建文件存储失败: %v", err)
 	}
 
 	// 创建同步服务
@@ -239,6 +244,154 @@ func TestServiceStartStop(t *testing.T) {
 	}
 }
 
+// TestSyncWithConfig 测试带配置的同步功能
+func TestSyncWithConfig(t *testing.T) {
+	// 使用指定的测试目录
+	serverRoot := "G:\\test\\server"
+	clientRoot := "G:\\test\\client"
+
+	// 使用随机高端口
+	port := 50000 + rand.Intn(10000)
+
+	// 创建服务端配置
+	serverConfig := &interfaces.Config{
+		UUID:    "500a59d565c795e7d49d089836aff8ec",
+		Type:    "server",
+		Name:    "AA",
+		Version: "1.0.0",
+		Host:    "0.0.0.0",
+		Port:    port,
+		SyncDir: serverRoot,
+		SyncFolders: []interfaces.SyncFolder{
+			{
+				Path:     "aaa",
+				SyncMode: "mirror",
+				PackMD5:  "",
+			},
+			{
+				Path:     "bbb",
+				SyncMode: "mirror",
+				PackMD5:  "",
+			},
+		},
+		IgnoreList: []string{
+			".clientconfig",
+			".DS_Store",
+			"thumbs.db",
+		},
+		FolderRedirects: []interfaces.FolderRedirect{
+			{
+				ServerPath: "clientmods",
+				ClientPath: "mods",
+			},
+			{
+				ServerPath: "aaa",
+				ClientPath: "aaB",
+			},
+		},
+	}
+
+	// 创建客户端配置
+	clientConfig := &interfaces.Config{
+		UUID:    "default",
+		Type:    "client",
+		Name:    "SyncTools Client",
+		Version: "1.0.0",
+		Host:    "127.0.0.1",
+		Port:    port,
+		SyncDir: clientRoot,
+	}
+
+	// 创建测试文件
+	testFiles := map[string][]byte{
+		"aaa/test1.txt": []byte("test1 content"),
+		"aaa/test2.txt": []byte("test2 content"),
+		"bbb/test3.txt": []byte("test3 content"),
+		"bbb/test4.txt": []byte("test4 content"),
+	}
+
+	// 创建服务端目录结构和文件
+	for path, content := range testFiles {
+		fullPath := filepath.Join(serverRoot, path)
+		err := os.MkdirAll(filepath.Dir(fullPath), 0755)
+		if err != nil {
+			t.Fatalf("创建目录失败: %v", err)
+		}
+		err = os.WriteFile(fullPath, content, 0644)
+		if err != nil {
+			t.Fatalf("写入文件失败: %v", err)
+		}
+	}
+
+	// 创建日志记录器
+	logger := NewTestLogger(t)
+
+	// 创建存储接口
+	serverStorage, err := storage.NewFileStorage(serverRoot, logger)
+	if err != nil {
+		t.Fatalf("创建服务端存储失败: %v", err)
+	}
+	clientStorage, err := storage.NewFileStorage(clientRoot, logger)
+	if err != nil {
+		t.Fatalf("创建客户端存储失败: %v", err)
+	}
+
+	// 创建服务端同步服务
+	serverService := service.NewSyncService(serverConfig, logger, serverStorage)
+	if err := serverService.Start(); err != nil {
+		t.Fatalf("启动服务端服务失败: %v", err)
+	}
+	defer serverService.Stop()
+
+	// 启动服务端网络服务
+	if err := serverService.StartServer(); err != nil {
+		t.Fatalf("启动服务端网络服务失败: %v", err)
+	}
+
+	// 创建客户端同步服务
+	clientService := service.NewSyncService(clientConfig, logger, clientStorage)
+	if err := clientService.Start(); err != nil {
+		t.Fatalf("启动客户端服务失败: %v", err)
+	}
+	defer clientService.Stop()
+
+	// 创建同步请求
+	syncRequest := &interfaces.SyncRequest{
+		Path:    clientRoot,
+		Storage: clientStorage,
+	}
+
+	// 执行同步
+	if err := serverService.HandleSyncRequest(syncRequest); err != nil {
+		t.Fatalf("处理同步请求失败: %v", err)
+	}
+
+	// 验证同步结果
+	for path, expectedContent := range testFiles {
+		// 根据重定向规则调整路径
+		clientPath := path
+		for _, redirect := range serverConfig.FolderRedirects {
+			if strings.HasPrefix(path, redirect.ServerPath) {
+				clientPath = strings.Replace(path, redirect.ServerPath, redirect.ClientPath, 1)
+				break
+			}
+		}
+
+		// 检查文件是否存在
+		fullPath := filepath.Join(clientRoot, clientPath)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			t.Errorf("读取同步后的文件失败: %v", err)
+			continue
+		}
+
+		// 验证文件内容
+		if !bytes.Equal(content, expectedContent) {
+			t.Errorf("文件内容不匹配 path=%s\nexpected: %s\nactual: %s", clientPath, expectedContent, content)
+		}
+	}
+}
+
 // TestLogger 测试用的日志记录器
 type TestLogger struct {
 	t     *testing.T
@@ -246,23 +399,23 @@ type TestLogger struct {
 }
 
 func (l *TestLogger) Debug(msg string, fields interfaces.Fields) {
-	l.t.Logf("[DEBUG] %s %v", msg, fields)
+	l.t.Logf("[DEBUG] %s %+v", msg, fields)
 }
 
 func (l *TestLogger) Info(msg string, fields interfaces.Fields) {
-	l.t.Logf("[INFO] %s %v", msg, fields)
+	l.t.Logf("[INFO] %s %+v", msg, fields)
 }
 
 func (l *TestLogger) Warn(msg string, fields interfaces.Fields) {
-	l.t.Logf("[WARN] %s %v", msg, fields)
+	l.t.Logf("[WARN] %s %+v", msg, fields)
 }
 
 func (l *TestLogger) Error(msg string, fields interfaces.Fields) {
-	l.t.Logf("[ERROR] %s %v", msg, fields)
+	l.t.Logf("[ERROR] %s %+v", msg, fields)
 }
 
 func (l *TestLogger) Fatal(msg string, fields interfaces.Fields) {
-	l.t.Fatalf("[FATAL] %s %v", msg, fields)
+	l.t.Fatalf("[FATAL] %s %+v", msg, fields)
 }
 
 // GetLevel 获取日志级别
@@ -278,4 +431,336 @@ func (l *TestLogger) SetLevel(level interfaces.LogLevel) {
 // WithFields 返回带有字段的日志记录器
 func (l *TestLogger) WithFields(fields interfaces.Fields) interfaces.Logger {
 	return l
+}
+
+// NewTestLogger 创建用于测试的日志记录器
+func NewTestLogger(t *testing.T) interfaces.Logger {
+	return &TestLogger{
+		t:     t,
+		level: interfaces.INFO,
+	}
+}
+
+// TestSyncButton 测试点击同步按钮的逻辑
+func TestSyncButton(t *testing.T) {
+	// 创建测试目录
+	serverRoot := "G:\\test\\server"
+	clientRoot := "G:\\test\\client"
+
+	// 创建目录
+	if err := os.MkdirAll(serverRoot, 0755); err != nil {
+		t.Fatalf("创建服务器目录失败: %v", err)
+	}
+	if err := os.MkdirAll(clientRoot, 0755); err != nil {
+		t.Fatalf("创建客户端目录失败: %v", err)
+	}
+
+	// 创建测试文件
+	testFiles := map[string][]byte{
+		"aaa/test1.txt": []byte("test1 content"),
+		"aaa/test2.txt": []byte("test2 content"),
+		"bbb/test3.txt": []byte("test3 content"),
+		"bbb/test4.txt": []byte("test4 content"),
+	}
+
+	// 创建服务器端的文件
+	for path, content := range testFiles {
+		fullPath := filepath.Join(serverRoot, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("创建目录失败: %v", err)
+		}
+		if err := os.WriteFile(fullPath, content, 0644); err != nil {
+			t.Fatalf("写入文件失败: %v", err)
+		}
+	}
+
+	// 创建日志记录器
+	logger := NewTestLogger(t)
+
+	// 创建服务器端存储
+	serverStorage, err := storage.NewFileStorage(serverRoot, logger)
+	if err != nil {
+		t.Fatalf("创建服务器端存储失败: %v", err)
+	}
+
+	// 创建服务器端配置
+	serverConfig := &interfaces.Config{
+		UUID:    "AA",
+		Name:    "测试服务器",
+		Version: "1.0.0",
+		Host:    "0.0.0.0",
+		Port:    50108,
+		SyncDir: serverRoot,
+		SyncFolders: []interfaces.SyncFolder{
+			{
+				Path:     "aaa",
+				SyncMode: interfaces.MirrorSync,
+			},
+			{
+				Path:     "bbb",
+				SyncMode: interfaces.MirrorSync,
+			},
+		},
+		FolderRedirects: []interfaces.FolderRedirect{
+			{
+				ServerPath: "aaa",
+				ClientPath: "aaB",
+			},
+		},
+	}
+
+	// 创建服务器端同步服务
+	serverService := service.NewSyncService(serverConfig, logger, serverStorage)
+	if err := serverService.Start(); err != nil {
+		t.Fatalf("启动服务器端服务失败: %v", err)
+	}
+	defer serverService.Stop()
+
+	// 创建客户端配置
+	clientConfig := &interfaces.Config{
+		UUID:    "BB",
+		Name:    "测试客户端",
+		Version: "1.0.0",
+		Host:    "127.0.0.1",
+		Port:    50108,
+		SyncDir: clientRoot,
+	}
+
+	// 创建客户端存储
+	clientStorage, err := storage.NewFileStorage(clientRoot, logger)
+	if err != nil {
+		t.Fatalf("创建客户端存储失败: %v", err)
+	}
+
+	// 创建客户端同步服务
+	clientService := service.NewSyncService(clientConfig, logger, clientStorage)
+	if err := clientService.Start(); err != nil {
+		t.Fatalf("启动客户端服务失败: %v", err)
+	}
+	defer clientService.Stop()
+
+	// 创建同步请求
+	syncRequest := &interfaces.SyncRequest{
+		Path:    clientRoot,
+		Storage: clientStorage,
+	}
+
+	// 执行同步
+	if err := serverService.HandleSyncRequest(syncRequest); err != nil {
+		t.Fatalf("同步失败: %v", err)
+	}
+
+	// 验证同步结果
+	for path, expectedContent := range testFiles {
+		// 根据重定向规则调整路径
+		clientPath := path
+		for _, redirect := range serverConfig.FolderRedirects {
+			if strings.HasPrefix(path, redirect.ServerPath) {
+				clientPath = strings.Replace(path, redirect.ServerPath, redirect.ClientPath, 1)
+				break
+			}
+		}
+
+		// 检查文件是否存在
+		fullPath := filepath.Join(clientRoot, clientPath)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			t.Errorf("读取同步后的文件失败 %s: %v", fullPath, err)
+			continue
+		}
+
+		// 验证文件内容
+		if !bytes.Equal(content, expectedContent) {
+			t.Errorf("文件内容不匹配 %s: 期望 %s, 实际 %s", clientPath, expectedContent, content)
+		}
+	}
+
+	// 检查目录结构
+	expectedDirs := []string{
+		filepath.Join(clientRoot, "aaB"),
+		filepath.Join(clientRoot, "bbb"),
+	}
+
+	for _, dir := range expectedDirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			t.Errorf("目录不存在: %s", dir)
+		}
+	}
+}
+
+// TestStartSyncMethod 测试实际的StartSync方法
+func TestStartSyncMethod(t *testing.T) {
+	// 创建测试目录
+	serverRoot := "G:\\test\\server"
+	clientRoot := "G:\\test\\client"
+
+	// 创建目录
+	if err := os.MkdirAll(serverRoot, 0755); err != nil {
+		t.Fatalf("创建服务器目录失败: %v", err)
+	}
+	if err := os.MkdirAll(clientRoot, 0755); err != nil {
+		t.Fatalf("创建客户端目录失败: %v", err)
+	}
+
+	// 创建测试文件
+	testFiles := map[string][]byte{
+		"aaa/test1.txt": []byte("test1 content"),
+		"aaa/test2.txt": []byte("test2 content"),
+		"bbb/test3.txt": []byte("test3 content"),
+		"bbb/test4.txt": []byte("test4 content"),
+	}
+
+	// 创建服务器端的文件
+	for path, content := range testFiles {
+		fullPath := filepath.Join(serverRoot, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("创建目录失败: %v", err)
+		}
+		if err := os.WriteFile(fullPath, content, 0644); err != nil {
+			t.Fatalf("写入文件失败: %v", err)
+		}
+	}
+
+	// 创建日志记录器
+	logger := NewTestLogger(t)
+
+	// 创建服务器端存储
+	serverStorage, err := storage.NewFileStorage(serverRoot, logger)
+	if err != nil {
+		t.Fatalf("创建服务器端存储失败: %v", err)
+	}
+
+	// 检查服务器端文件列表
+	serverFiles, err := serverStorage.List()
+	if err != nil {
+		t.Fatalf("获取服务器端文件列表失败: %v", err)
+	}
+	t.Logf("服务器端文件列表: %v", serverFiles)
+
+	// 创建服务器端配置
+	serverConfig := &interfaces.Config{
+		UUID:    "AA",
+		Name:    "测试服务器",
+		Version: "1.0.0",
+		Host:    "0.0.0.0",
+		Port:    50108,
+		SyncDir: serverRoot,
+		SyncFolders: []interfaces.SyncFolder{
+			{
+				Path:     "aaa",
+				SyncMode: interfaces.MirrorSync,
+			},
+			{
+				Path:     "bbb",
+				SyncMode: interfaces.MirrorSync,
+			},
+		},
+		FolderRedirects: []interfaces.FolderRedirect{
+			{
+				ServerPath: "aaa",
+				ClientPath: "aaB",
+			},
+		},
+	}
+
+	// 创建服务器端同步服务
+	serverService := service.NewSyncService(serverConfig, logger, serverStorage)
+	if err := serverService.Start(); err != nil {
+		t.Fatalf("启动服务器端服务失败: %v", err)
+	}
+	defer serverService.Stop()
+
+	// 创建并启动网络服务
+	networkService := network.NewServer(serverConfig, serverService, logger)
+	if err := networkService.Start(); err != nil {
+		t.Fatalf("启动网络服务失败: %v", err)
+	}
+	defer networkService.Stop()
+
+	// 创建客户端配置
+	clientConfig := &interfaces.Config{
+		UUID:    "BB",
+		Name:    "测试客户端",
+		Version: "1.0.0",
+		Host:    "127.0.0.1",
+		Port:    50108,
+		SyncDir: clientRoot,
+	}
+
+	// 创建客户端存储
+	clientStorage, err := storage.NewFileStorage(clientRoot, logger)
+	if err != nil {
+		t.Fatalf("创建客户端存储失败: %v", err)
+	}
+
+	// 创建客户端同步服务
+	clientService := service.NewSyncService(clientConfig, logger, clientStorage)
+	if err := clientService.Start(); err != nil {
+		t.Fatalf("启动客户端服务失败: %v", err)
+	}
+	defer clientService.Stop()
+
+	// 创建视图模型
+	viewModel := viewmodels.NewMainViewModel(clientService, logger)
+
+	// 设置同步路径
+	viewModel.SetSyncPath(clientRoot)
+
+	// 连接到服务器
+	if err := viewModel.Connect(); err != nil {
+		t.Fatalf("连接服务器失败: %v", err)
+	}
+	defer viewModel.Disconnect()
+
+	// 执行StartSync方法
+	if err := viewModel.StartSync(); err != nil {
+		t.Fatalf("StartSync失败: %v", err)
+	}
+
+	// 等待同步完成
+	time.Sleep(time.Second)
+
+	// 检查客户端文件列表
+	clientFiles, err := clientStorage.List()
+	if err != nil {
+		t.Fatalf("获取客户端文件列表失败: %v", err)
+	}
+	t.Logf("客户端文件列表: %v", clientFiles)
+
+	// 验证同步结果
+	for path, expectedContent := range testFiles {
+		// 根据重定向规则调整路径
+		clientPath := path
+		for _, redirect := range serverConfig.FolderRedirects {
+			if strings.HasPrefix(path, redirect.ServerPath) {
+				clientPath = strings.Replace(path, redirect.ServerPath, redirect.ClientPath, 1)
+				break
+			}
+		}
+
+		// 检查文件是否存在
+		fullPath := filepath.Join(clientRoot, clientPath)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			t.Errorf("读取同步后的文件失败 %s: %v", fullPath, err)
+			continue
+		}
+
+		// 验证文件内容
+		if !bytes.Equal(content, expectedContent) {
+			t.Errorf("文件内容不匹配 %s: 期望 %s, 实际 %s", clientPath, expectedContent, content)
+		}
+	}
+
+	// 检查目录结构
+	expectedDirs := []string{
+		filepath.Join(clientRoot, "aaB"),
+		filepath.Join(clientRoot, "bbb"),
+	}
+
+	for _, dir := range expectedDirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			t.Errorf("目录不存在: %s", dir)
+		}
+	}
 }
