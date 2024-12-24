@@ -26,13 +26,14 @@ type ClientTab struct {
 	*walk.TabPage
 
 	// UI 组件
-	addressEdit      *walk.LineEdit
-	portEdit         *walk.LineEdit
-	connectButton    *walk.PushButton
-	disconnectButton *walk.PushButton
-	progressBar      *walk.ProgressBar
-	StatusBar        *walk.StatusBarItem
-	saveButton       *walk.PushButton
+	addressEdit   *walk.LineEdit
+	portEdit      *walk.LineEdit
+	syncPathEdit  *walk.LineEdit
+	browseButton  *walk.PushButton
+	connectButton *walk.PushButton // 合并后的连接/断开按钮
+	progressBar   *walk.ProgressBar
+	StatusBar     *walk.StatusBarItem
+	saveButton    *walk.PushButton
 
 	viewModel *viewmodels.MainViewModel
 }
@@ -71,6 +72,26 @@ func (t *ClientTab) Setup() error {
 									t.viewModel.SetServerPort(t.portEdit.Text())
 								},
 							},
+							Label{Text: "同步目录:"},
+							Composite{
+								Layout: HBox{Spacing: 5},
+								Children: []Widget{
+									LineEdit{
+										AssignTo: &t.syncPathEdit,
+										OnTextChanged: func() {
+											t.viewModel.SetSyncPath(t.syncPathEdit.Text())
+										},
+									},
+									PushButton{
+										AssignTo: &t.browseButton,
+										Text:     "浏览...",
+										MaxSize:  Size{Width: 60},
+										OnClicked: func() {
+											t.onBrowse()
+										},
+									},
+								},
+							},
 						},
 					},
 					Composite{
@@ -87,26 +108,10 @@ func (t *ClientTab) Setup() error {
 							},
 							PushButton{
 								AssignTo: &t.connectButton,
-								Text:     "连接",
+								Text:     "连接服务器",
 								MinSize:  Size{Width: 80},
 								OnClicked: func() {
-									if err := t.viewModel.Connect(); err != nil {
-										walk.MsgBox(t.Form(), "错误",
-											"连接服务器失败: "+err.Error(),
-											walk.MsgBoxIconError)
-									}
-								},
-							},
-							PushButton{
-								AssignTo: &t.disconnectButton,
-								Text:     "断开",
-								MinSize:  Size{Width: 80},
-								OnClicked: func() {
-									if err := t.viewModel.Disconnect(); err != nil {
-										walk.MsgBox(t.Form(), "错误",
-											"断开连接失败: "+err.Error(),
-											walk.MsgBoxIconError)
-									}
+									t.onConnectOrDisconnect()
 								},
 							},
 						},
@@ -130,7 +135,7 @@ func (t *ClientTab) Setup() error {
 	}
 
 	// 设置UI控件引用
-	t.viewModel.SetUIControls(t.connectButton, t.disconnectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton)
+	t.viewModel.SetUIControls(t.connectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton, t.syncPathEdit)
 
 	// 设置UI更新回调
 	t.viewModel.SetUIUpdateCallback(t.UpdateUI)
@@ -150,6 +155,34 @@ func (t *ClientTab) onSave() {
 	walk.MsgBox(t.Form(), "提示", "配置已保存", walk.MsgBoxIconInformation)
 }
 
+// onBrowse 处理浏览按钮点击
+func (t *ClientTab) onBrowse() {
+	dlg := new(walk.FileDialog)
+	dlg.Title = "选择同步目录"
+	dlg.FilePath = t.syncPathEdit.Text()
+
+	if ok, err := dlg.ShowBrowseFolder(t.Form()); err != nil {
+		walk.MsgBox(t.Form(), "错误", "选择目录失败: "+err.Error(), walk.MsgBoxIconError)
+	} else if ok {
+		t.syncPathEdit.SetText(dlg.FilePath)
+	}
+}
+
+// onConnectOrDisconnect 处理连接/断开按钮点击
+func (t *ClientTab) onConnectOrDisconnect() {
+	if t.viewModel.IsConnected() {
+		// 当前已连接，执行断开操作
+		if err := t.viewModel.Disconnect(); err != nil {
+			walk.MsgBox(t.Form(), "错误", "断开连接失败: "+err.Error(), walk.MsgBoxIconError)
+		}
+	} else {
+		// 当前未连接，执行连接操作
+		if err := t.viewModel.Connect(); err != nil {
+			walk.MsgBox(t.Form(), "错误", "连接服务器失败: "+err.Error(), walk.MsgBoxIconError)
+		}
+	}
+}
+
 // Activating 实现 walk.Form 接口
 func (t *ClientTab) Activating() bool {
 	return true
@@ -164,17 +197,24 @@ func (t *ClientTab) UpdateUI() {
 	if t.portEdit != nil {
 		t.portEdit.SetText(t.viewModel.GetServerPort())
 	}
+	if t.syncPathEdit != nil {
+		t.syncPathEdit.SetText(t.viewModel.GetSyncPath())
+	}
 
 	// 更新按钮状态
 	isConnected := t.viewModel.IsConnected()
 	if t.connectButton != nil {
-		t.connectButton.SetEnabled(!isConnected)
-	}
-	if t.disconnectButton != nil {
-		t.disconnectButton.SetEnabled(isConnected)
+		if isConnected {
+			t.connectButton.SetText("断开连接")
+		} else {
+			t.connectButton.SetText("连接服务器")
+		}
 	}
 	if t.saveButton != nil {
 		t.saveButton.SetEnabled(!isConnected)
+	}
+	if t.browseButton != nil {
+		t.browseButton.SetEnabled(!isConnected)
 	}
 
 	// 更新输入框状态
@@ -183,6 +223,9 @@ func (t *ClientTab) UpdateUI() {
 	}
 	if t.portEdit != nil {
 		t.portEdit.SetEnabled(!isConnected)
+	}
+	if t.syncPathEdit != nil {
+		t.syncPathEdit.SetEnabled(!isConnected)
 	}
 
 	// 更新状态栏

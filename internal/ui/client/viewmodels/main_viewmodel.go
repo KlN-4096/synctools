@@ -32,6 +32,7 @@ type MainViewModel struct {
 	connected   bool
 	serverAddr  string
 	serverPort  string
+	syncPath    string // 新增：同步目录路径
 
 	// UI 组件
 	connectButton    *walk.PushButton
@@ -40,6 +41,7 @@ type MainViewModel struct {
 	portEdit         *walk.LineEdit
 	progressBar      *walk.ProgressBar
 	saveButton       *walk.PushButton
+	syncPathEdit     *walk.LineEdit // 新增：同步目录输入框
 
 	// 网络连接
 	conn       net.Conn
@@ -57,6 +59,7 @@ func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logg
 		connected:   false,
 		serverAddr:  "localhost",
 		serverPort:  "9527",
+		syncPath:    "", // 默认为空
 		networkOps:  network.NewOperations(logger),
 	}
 
@@ -65,12 +68,17 @@ func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logg
 		if config := syncService.GetCurrentConfig(); config != nil {
 			vm.serverAddr = config.Host
 			vm.serverPort = fmt.Sprintf("%d", config.Port)
+			// 如果有重定向配置，使用第一个作为默认同步路径
+			if len(config.FolderRedirects) > 0 {
+				vm.syncPath = config.FolderRedirects[0].ClientPath
+			}
 		}
 	}
 
 	vm.logger.Debug("创建主视图模型", interfaces.Fields{
 		"defaultAddr": vm.serverAddr,
 		"defaultPort": vm.serverPort,
+		"syncPath":    vm.syncPath,
 	})
 	return vm
 }
@@ -138,13 +146,13 @@ func (vm *MainViewModel) GetServerPort() string {
 }
 
 // SetUIControls 设置UI控件引用
-func (vm *MainViewModel) SetUIControls(connectBtn, disconnectBtn *walk.PushButton, addrEdit, portEdit *walk.LineEdit, progress *walk.ProgressBar, saveBtn *walk.PushButton) {
+func (vm *MainViewModel) SetUIControls(connectBtn *walk.PushButton, addrEdit, portEdit *walk.LineEdit, progress *walk.ProgressBar, saveBtn *walk.PushButton, syncPathEdit *walk.LineEdit) {
 	vm.connectButton = connectBtn
-	vm.disconnectButton = disconnectBtn
 	vm.addressEdit = addrEdit
 	vm.portEdit = portEdit
 	vm.progressBar = progress
 	vm.saveButton = saveBtn
+	vm.syncPathEdit = syncPathEdit
 	vm.updateUIState()
 }
 
@@ -328,22 +336,29 @@ func (vm *MainViewModel) SaveConfig() error {
 	// 保存原始值
 	originalHost := config.Host
 	originalPort := config.Port
+	originalSyncPath := ""
+	if len(config.FolderRedirects) > 0 {
+		originalSyncPath = config.FolderRedirects[0].ClientPath
+	}
 
 	// 更新配置
 	newPort := vm.parsePort()
 
 	vm.logger.Debug("检查配置变更", interfaces.Fields{
-		"originalHost": originalHost,
-		"newHost":      vm.serverAddr,
-		"originalPort": originalPort,
-		"newPort":      newPort,
+		"originalHost":     originalHost,
+		"newHost":          vm.serverAddr,
+		"originalPort":     originalPort,
+		"newPort":          newPort,
+		"originalSyncPath": originalSyncPath,
+		"newSyncPath":      vm.syncPath,
 	})
 
 	// 检查是否有变更
-	if originalHost == vm.serverAddr && originalPort == newPort {
+	if originalHost == vm.serverAddr && originalPort == newPort && originalSyncPath == vm.syncPath {
 		vm.logger.Debug("配置未发生变化，无需保存", interfaces.Fields{
-			"host": originalHost,
-			"port": originalPort,
+			"host":     originalHost,
+			"port":     originalPort,
+			"syncPath": originalSyncPath,
 		})
 		return nil
 	}
@@ -351,6 +366,22 @@ func (vm *MainViewModel) SaveConfig() error {
 	// 更新配置
 	config.Host = vm.serverAddr
 	config.Port = newPort
+
+	// 更新重定向配置
+	if vm.syncPath != "" {
+		if len(config.FolderRedirects) == 0 {
+			// 如果没有重定向配置，创建一个新的
+			config.FolderRedirects = []interfaces.FolderRedirect{
+				{
+					ServerPath: "/", // 使用根路径作为服务器路径
+					ClientPath: vm.syncPath,
+				},
+			}
+		} else {
+			// 更新第一个重定向配置
+			config.FolderRedirects[0].ClientPath = vm.syncPath
+		}
+	}
 
 	// 保存配置
 	if err := vm.syncService.SaveConfig(config); err != nil {
@@ -361,8 +392,9 @@ func (vm *MainViewModel) SaveConfig() error {
 	}
 
 	vm.logger.Info("配置已保存", interfaces.Fields{
-		"host": config.Host,
-		"port": config.Port,
+		"host":     config.Host,
+		"port":     config.Port,
+		"syncPath": vm.syncPath,
 	})
 
 	return nil
@@ -386,4 +418,18 @@ func (vm *MainViewModel) parsePort() int {
 		port = 9527 // 默认端口
 	}
 	return port
+}
+
+// SetSyncPath 设置同步路径
+func (vm *MainViewModel) SetSyncPath(path string) {
+	vm.logger.Debug("设置同步路径", interfaces.Fields{
+		"oldPath": vm.syncPath,
+		"newPath": path,
+	})
+	vm.syncPath = path
+}
+
+// GetSyncPath 获取同步路径
+func (vm *MainViewModel) GetSyncPath() string {
+	return vm.syncPath
 }
