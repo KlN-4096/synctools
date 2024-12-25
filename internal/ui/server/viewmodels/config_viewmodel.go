@@ -69,7 +69,7 @@ type ConfigViewModel struct {
 
 	// UI 状态
 	isEditing     bool
-	serverRunning bool // 添加服务器状态标志
+	serverRunning bool // 服务器运行状态标志
 
 	// UI 组件
 	window          *walk.MainWindow
@@ -169,6 +169,7 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.ignoreEdit = ignoreEdit
 	vm.startServerButton = startServerButton
 	vm.saveButton = saveButton
+	vm.window = startServerButton.Form().(*walk.MainWindow)
 
 	// 检查服务器初始状态
 	if vm.syncService != nil {
@@ -409,12 +410,18 @@ func (vm *ConfigViewModel) updateButtonStates() {
 	// 在UI线程中更新按钮状态
 	if vm.window != nil {
 		vm.window.Synchronize(func() {
-			if vm.serverRunning {
+			// 再次检查服务器状态
+			isRunning := vm.syncService.IsRunning()
+
+			if isRunning {
 				vm.startServerButton.SetText("停止服务器")
 			} else {
 				vm.startServerButton.SetText("启动服务器")
 			}
 			vm.startServerButton.SetEnabled(true)
+
+			// 更新内部状态
+			vm.serverRunning = isRunning
 		})
 	}
 }
@@ -441,11 +448,23 @@ func (vm *ConfigViewModel) StartServer() error {
 
 	if err := vm.syncService.StartServer(); err != nil {
 		vm.setStatus("启动服务器失败")
+		vm.serverRunning = false
 		vm.updateButtonStates()
 		return err
 	}
 
-	vm.serverRunning = true // 设置状态
+	// 等待服务器完全启动
+	time.Sleep(100 * time.Millisecond)
+
+	// 检查服务器状态
+	if vm.syncService.GetNetworkServer() == nil || !vm.syncService.GetNetworkServer().IsRunning() {
+		vm.setStatus("服务器启动失败")
+		vm.serverRunning = false
+		vm.updateButtonStates()
+		return fmt.Errorf("服务器启动失败")
+	}
+
+	vm.serverRunning = true
 	vm.setStatus("服务器已启动")
 	vm.updateButtonStates()
 	return nil
@@ -463,7 +482,18 @@ func (vm *ConfigViewModel) StopServer() error {
 		return err
 	}
 
-	vm.serverRunning = false // 设置状态
+	// 等待服务器完全停止
+	time.Sleep(100 * time.Millisecond)
+
+	// 检查服务器状态
+	if vm.syncService.GetNetworkServer() != nil && vm.syncService.GetNetworkServer().IsRunning() {
+		vm.setStatus("服务器停止失败")
+		vm.serverRunning = true
+		vm.updateButtonStates()
+		return fmt.Errorf("服务器停止失败")
+	}
+
+	vm.serverRunning = false
 	vm.setStatus("服务器已停止")
 	vm.updateButtonStates()
 	return nil
@@ -1120,6 +1150,9 @@ func (vm *ConfigViewModel) IsServerRunning() bool {
 	if vm == nil || vm.syncService == nil {
 		return false
 	}
-	// 使用本地状态标志
-	return vm.serverRunning
+	// 同时检查 syncService 和 networkServer 的状态
+	isRunning := vm.syncService.IsRunning() && vm.syncService.GetNetworkServer() != nil && vm.syncService.GetNetworkServer().IsRunning()
+	// 更新内部状态
+	vm.serverRunning = isRunning
+	return isRunning
 }
