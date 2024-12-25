@@ -315,7 +315,7 @@ func (vm *MainViewModel) Connect() error {
 
 // heartbeat 发送心跳包保持连接
 func (vm *MainViewModel) heartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(20 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -326,7 +326,7 @@ func (vm *MainViewModel) heartbeat() {
 			}
 
 			// 设置写入超时
-			vm.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			vm.conn.SetWriteDeadline(time.Now().Add(5 * time.Minute))
 
 			heartbeatMsg := &interfaces.Message{
 				Type: "heartbeat",
@@ -342,7 +342,7 @@ func (vm *MainViewModel) heartbeat() {
 			}
 
 			// 设置读取超时
-			vm.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			vm.conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 
 			// 等待心跳响应
 			var response interfaces.Message

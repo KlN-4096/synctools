@@ -1,0 +1,15 @@
+// 1. 文件存储路径设置
+// 在 client_viewmodel.go 中，同步请求时使用了用户选择的路径作为存储路径：
+storage, err := storage.NewFileStorage(path, vm.logger)
+syncRequest := &interfaces.SyncRequest{
+    Path:    path,
+    Storage: storage,
+}
+
+// 2. 存储服务实现
+// 在 file_storage.go 中，FileStorage 的实现会将文件保存到 baseDir 目录下：
+filePath := filepath.Join(s.baseDir, key)
+
+// 3. 配置文件加载
+// 在 main.go 中，配置文件默认从 configs 目录加载：
+configsDir := filepath.Join(baseDir, "configs") 

@@ -299,15 +299,6 @@ func (s *SyncService) handleFileSync(file string, info *interfaces.FileInfo, mod
 		"fullDir":   targetFullDir,
 	})
 
-	// 检查目标路径是否在配置文件夹中
-	configDir := filepath.Join(targetBaseDir, "configs")
-	if strings.HasPrefix(targetFullDir, configDir) {
-		s.logger.Debug("跳过配置文件夹中的文件", interfaces.Fields{
-			"path": targetFullDir,
-		})
-		return nil
-	}
-
 	if err := os.MkdirAll(targetFullDir, 0755); err != nil {
 		s.logger.Error("创建目标目录失败", interfaces.Fields{
 			"dir":   targetFullDir,

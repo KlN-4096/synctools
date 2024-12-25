@@ -246,13 +246,13 @@ func NewClient(conn net.Conn, server *Server) *Client {
 
 // checkTimeout 检查客户端是否超时
 func (c *Client) checkTimeout() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			if time.Since(c.lastActivity) > 90*time.Second {
+			if time.Since(c.lastActivity) > 40*time.Minute {
 				c.server.logger.Warn("客户端超时", interfaces.Fields{
 					"client":       c.ID,
 					"lastActivity": c.lastActivity,

@@ -1,6 +1,19 @@
 # SyncTools 代码库说明
 
+## 项目概述
+SyncTools是一个基于Go语言开发的文件同步工具，采用客户端-服务器架构，具有图形用户界面。项目致力于提供高效、可靠的文件同步解决方案。
+
 ## 项目结构
+
+### 根目录文件
+- `go.mod`: Go项目依赖管理文件
+- `go.sum`: Go项目依赖版本锁定文件
+- `README.md`: 项目说明文档
+- `LICENSE`: 项目许可证
+- `client.exe`: 客户端可执行文件
+- `server.exe`: 服务端可执行文件
+- `app.manifest`: 应用程序清单文件
+- `CODEBASE.md`: 代码库说明文档
 
 ### cmd/ - 入口程序
 #### client/main.go
@@ -50,13 +63,19 @@
 - **types.go**: 定义共享数据类型
 
 #### ui/ - 用户界面
-- **main_window.go**: 主窗口实现
-- **viewmodels/**: 视图模型实现
-  - config_viewmodel.go: 配置视图模型
-  - main_viewmodel.go: 主视图模型
-  - interfaces.go: 视图模型接口
-- **views/**: 视图实现
-  - config_tab.go: 配置标签页
+##### client/ - 客户端UI
+- **views/client_tab.go**: 客户端主界面实现
+- **viewmodels/client_viewmodel.go**: 客户端视图模型
+- **windows/client_window.go**: 客户端窗口管理
+
+##### server/ - 服务端UI
+- **views/config_tab.go**: 服务端配置界面
+- **viewmodels/server_viewmodel.go**: 服务端视图模型
+- **viewmodels/config_viewmodel.go**: 配置视图模型
+- **windows/server_window.go**: 服务端窗口管理
+
+##### common/ - 公共UI组件
+- **logger/adapter.go**: 日志适配器
 
 ### pkg/ - 可重用包
 
@@ -104,6 +123,13 @@
 #### storage/ - 存储实现
 - **file_storage.go**: 文件存储实现
 - **file_utils.go**: 文件操作工具
+
+### configs/ - 配置文件
+- `default.json`: 默认配置文件
+- `*.json`: 用户配置文件
+
+### logs/ - 日志文件
+- `sync_*.log`: 同步操作日志文件
 
 ## 架构设计
 
@@ -226,3 +252,43 @@ graph TB
 1. 使用适当的日志级别
 2. 包含上下文信息
 3. 避免敏感信息
+
+## 技术栈
+
+### 核心技术
+- 语言：Go
+- GUI框架：walk
+- 网络：标准库net包
+- 存储：文件系统操作
+- 日志：结构化日志
+- 配置：JSON配置文件
+
+### 开发工具
+- IDE：支持Go的任意IDE
+- 构建工具：Go build
+- 依赖管理：Go modules
+- 版本控制：Git
+
+## 部署说明
+
+### 环境要求
+- Go 1.16+
+- Windows 7/10/11
+- 足够的磁盘空间用于文件同步
+
+### 构建步骤
+1. 克隆代码库
+2. 安装依赖：`go mod download`
+3. 构建客户端：`go build cmd/client/main.go`
+4. 构建服务端：`go build cmd/server/main.go`
+
+### 配置说明
+1. 默认配置文件位于 `configs/default.json`
+2. 可通过命令行参数指定配置文件
+3. 支持运行时修改配置
+
+### 运行说明
+1. 启动服务端：`server.exe`
+2. 启动客户端：`client.exe`
+3. 配置同步参数
+4. 开始同步操作
