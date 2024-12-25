@@ -2,6 +2,20 @@ package interfaces
 
 import "encoding/json"
 
+// LogLevel 定义日志级别
+type LogLevel int
+
+const (
+	DEBUG LogLevel = iota
+	INFO
+	WARN
+	ERROR
+	FATAL
+)
+
+// Fields 定义日志字段类型
+type Fields map[string]interface{}
+
 // ConfigType 配置类型
 type ConfigType string
 
