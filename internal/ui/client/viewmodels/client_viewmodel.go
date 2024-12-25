@@ -572,9 +572,14 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 
 	// 准备同步请求数据
 	syncRequestData := struct {
-		Path string `json:"path"`
+		Path      string   `json:"path"`
+		Mode      string   `json:"mode"`
+		Direction string   `json:"direction"`
+		Files     []string `json:"files,omitempty"`
 	}{
-		Path: path,
+		Path:      path,
+		Mode:      "mirror", // 默认使用镜像模式
+		Direction: "upload", // 默认上传到服务器
 	}
 
 	// 序列化请求数据
@@ -635,15 +640,6 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 			"error": syncResponse.Error,
 		})
 		return fmt.Errorf("同步失败: %s", syncResponse.Error)
-	}
-
-	// 调用同步服务进行同步
-	if err := vm.syncService.SyncFiles(path); err != nil {
-		vm.logger.Error("同步失败", interfaces.Fields{
-			"path":  path,
-			"error": err,
-		})
-		return fmt.Errorf("同步失败: %v", err)
 	}
 
 	vm.logger.Info("同步完成", interfaces.Fields{

@@ -34,6 +34,7 @@ import (
 
 	"synctools/internal/interfaces"
 	"synctools/pkg/errors"
+	"synctools/pkg/storage"
 )
 
 // Server 网络服务器实现
@@ -354,7 +355,12 @@ func (c *Client) handleMessage(msg *interfaces.Message) error {
 		})
 
 		// 解析同步请求数据
-		var syncRequestData interfaces.SyncRequest
+		var syncRequestData struct {
+			Path      string   `json:"path"`
+			Mode      string   `json:"mode"`
+			Direction string   `json:"direction"`
+			Files     []string `json:"files,omitempty"`
+		}
 		if err := json.Unmarshal(msg.Payload, &syncRequestData); err != nil {
 			c.server.logger.Error("解析同步请求失败", interfaces.Fields{
 				"error":  err,
@@ -386,8 +392,51 @@ func (c *Client) handleMessage(msg *interfaces.Message) error {
 			return c.server.networkOps.WriteJSON(c.conn, response)
 		}
 
+		// 为目标路径创建存储实例
+		targetStorage, err := storage.NewFileStorage(syncRequestData.Path, c.server.logger)
+		if err != nil {
+			c.server.logger.Error("创建存储实例失败", interfaces.Fields{
+				"error":  err,
+				"client": c.ID,
+				"path":   syncRequestData.Path,
+			})
+
+			// 准备错误响应
+			syncResponse := struct {
+				Success bool   `json:"success"`
+				Error   string `json:"error"`
+			}{
+				Success: false,
+				Error:   fmt.Sprintf("创建存储实例失败: %v", err),
+			}
+
+			// 序列化响应
+			payload, err := json.Marshal(syncResponse)
+			if err != nil {
+				return err
+			}
+
+			// 发送错误响应
+			response := &interfaces.Message{
+				Type:    "sync_response",
+				UUID:    c.UUID,
+				Payload: payload,
+			}
+
+			return c.server.networkOps.WriteJSON(c.conn, response)
+		}
+
+		// 创建完整的同步请求
+		fullSyncRequest := &interfaces.SyncRequest{
+			Path:      syncRequestData.Path,
+			Mode:      interfaces.SyncMode(syncRequestData.Mode),
+			Direction: interfaces.SyncDirection(syncRequestData.Direction),
+			Files:     syncRequestData.Files,
+			Storage:   targetStorage,
+		}
+
 		// 处理同步请求
-		if err := c.server.syncService.HandleSyncRequest(&syncRequestData); err != nil {
+		if err := c.server.syncService.HandleSyncRequest(fullSyncRequest); err != nil {
 			c.server.logger.Error("处理同步请求失败", interfaces.Fields{
 				"error":  err,
 				"client": c.ID,
