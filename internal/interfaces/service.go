@@ -12,6 +12,7 @@ type SyncService interface {
 	StartServer() error
 	StopServer() error
 	SetServer(server NetworkServer)
+	GetNetworkServer() NetworkServer
 
 	// 同步操作
 	SyncFiles(path string) error

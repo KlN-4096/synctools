@@ -17,6 +17,7 @@ package viewmodels
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -172,10 +173,46 @@ func (vm *MainViewModel) updateUIState() {
 
 	vm.logger.Debug("开始更新UI状态", interfaces.Fields{
 		"isConnected": vm.connected,
+		"hasConn":     vm.conn != nil,
 	})
 
 	// 在UI线程中执行
 	vm.window.Synchronize(func() {
+		// 更新连接按钮状态
+		if vm.connectButton != nil {
+			if vm.connected {
+				vm.connectButton.SetText("断开连接")
+				vm.connectButton.SetEnabled(true)
+			} else {
+				vm.connectButton.SetText("连接服务器")
+				vm.connectButton.SetEnabled(true)
+			}
+		}
+
+		// 更新输入框状态
+		if vm.addressEdit != nil {
+			vm.addressEdit.SetEnabled(!vm.connected)
+		}
+		if vm.portEdit != nil {
+			vm.portEdit.SetEnabled(!vm.connected)
+		}
+		if vm.syncPathEdit != nil {
+			vm.syncPathEdit.SetEnabled(!vm.connected)
+		}
+
+		// 更新保存按钮状态
+		if vm.saveButton != nil {
+			vm.saveButton.SetEnabled(!vm.connected)
+		}
+
+		// 更新进度条状态
+		if vm.progressBar != nil {
+			if !vm.connected {
+				vm.progressBar.SetValue(0)
+			}
+		}
+
+		// 调用自定义UI更新回调
 		if vm.onUIUpdate != nil {
 			vm.onUIUpdate()
 		}
@@ -229,11 +266,14 @@ func (vm *MainViewModel) Connect() error {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
+	vm.conn = conn
+
+	// 启动连接监听协程
+	go vm.monitorConnection()
+
 	// 设置读写超时
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-
-	vm.conn = conn
 
 	// 发送初始化消息
 	initMsg := &interfaces.Message{
@@ -310,6 +350,48 @@ func (vm *MainViewModel) Connect() error {
 	return nil
 }
 
+// monitorConnection 监听连接状态
+func (vm *MainViewModel) monitorConnection() {
+	for {
+		if !vm.connected || vm.conn == nil {
+			return
+		}
+
+		// 创建一个临时的缓冲区用于测试连接
+		tmp := make([]byte, 1)
+
+		// 设置读取超时
+		vm.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+
+		// 尝试读取数据（不会实际读取任何数据，只是测试连接是否断开）
+		if _, err := vm.conn.Read(tmp); err != nil {
+			if err == io.EOF || isTimeout(err) {
+				vm.logger.Warn("连接已断开", interfaces.Fields{
+					"error": err,
+				})
+				// 在UI线程中执行断开操作
+				vm.window.Synchronize(func() {
+					vm.Disconnect()
+				})
+				return
+			}
+			// 如果是超时错误，继续监听
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue
+			}
+		}
+	}
+}
+
+// isTimeout 判断错误是否为超时错误
+func isTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	netErr, ok := err.(net.Error)
+	return ok && netErr.Timeout()
+}
+
 // Disconnect 断开服务器连接
 func (vm *MainViewModel) Disconnect() error {
 	vm.logger.Debug("开始断开服务器连接", interfaces.Fields{
@@ -333,6 +415,10 @@ func (vm *MainViewModel) Disconnect() error {
 			vm.logger.Error("关闭连接失败", interfaces.Fields{
 				"error": err,
 			})
+			// 即使关闭失败，也要更新状态
+			vm.connected = false
+			vm.conn = nil
+			vm.updateUIState()
 			return fmt.Errorf("关闭连接失败: %v", err)
 		}
 		vm.conn = nil

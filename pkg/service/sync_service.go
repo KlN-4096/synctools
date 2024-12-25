@@ -91,59 +91,50 @@ func (s *SyncService) Start() error {
 
 // StartServer 启动网络服务器
 func (s *SyncService) StartServer() error {
-	// 如果服务未运行，先启动服务
-	if !s.running {
-		if err := s.Start(); err != nil {
-			return err
-		}
+	s.logger.Info("服务操作", interfaces.Fields{
+		"action": "start_server",
+	})
+
+	if s.server == nil {
+		s.logger.Debug("创建网络服务器", interfaces.Fields{})
+		s.server = network.NewServer(s.config, s, s.logger)
 	}
 
-	// 创建新的网络服务器实例
-	s.server = network.NewServer(s.config, s, s.logger)
-
-	// 启动网络服务器
 	if err := s.server.Start(); err != nil {
-		s.logger.Error("服务操作失败", interfaces.Fields{
-			"operation": "start_server",
-			"error":     err,
+		s.running = false // 启动失败时设置状态
+		s.logger.Error("启动服务器失败", interfaces.Fields{
+			"error": err,
 		})
 		return err
 	}
 
-	s.setStatus("服务器运行中")
-	s.logger.Info("服务状态变更", interfaces.Fields{
-		"status": "started",
-		"type":   "network",
-		"host":   s.config.Host,
-		"port":   s.config.Port,
-	})
-
+	s.running = true // 启动成功时设置状态
+	s.logger.Info("服务器已启动", interfaces.Fields{})
 	return nil
 }
 
 // StopServer 停止网络服务器
 func (s *SyncService) StopServer() error {
+	s.logger.Info("服务操作", interfaces.Fields{
+		"action": "stop_server",
+	})
+
 	if s.server == nil {
+		s.running = false // 没有服务器实例时设置状态
+		s.logger.Debug("服务器未启动", interfaces.Fields{})
 		return nil
 	}
 
-	// 停止网络服务器
 	if err := s.server.Stop(); err != nil {
-		s.logger.Error("服务操作失败", interfaces.Fields{
-			"operation": "stop_server",
-			"error":     err,
+		s.logger.Error("停止服务器失败", interfaces.Fields{
+			"error": err,
 		})
 		return err
 	}
 
-	// 清理服务器实例
 	s.server = nil
-	s.setStatus("服务器已停止")
-	s.logger.Info("服务状态变更", interfaces.Fields{
-		"status": "stopped",
-		"type":   "network",
-	})
-
+	s.running = false // 停止成功时设置状态
+	s.logger.Info("服务器已停止", interfaces.Fields{})
 	return nil
 }
 
@@ -1085,4 +1076,9 @@ func (s *SyncService) SetServer(server interfaces.NetworkServer) {
 		s.StopServer()
 	}
 	s.server = server
+}
+
+// GetNetworkServer 获取网络服务器实例
+func (s *SyncService) GetNetworkServer() interfaces.NetworkServer {
+	return s.server
 }

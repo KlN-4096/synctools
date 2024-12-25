@@ -68,7 +68,8 @@ type ConfigViewModel struct {
 	logger      ViewModelLogger
 
 	// UI 状态
-	isEditing bool
+	isEditing     bool
+	serverRunning bool // 添加服务器状态标志
 
 	// UI 组件
 	window          *walk.MainWindow
@@ -260,6 +261,16 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 更新按钮状态
 	vm.updateButtonStates()
+
+	// 更新状态栏
+	if vm.statusBar != nil {
+		if vm.serverRunning {
+			vm.setStatus("服务器运行中")
+		} else {
+			vm.setStatus("服务器已停止")
+		}
+	}
+
 	vm.logger.Debug("UI组件更新完成", nil)
 }
 
@@ -387,27 +398,24 @@ func (vm *ConfigViewModel) getIgnoreListFromUI() []string {
 
 // updateButtonStates 更新按钮状态
 func (vm *ConfigViewModel) updateButtonStates() {
-	vm.logger.Debug("UI操作", interfaces.Fields{
-		"action":         "update_buttons",
-		"server_running": vm.syncService.IsRunning(),
-	})
-
-	if vm.startServerButton != nil {
-		if vm.syncService.IsRunning() {
-			vm.startServerButton.SetText("停止服务器")
-		} else {
-			vm.startServerButton.SetText("启动服务器")
-		}
-		vm.startServerButton.SetEnabled(true)
-	} else {
-		vm.logger.Warn("UI状态", interfaces.Fields{
-			"component": "server_button",
-			"status":    "empty",
-		})
+	if vm.startServerButton == nil {
+		return
 	}
 
-	if vm.saveButton != nil {
-		vm.saveButton.SetEnabled(!vm.isEditing)
+	vm.logger.Debug("更新服务器按钮状态", interfaces.Fields{
+		"isRunning": vm.serverRunning,
+	})
+
+	// 在UI线程中更新按钮状态
+	if vm.window != nil {
+		vm.window.Synchronize(func() {
+			if vm.serverRunning {
+				vm.startServerButton.SetText("停止服务器")
+			} else {
+				vm.startServerButton.SetText("启动服务器")
+			}
+			vm.startServerButton.SetEnabled(true)
+		})
 	}
 }
 
@@ -427,69 +435,37 @@ func (vm *ConfigViewModel) setStatus(status string) {
 
 // StartServer 处理启动服务器的 UI 操作
 func (vm *ConfigViewModel) StartServer() error {
-	// 安全检查
-	if vm == nil || vm.syncService == nil {
-		return fmt.Errorf("视图模型或同步服务未初始化")
-	}
+	vm.logger.Info("服务器操作", interfaces.Fields{
+		"action": "start",
+	})
 
-	// 检查是否有选中的配置
-	if vm.syncService.GetCurrentConfig() == nil {
-		vm.setStatus("没有选中的配置")
-		return fmt.Errorf("没有选中的配置")
-	}
-
-	// 更新 UI 状态
-	if vm.startServerButton != nil {
-		vm.startServerButton.SetEnabled(false)
-	}
-	vm.setStatus("正在启动服务器...")
-
-	// 调用服务层启动服务器
 	if err := vm.syncService.StartServer(); err != nil {
 		vm.setStatus("启动服务器失败")
-		if vm.startServerButton != nil {
-			vm.startServerButton.SetEnabled(true)
-		}
+		vm.updateButtonStates()
 		return err
 	}
 
-	// 更新 UI 状态
-	if vm.startServerButton != nil {
-		vm.startServerButton.SetText("停止服务器")
-		vm.startServerButton.SetEnabled(true)
-	}
+	vm.serverRunning = true // 设置状态
 	vm.setStatus("服务器已启动")
+	vm.updateButtonStates()
 	return nil
 }
 
 // StopServer 处理停止服务器的 UI 操作
 func (vm *ConfigViewModel) StopServer() error {
-	// 安全检查
-	if vm == nil || vm.syncService == nil {
-		return fmt.Errorf("视图模型或同步服务未初始化")
-	}
+	vm.logger.Info("服务器操作", interfaces.Fields{
+		"action": "stop",
+	})
 
-	// 更新 UI 状态
-	if vm.startServerButton != nil {
-		vm.startServerButton.SetEnabled(false)
-	}
-	vm.setStatus("正在停止服务器...")
-
-	// 调用服务层停止服务器
 	if err := vm.syncService.StopServer(); err != nil {
 		vm.setStatus("停止服务器失败")
-		if vm.startServerButton != nil {
-			vm.startServerButton.SetEnabled(true)
-		}
+		vm.updateButtonStates()
 		return err
 	}
 
-	// 更新 UI 状态
-	if vm.startServerButton != nil {
-		vm.startServerButton.SetText("启动服务器")
-		vm.startServerButton.SetEnabled(true)
-	}
+	vm.serverRunning = false // 设置状态
 	vm.setStatus("服务器已停止")
+	vm.updateButtonStates()
 	return nil
 }
 
@@ -1139,11 +1115,11 @@ func (vm *ConfigViewModel) DeleteSyncFolder(index int) error {
 	return nil
 }
 
-// IsServerRunning 返回服务器是否正在运行
+// IsServerRunning 检查服务器是否正在运行
 func (vm *ConfigViewModel) IsServerRunning() bool {
-	// 安全检查
 	if vm == nil || vm.syncService == nil {
 		return false
 	}
-	return vm.syncService.IsRunning()
+	// 使用本地状态标志
+	return vm.serverRunning
 }
