@@ -247,16 +247,22 @@ func NewClient(conn net.Conn, server *Server) *Client {
 
 // checkTimeout 检查客户端是否超时
 func (c *Client) checkTimeout() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(10 * time.Second) // 每10秒检查一次
 	defer ticker.Stop()
+
+	timeout := time.Duration(c.server.config.ConnTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second // 默认1分钟
+	}
 
 	for {
 		select {
 		case <-ticker.C:
-			if time.Since(c.lastActivity) > 40*time.Minute {
+			if time.Since(c.lastActivity) > timeout {
 				c.server.logger.Warn("客户端超时", interfaces.Fields{
 					"client":       c.ID,
 					"lastActivity": c.lastActivity,
+					"timeout":      timeout,
 				})
 				c.Close()
 				return
@@ -501,29 +507,6 @@ func (c *Client) handleMessage(msg *interfaces.Message) error {
 			"path":   syncRequestData.Path,
 		})
 
-		return nil
-
-	case "heartbeat":
-		// 处理心跳消息
-		c.lastActivity = time.Now()
-
-		// 发送心跳响应
-		response := &interfaces.Message{
-			Type: "heartbeat_response",
-			UUID: c.UUID,
-		}
-
-		if err := c.server.networkOps.WriteJSON(c.conn, response); err != nil {
-			c.server.logger.Error("发送心跳响应失败", interfaces.Fields{
-				"error":  err,
-				"client": c.ID,
-			})
-			return err
-		}
-
-		c.server.logger.Debug("心跳响应已发送", interfaces.Fields{
-			"client": c.ID,
-		})
 		return nil
 
 	default:

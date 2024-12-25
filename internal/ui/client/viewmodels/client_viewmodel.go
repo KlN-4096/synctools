@@ -305,70 +305,9 @@ func (vm *MainViewModel) Connect() error {
 		"remoteAddr": conn.RemoteAddr().String(),
 	})
 
-	// 启动心跳协程
-	go vm.heartbeat()
-
 	// 更新UI状态
 	vm.updateUIState()
 	return nil
-}
-
-// heartbeat 发送心跳包保持连接
-func (vm *MainViewModel) heartbeat() {
-	ticker := time.NewTicker(20 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if !vm.connected || vm.conn == nil {
-				return
-			}
-
-			// 设置写入超时
-			vm.conn.SetWriteDeadline(time.Now().Add(5 * time.Minute))
-
-			heartbeatMsg := &interfaces.Message{
-				Type: "heartbeat",
-				UUID: vm.syncService.GetCurrentConfig().UUID,
-			}
-
-			if err := vm.networkOps.WriteJSON(vm.conn, heartbeatMsg); err != nil {
-				vm.logger.Error("发送心跳消息失败", interfaces.Fields{
-					"error": err,
-				})
-				vm.Disconnect()
-				return
-			}
-
-			// 设置读取超时
-			vm.conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
-
-			// 等待心跳响应
-			var response interfaces.Message
-			if err := vm.networkOps.ReadJSON(vm.conn, &response); err != nil {
-				vm.logger.Error("读取心跳响应失败", interfaces.Fields{
-					"error": err,
-				})
-				vm.Disconnect()
-				return
-			}
-
-			if response.Type != "heartbeat_response" {
-				vm.logger.Error("收到意外的心跳响应类型", interfaces.Fields{
-					"type": response.Type,
-				})
-				vm.Disconnect()
-				return
-			}
-
-			// 重置超时
-			vm.conn.SetReadDeadline(time.Time{})
-			vm.conn.SetWriteDeadline(time.Time{})
-
-			vm.logger.Debug("心跳成功", interfaces.Fields{})
-		}
-	}
 }
 
 // Disconnect 断开服务器连接

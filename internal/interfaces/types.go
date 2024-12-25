@@ -39,6 +39,7 @@ type Config struct {
 	Version         string           `json:"version"`          // 整合包版本
 	Host            string           `json:"host"`             // 服务器主机地址
 	Port            int              `json:"port"`             // 服务器端口
+	ConnTimeout     int              `json:"conn_timeout"`     // 连接超时时间(秒)
 	SyncDir         string           `json:"sync_dir"`         // 同步目录
 	SyncFolders     []SyncFolder     `json:"sync_folders"`     // 同步文件夹列表
 	IgnoreList      []string         `json:"ignore_list"`      // 忽略文件列表
