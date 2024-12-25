@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"archive/zip"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 
 	"synctools/internal/interfaces"
 	"synctools/pkg/errors"
@@ -29,6 +31,22 @@ type FileDiff struct {
 	Action   FileAction  // 操作类型
 	FileInfo os.FileInfo // 文件信息
 	Hash     string      // 文件哈希值
+}
+
+// CompressProgress 压缩进度信息
+type CompressProgress struct {
+	CurrentFile   string    // 当前处理的文件
+	TotalFiles    int       // 总文件数
+	ProcessedNum  int       // 已处理文件数
+	TotalSize     int64     // 总大小
+	ProcessedSize int64     // 已处理大小
+	StartTime     time.Time // 开始时间
+	Speed         float64   // 处理速度 (bytes/s)
+}
+
+// CompressOptions 压缩选项
+type CompressOptions struct {
+	IgnoreList []string // 忽略文件列表
 }
 
 // FileStorage 文件存储实现
@@ -189,6 +207,193 @@ func (s *FileStorage) List() ([]string, error) {
 		return nil, fmt.Errorf("遍历目录失败: %v", err)
 	}
 	return fileList, nil
+}
+
+// CompressFiles 压缩文件到ZIP
+func (s *FileStorage) CompressFiles(srcPath, zipPath string, opts *CompressOptions) (*CompressProgress, error) {
+	// 验证源路径
+	if _, err := os.Stat(srcPath); err != nil {
+		return nil, errors.NewStorageError("CompressFiles", "源路径无效", err)
+	}
+
+	// 创建ZIP文件
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		return nil, errors.NewStorageError("CompressFiles", "创建ZIP文件失败", err)
+	}
+	defer zipFile.Close()
+
+	// 创建ZIP写入器
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// 创建进度信息
+	progress := &CompressProgress{
+		StartTime: time.Now(),
+	}
+
+	// 遍历源目录
+	err = filepath.Walk(srcPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return errors.NewStorageError("CompressFiles", "遍历目录失败", err)
+		}
+
+		// 获取相对路径
+		relPath, err := filepath.Rel(srcPath, path)
+		if err != nil {
+			return errors.NewStorageError("CompressFiles", "获取相对路径失败", err)
+		}
+
+		// 检查是否在忽略列表中
+		if opts != nil {
+			for _, ignore := range opts.IgnoreList {
+				matched, err := filepath.Match(ignore, relPath)
+				if err != nil {
+					return errors.NewStorageError("CompressFiles", "匹配忽略规则失败", err)
+				}
+				if matched {
+					if info.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+			}
+		}
+
+		// 更新进度信息
+		progress.CurrentFile = relPath
+		progress.TotalFiles++
+		progress.TotalSize += info.Size()
+
+		// 如果是目录，跳过
+		if info.IsDir() {
+			return nil
+		}
+
+		// 创建文件头
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return errors.NewStorageError("CompressFiles", "创建文件头失败", err)
+		}
+
+		// 设置压缩方法
+		header.Method = zip.Deflate
+		// 设置相对路径
+		header.Name = relPath
+
+		// 创建文件写入器
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return errors.NewStorageError("CompressFiles", "创建文件写入器失败", err)
+		}
+
+		// 打开源文件
+		file, err := os.Open(path)
+		if err != nil {
+			return errors.NewStorageError("CompressFiles", "打开源文件失败", err)
+		}
+		defer file.Close()
+
+		// 复制文件内容
+		written, err := io.Copy(writer, file)
+		if err != nil {
+			return errors.NewStorageError("CompressFiles", "写入文件内容失败", err)
+		}
+
+		// 更新进度信息
+		progress.ProcessedNum++
+		progress.ProcessedSize += written
+		progress.Speed = float64(progress.ProcessedSize) / time.Since(progress.StartTime).Seconds()
+
+		return nil
+	})
+
+	if err != nil {
+		return progress, err
+	}
+
+	return progress, nil
+}
+
+// DecompressFiles 解压ZIP文件
+func (s *FileStorage) DecompressFiles(zipPath, destPath string) (*CompressProgress, error) {
+	// 验证ZIP文件
+	if _, err := os.Stat(zipPath); err != nil {
+		return nil, errors.NewStorageError("DecompressFiles", "ZIP文件无效", err)
+	}
+
+	// 打开ZIP文件
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, errors.NewStorageError("DecompressFiles", "打开ZIP文件失败", err)
+	}
+	defer reader.Close()
+
+	// 创建进度信息
+	progress := &CompressProgress{
+		StartTime:  time.Now(),
+		TotalFiles: len(reader.File),
+	}
+
+	// 计算总大小
+	for _, file := range reader.File {
+		progress.TotalSize += int64(file.UncompressedSize64)
+	}
+
+	// 确保目标目录存在
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return nil, errors.NewStorageError("DecompressFiles", "创建目标目录失败", err)
+	}
+
+	// 遍历压缩文件
+	for _, file := range reader.File {
+		progress.CurrentFile = file.Name
+
+		// 构建完整路径
+		path := filepath.Join(destPath, file.Name)
+
+		// 如果是目录，创建它
+		if file.FileInfo().IsDir() {
+			if err := os.MkdirAll(path, file.Mode()); err != nil {
+				return nil, errors.NewStorageError("DecompressFiles", "创建目录失败", err)
+			}
+			continue
+		}
+
+		// 确保父目录存在
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return nil, errors.NewStorageError("DecompressFiles", "创建父目录失败", err)
+		}
+
+		// 创建目标文件
+		outFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
+		if err != nil {
+			return nil, errors.NewStorageError("DecompressFiles", "创建目标文件失败", err)
+		}
+
+		// 打开压缩文件
+		rc, err := file.Open()
+		if err != nil {
+			outFile.Close()
+			return nil, errors.NewStorageError("DecompressFiles", "打开压缩文件失败", err)
+		}
+
+		// 复制文件内容
+		written, err := io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return nil, errors.NewStorageError("DecompressFiles", "写入文件内容失败", err)
+		}
+
+		// 更新进度信息
+		progress.ProcessedNum++
+		progress.ProcessedSize += written
+		progress.Speed = float64(progress.ProcessedSize) / time.Since(progress.StartTime).Seconds()
+	}
+
+	return progress, nil
 }
 
 // CompareFiles 比较源目录和目标目录的文件差异

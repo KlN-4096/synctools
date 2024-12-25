@@ -16,7 +16,7 @@ SyncTools是一个基于Go语言开发的文件同步工具，采用客户端-�
 - `CODEBASE.md`: 代码库说明文档
 
 ### cmd/ - 入口程序
-#### client/main.go
+#### client/client_main.go
 - **文件作用**：
   - 实现客户端的主程序入口
   - 初始化客户端配置和组件
@@ -27,7 +27,7 @@ SyncTools是一个基于Go语言开发的文件同步工具，采用客户端-�
   - init: 初始化基础配置和命令行参数
   - loadOrCreateConfig: 加载或创建默认配置文件
 
-#### server/main.go
+#### server/server_main.go
 - **文件作用**：
   - 实现服务器的主程序入口
   - 初始化服务器配置和组件
@@ -55,27 +55,60 @@ SyncTools是一个基于Go语言开发的文件同步工具，采用客户端-�
   - Shutdown: 关闭所有服务
 
 #### interfaces/ - 接口定义
-- **config.go**: 定义配置管理接口
-- **logger.go**: 定义日志记录接口
-- **network.go**: 定义网络操作接口
-- **service.go**: 定义同步服务接口
-- **storage.go**: 定义存储操作接口
-- **types.go**: 定义共享数据类型
+- `interfaces.go`: 定义核心接口
+- `types.go`: 定义共享数据类型
 
 #### ui/ - 用户界面
 ##### client/ - 客户端UI
-- **views/client_tab.go**: 客户端主界面实现
-- **viewmodels/client_viewmodel.go**: 客户端视图模型
-- **windows/client_window.go**: 客户端窗口管理
+- **views/client_tab.go**: 
+  - 实现客户端主界面的UI布局和交互
+  - 管理客户端界面的各个控件
+  - 处理用户界面事件
+  - 与视图模型层交互
+
+- **viewmodels/client_viewmodel.go**:
+  - 实现客户端主视图模型
+  - 管理客户端状态
+  - 处理客户端业务逻辑
+  - 提供UI数据绑定
+
+- **windows/client_window.go**:
+  - 实现客户端主窗口界面
+  - 管理界面布局
+  - 处理用户交互
+  - 集成客户端功能模块
 
 ##### server/ - 服务端UI
-- **views/config_tab.go**: 服务端配置界面
-- **viewmodels/server_viewmodel.go**: 服务端视图模型
-- **viewmodels/config_viewmodel.go**: 配置视图模型
-- **windows/server_window.go**: 服务端窗口管理
+- **views/config_tab.go**: 
+  - 实现配置界面的UI布局和交互
+  - 管理配置界面的各个控件
+  - 处理用户界面事件
+  - 与视图模型层交互
 
-##### common/ - 公共UI组件
-- **logger/adapter.go**: 日志适配器
+- **viewmodels/server_viewmodel.go**:
+  - 实现主窗口的视图模型
+  - 管理全局状态
+  - 协调各个子视图模型
+  - 处理主窗口事件
+
+- **viewmodels/config_viewmodel.go**:
+  - 实现配置界面的视图模型
+  - 管理配置数据绑定
+  - 处理配置界面交互
+  - 提供配置操作接口
+
+- **windows/server_window.go**:
+  - 实现主窗口界面
+  - 管理界面布局
+  - 处理用户交互
+  - 集成各个功能模块
+
+##### common/logger/adapter.go
+- **文件作用**：
+  - 提供UI层通用的日志适配器
+  - 实现日志接口的包装
+  - 提供调试模式支持
+  - 统一日志格式化
 
 ### pkg/ - 可重用包
 
@@ -84,94 +117,172 @@ SyncTools是一个基于Go语言开发的文件同步工具，采用客户端-�
   - 实现文件压缩和解压功能
   - 提供进度报告
   - 处理文件完整性验证
+- **主要功能**：
+  - CompressFiles: 压缩文件到ZIP
+  - DecompressFiles: 解压ZIP文件
+  - ValidateZip: 验证ZIP文件完整性
 
 #### config/manager.go
 - **文件作用**：
   - 实现配置管理器
   - 负责配置文件的加载、保存和验证
   - 管理配置的生命周期和变更通知
+  - 提供配置的CRUD操作
 - **主要方法**：
   - NewManager: 创建配置管理器
-  - LoadConfig: 加载配置
-  - SaveConfig: 保存配置
-  - ValidateConfig: 验证配置
-  - GetCurrentConfig: 获取当前配置
+  - LoadConfig: 加载配置文件
+  - SaveConfig: 保存配置到文件
+  - ValidateConfig: 验证配置有效性
 
 #### errors/ - 错误定义
-- **common.go**: 通用错误类型
-- **config.go**: 配置相关错误
-- **network.go**: 网络相关错误
-- **service.go**: 服务相关错误
-- **storage.go**: 存储相关错误
+- `errors.go`: 定义错误类型和处理函数
+- `codes.go`: 定义错误代码常量
 
 #### logger/default.go
 - **文件作用**：
   - 实现默认日志记录器
   - 支持不同日志级别
   - 提供结构化日志记录
+- **主要功能**：
+  - Debug/Info/Warn/Error/Fatal: 不同级别的日志记录
+  - WithFields: 添加日志字段
+  - SetLevel: 设置日志级别
 
-#### network/ - 网络实现
-- **server.go**: 网络服务器实现
-- **operations.go**: 网络操作实现
+#### network/network.go
+- **文件作用**：
+  - 实现网络通信功能
+  - 管理客户端连接
+  - 处理消息收发
+  - 提供网络操作接口
 
 #### service/sync_service.go
 - **文件作用**：
-  - 实现文件同步服务
-  - 管理同步状态和进度
+  - 实现核心业务逻辑服务层
+  - 管理配置的存储和验证
+  - 管理文件同步状态和进度
   - 处理同步请求和响应
+- **主要功能**：
+  - 配置管理: 配置的CRUD操作和验证
+  - 同步服务: 文件同步和进度跟踪
+  - 网络服务: 服务器管理和请求处理
+  - 状态管理: 同步状态和进度管理
 
-#### storage/ - 存储实现
-- **file_storage.go**: 文件存储实现
-- **file_utils.go**: 文件操作工具
+#### storage/storage.go
+- **文件作用**：
+  - 实现文件存储接口
+  - 提供文件操作功能
+  - 管理文件系统交互
+  - 处理文件元数据
 
-### configs/ - 配置文件
-- `default.json`: 默认配置文件
-- `*.json`: 用户配置文件
-
-### logs/ - 日志文件
-- `sync_*.log`: 同步操作日志文件
+### test/ - 测试代码
+- `sync_service_test.go`: 同步服务的单元测试
 
 ## 架构设计
 
 ### 分层架构
 ```mermaid
 graph TB
-    subgraph 入口层[入口层 cmd/]
-        Client[client/main.go]
-        Server[server/main.go]
+    subgraph 展示层[展示层 - Presentation Layer]
+        subgraph ClientUI[客户端UI]
+            ClientTab[client_tab.go]
+            ClientWindow[client_window.go]
+        end
+        
+        subgraph ServerUI[服务器UI]
+            ConfigTab[config_tab.go]
+            ServerWindow[server_window.go]
+        end
     end
 
-    subgraph 应用层[应用层 internal/]
-        Container[container/container.go]
-        UI[ui/]
+    subgraph 应用层[应用层 - Application Layer]
+        subgraph ViewModels[视图模型]
+            ClientViewModel[client_viewmodel.go]
+            ServerViewModel[server_viewmodel.go]
+            ConfigViewModel[config_viewmodel.go]
+        end
+        
+        subgraph Container[容器]
+            DIContainer[container.go]
+        end
     end
 
-    subgraph 接口层[接口层 internal/interfaces/]
-        Interfaces[interfaces/*.go]
+    subgraph 领域层[领域层 - Domain Layer]
+        subgraph Interfaces[接口定义]
+            CoreInterfaces[interfaces.go]
+            Types[types.go]
+        end
+        
+        subgraph Services[核心服务]
+            SyncService[sync_service.go]
+        end
     end
 
-    subgraph 基础设施层[基础设施层 pkg/]
-        Config[config/manager.go]
-        Network[network/*.go]
-        Service[service/sync_service.go]
-        Storage[storage/*.go]
-        Logger[logger/default.go]
-        Archive[archive/zip.go]
-        Errors[errors/*.go]
+    subgraph 基础设施层[基础设施层 - Infrastructure Layer]
+        subgraph Common[通用组件]
+            Logger[default.go]
+            LogAdapter[adapter.go]
+            ErrorHandler[errors.go]
+            ErrorCodes[codes.go]
+        end
+        
+        subgraph Storage[存储组件]
+            FileStorage[storage.go]
+            Archive[zip.go]
+            ConfigManager[manager.go]
+        end
+        
+        subgraph Network[网络组件]
+            NetworkServer[network.go]
+        end
     end
 
-    %% 依赖关系
-    Client --> Container
-    Server --> Container
-    Container --> Interfaces
-    UI --> Interfaces
-    Config --> Interfaces
-    Network --> Interfaces
-    Service --> Interfaces
-    Storage --> Interfaces
-    Logger --> Interfaces
-    Archive --> Interfaces
-    Errors --> Interfaces
+    subgraph 入口层[入口层 - Entry Layer]
+        ClientMain[client_main.go]
+        ServerMain[server_main.go]
+    end
+
+    %% 展示层依赖
+    ClientTab --> ClientViewModel
+    ClientWindow --> ClientViewModel
+    ConfigTab --> ConfigViewModel
+    ServerWindow --> ServerViewModel
+
+    %% 应用层依赖
+    ClientViewModel --> CoreInterfaces
+    ServerViewModel --> CoreInterfaces
+    ConfigViewModel --> CoreInterfaces
+    DIContainer --> CoreInterfaces
+
+    %% 领域层依赖
+    SyncService --> CoreInterfaces
+    CoreInterfaces --> Types
+
+    %% 基础设施层依赖
+    Logger --> CoreInterfaces
+    LogAdapter --> Logger
+    FileStorage --> CoreInterfaces
+    NetworkServer --> CoreInterfaces
+    ConfigManager --> CoreInterfaces
+
+    %% 入口层依赖
+    ClientMain --> DIContainer
+    ServerMain --> DIContainer
+    
+    %% 横向通信
+    DIContainer -.-> Logger
+    DIContainer -.-> FileStorage
+    DIContainer -.-> NetworkServer
+    DIContainer -.-> SyncService
+
+    style ClientUI fill:#FFD700
+    style ServerUI fill:#FFD700
+    style ViewModels fill:#98FB98
+    style Container fill:#98FB98
+    style Interfaces fill:#87CEEB
+    style Services fill:#87CEEB
+    style Common fill:#DDA0DD
+    style Storage fill:#DDA0DD
+    style Network fill:#DDA0DD
 ```
 
 ### 设计原则

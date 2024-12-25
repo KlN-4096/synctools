@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"synctools/internal/interfaces"
-	"synctools/internal/ui/common/logger"
+	"synctools/pkg/logger"
 
 	"github.com/lxn/walk"
 )
