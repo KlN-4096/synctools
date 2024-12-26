@@ -61,6 +61,8 @@ type SyncService struct {
 	progressCallback func(progress *interfaces.Progress)
 }
 
+// ==================== 1. 核心服务管理 ====================
+
 // NewSyncService 创建新的同步服务
 func NewSyncService(config *interfaces.Config, logger interfaces.Logger, storage interfaces.Storage) *SyncService {
 	return &SyncService{
@@ -89,55 +91,6 @@ func (s *SyncService) Start() error {
 	return nil
 }
 
-// StartServer 启动网络服务器
-func (s *SyncService) StartServer() error {
-	s.logger.Info("服务操作", interfaces.Fields{
-		"action": "start_server",
-	})
-
-	if s.server == nil {
-		s.logger.Debug("创建网络服务器", interfaces.Fields{})
-		s.server = network.NewServer(s.config, s, s.logger)
-	}
-
-	if err := s.server.Start(); err != nil {
-		s.running = false // 启动失败时设置状态
-		s.logger.Error("启动服务器失败", interfaces.Fields{
-			"error": err,
-		})
-		return err
-	}
-
-	s.running = true // 启动成功时设置状态
-	s.logger.Info("服务器已启动", interfaces.Fields{})
-	return nil
-}
-
-// StopServer 停止网络服务器
-func (s *SyncService) StopServer() error {
-	s.logger.Info("服务操作", interfaces.Fields{
-		"action": "stop_server",
-	})
-
-	if s.server == nil {
-		s.running = false // 没有服务器实例时设置状态
-		s.logger.Debug("服务器未启动", interfaces.Fields{})
-		return nil
-	}
-
-	if err := s.server.Stop(); err != nil {
-		s.logger.Error("停止服务器失败", interfaces.Fields{
-			"error": err,
-		})
-		return err
-	}
-
-	s.server = nil
-	s.running = false // 停止成功时设置状态
-	s.logger.Info("服务器已停止", interfaces.Fields{})
-	return nil
-}
-
 // Stop 实现 interfaces.SyncService 接口
 func (s *SyncService) Stop() error {
 	if !s.running {
@@ -162,13 +115,161 @@ func (s *SyncService) Stop() error {
 	return nil
 }
 
+// IsRunning 实现 interfaces.SyncService 接口
+func (s *SyncService) IsRunning() bool {
+	return s.running
+}
+
+// ==================== 2. 配置管理 ====================
+
+// GetCurrentConfig 实现 interfaces.SyncService 接口
+func (s *SyncService) GetCurrentConfig() *interfaces.Config {
+	return s.config
+}
+
+// ListConfigs 实现配置列表功能
+func (s *SyncService) ListConfigs() ([]*interfaces.Config, error) {
+	files, err := s.storage.List()
+	if err != nil {
+		return nil, fmt.Errorf("列出配置文件失败: %v", err)
+	}
+
+	configs := make([]*interfaces.Config, 0)
+	for _, file := range files {
+		if !strings.HasSuffix(file, ".json") {
+			continue
+		}
+
+		var config interfaces.Config
+		if err := s.storage.Load(file, &config); err != nil {
+			s.logger.Error("读取配置文件失败", interfaces.Fields{
+				"file":  file,
+				"error": err,
+			})
+			continue
+		}
+
+		configs = append(configs, &config)
+	}
+
+	return configs, nil
+}
+
+// LoadConfig 实现配置加载功能
+func (s *SyncService) LoadConfig(id string) error {
+	filename := fmt.Sprintf("%s.json", id)
+
+	var config interfaces.Config
+	if err := s.storage.Load(filename, &config); err != nil {
+		return fmt.Errorf("读取配置文件失败: %v", err)
+	}
+
+	s.config = &config
+
+	if s.onConfigChanged != nil {
+		s.onConfigChanged()
+	}
+
+	return nil
+}
+
+// SaveConfig 实现配置保存功能
+func (s *SyncService) SaveConfig(config *interfaces.Config) error {
+	if err := s.ValidateConfig(config); err != nil {
+		return fmt.Errorf("配置验证失败: %v", err)
+	}
+
+	filename := fmt.Sprintf("%s.json", config.UUID)
+	if err := s.storage.Save(filename, config); err != nil {
+		return fmt.Errorf("保存配置文件失败: %v", err)
+	}
+
+	s.config = config
+
+	if s.onConfigChanged != nil {
+		s.onConfigChanged()
+	}
+
+	return nil
+}
+
+// DeleteConfig 实现配置删除功能
+func (s *SyncService) DeleteConfig(uuid string) error {
+	filename := fmt.Sprintf("%s.json", uuid)
+
+	if err := s.storage.Delete(filename); err != nil {
+		return fmt.Errorf("删除配置文件失败: %v", err)
+	}
+
+	if s.config != nil && s.config.UUID == uuid {
+		s.config = nil
+	}
+
+	return nil
+}
+
+// ValidateConfig 实现配置验证功能
+func (s *SyncService) ValidateConfig(config *interfaces.Config) error {
+	if config == nil {
+		return errors.NewError("CONFIG_INVALID", "配置不能为空", nil)
+	}
+
+	if config.UUID == "" {
+		return errors.NewError("CONFIG_INVALID", "UUID不能为空", nil)
+	}
+	if config.Name == "" {
+		return errors.NewError("CONFIG_INVALID", "名称不能为空", nil)
+	}
+	if config.Version == "" {
+		return errors.NewError("CONFIG_INVALID", "版本不能为空", nil)
+	}
+	if config.Host == "" {
+		return errors.NewError("CONFIG_INVALID", "主机地址不能为空", nil)
+	}
+	if config.Port <= 0 || config.Port > 65535 {
+		return errors.NewError("CONFIG_INVALID", "端口号无效", nil)
+	}
+	if config.SyncDir == "" {
+		return errors.NewError("CONFIG_INVALID", "同步目录不能为空", nil)
+	}
+
+	for i, folder := range config.SyncFolders {
+		if folder.Path == "" {
+			return errors.NewError("CONFIG_INVALID", fmt.Sprintf("同步文件夹 #%d 路径不能为空", i+1), nil)
+		}
+		if !filepath.IsAbs(folder.Path) {
+			absPath := filepath.Join(config.SyncDir, folder.Path)
+			if !filepath.HasPrefix(absPath, config.SyncDir) {
+				return errors.NewError("CONFIG_INVALID", fmt.Sprintf("同步文件夹 #%d 路径必须在同步目录内", i+1), nil)
+			}
+		}
+	}
+
+	for i, redirect := range config.FolderRedirects {
+		if redirect.ServerPath == "" {
+			return errors.NewError("CONFIG_INVALID", fmt.Sprintf("重定向 #%d 服务器路径不能为空", i+1), nil)
+		}
+		if redirect.ClientPath == "" {
+			return errors.NewError("CONFIG_INVALID", fmt.Sprintf("重定向 #%d 客户端路径不能为空", i+1), nil)
+		}
+	}
+
+	return nil
+}
+
+// SetOnConfigChanged 实现配置变更回调
+func (s *SyncService) SetOnConfigChanged(callback func()) {
+	s.onConfigChanged = callback
+}
+
+// ==================== 3. 同步操作 ====================
+
 // SyncFiles 同步指定目录的文件
 func (s *SyncService) SyncFiles(path string) error {
 	if !s.running {
 		return errors.ErrServiceNotRunning
 	}
 
-	// 创建存储服务
 	storage, err := storage.NewFileStorage(path, s.logger)
 	if err != nil {
 		s.logger.Error("创建存储服务失败", interfaces.Fields{
@@ -182,13 +283,11 @@ func (s *SyncService) SyncFiles(path string) error {
 		"path": path,
 	})
 
-	// 创建同步请求
 	request := &interfaces.SyncRequest{
 		Path:    path,
 		Storage: storage,
 	}
 
-	// 执行同步
 	if err := s.HandleSyncRequest(request); err != nil {
 		s.logger.Error("同步失败", interfaces.Fields{
 			"error": err,
@@ -204,34 +303,108 @@ func (s *SyncService) SyncFiles(path string) error {
 	return nil
 }
 
-// isIgnored 检查文件是否在忽略列表中
-func (s *SyncService) isIgnored(file string) bool {
-	for _, pattern := range s.config.IgnoreList {
-		matched, err := filepath.Match(pattern, filepath.Base(file))
+// HandleSyncRequest 实现 interfaces.SyncService 接口
+func (s *SyncService) HandleSyncRequest(request interface{}) error {
+	req, ok := request.(*interfaces.SyncRequest)
+	if !ok {
+		s.logger.Error("请求类型错误", interfaces.Fields{
+			"type": fmt.Sprintf("%T", request),
+		})
+		return fmt.Errorf("无效的请求类型")
+	}
+
+	sourcePath := s.config.SyncDir
+	if sourcePath == "" {
+		s.logger.Error("服务端同步目录未配置", interfaces.Fields{})
+		return fmt.Errorf("服务端同步目录未配置")
+	}
+
+	targetStorage := req.Storage
+	if targetStorage == nil {
+		s.logger.Debug("创建目标存储服务", interfaces.Fields{
+			"path": req.Path,
+		})
+		var err error
+		targetStorage, err = storage.NewFileStorage(req.Path, s.logger)
 		if err != nil {
-			s.logger.Error("匹配忽略模式失败", interfaces.Fields{
-				"pattern": pattern,
-				"file":    file,
-				"error":   err,
+			s.logger.Error("创建存储服务失败", interfaces.Fields{
+				"error": err,
+				"path":  req.Path,
+			})
+			return fmt.Errorf("创建存储服务失败: %v", err)
+		}
+		req.Storage = targetStorage
+	}
+
+	for _, folder := range s.config.SyncFolders {
+		sourceFolderPath := filepath.Join(sourcePath, folder.Path)
+		targetFolderPath := filepath.Join(req.Path, folder.Path)
+
+		for _, redirect := range s.config.FolderRedirects {
+			if redirect.ServerPath == folder.Path {
+				targetFolderPath = filepath.Join(req.Path, redirect.ClientPath)
+				break
+			}
+		}
+
+		s.logger.Info("处理同步文件夹", interfaces.Fields{
+			"source": sourceFolderPath,
+			"target": targetFolderPath,
+			"mode":   folder.SyncMode,
+		})
+
+		if err := os.MkdirAll(targetFolderPath, 0755); err != nil {
+			s.logger.Error("创建目标目录失败", interfaces.Fields{
+				"path":  targetFolderPath,
+				"error": err,
 			})
 			continue
 		}
-		if matched {
-			return true
-		}
-	}
-	return false
-}
 
-// getSyncMode 获取文件的同步模式
-func (s *SyncService) getSyncMode(file string) interfaces.SyncMode {
-	// 检查文件是否在同步文件夹中
-	for _, folder := range s.config.SyncFolders {
-		if strings.HasPrefix(file, folder.Path) {
-			return folder.SyncMode
+		files, err := filepath.Glob(filepath.Join(sourceFolderPath, "*"))
+		if err != nil {
+			s.logger.Error("获取源文件列表失败", interfaces.Fields{
+				"path":  sourceFolderPath,
+				"error": err,
+			})
+			continue
+		}
+
+		for _, file := range files {
+			relPath, err := filepath.Rel(sourcePath, file)
+			if err != nil {
+				s.logger.Error("获取相对路径失败", interfaces.Fields{
+					"file":  file,
+					"error": err,
+				})
+				continue
+			}
+
+			ignored := false
+			for _, pattern := range s.config.IgnoreList {
+				if matched, _ := filepath.Match(pattern, filepath.Base(file)); matched {
+					ignored = true
+					break
+				}
+			}
+			if ignored {
+				s.logger.Debug("忽略文件", interfaces.Fields{
+					"file": relPath,
+				})
+				continue
+			}
+
+			if err := s.syncFile(file, relPath, folder.SyncMode, targetStorage); err != nil {
+				s.logger.Error("同步文件失败", interfaces.Fields{
+					"file":  file,
+					"error": err,
+				})
+				continue
+			}
 		}
 	}
-	return interfaces.AutoSync
+
+	return nil
 }
 
 // handleFileSync 根据同步模式处理文件
@@ -452,318 +625,8 @@ func (s *SyncService) handleFileSync(file string, info *interfaces.FileInfo, mod
 	return nil
 }
 
-// mirrorSync 执行镜像同步
-func (s *SyncService) mirrorSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
-	// 读取源文件
-	var data []byte
-	if err := s.storage.Load(file, &data); err != nil {
-		return fmt.Errorf("读取源文件失败: %v", err)
-	}
-
-	// 确保目标目录存在
-	targetDir := filepath.Dir(file)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		s.logger.Error("创建目标目录失败", interfaces.Fields{
-			"dir":   targetDir,
-			"error": err,
-		})
-		return fmt.Errorf("创建目标目录失败: %v", err)
-	}
-
-	// 保存文件
-	if err := targetStorage.Save(file, data); err != nil {
-		return fmt.Errorf("保存目标文件失败: %v", err)
-	}
-
-	s.logger.Debug("文件同步完成", interfaces.Fields{
-		"file": file,
-		"mode": "mirror",
-	})
-
-	return nil
-}
-
-// pushSync 执行推送同步
-func (s *SyncService) pushSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
-	// 读取源文件
-	var data []byte
-	if err := s.storage.Load(file, &data); err != nil {
-		return fmt.Errorf("读取源文件失败: %v", err)
-	}
-
-	// 确保目标目录存在
-	targetDir := filepath.Dir(file)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		s.logger.Error("创建目标目录失败", interfaces.Fields{
-			"dir":   targetDir,
-			"error": err,
-		})
-		return fmt.Errorf("创建目标目录失败: %v", err)
-	}
-
-	// 检查目标文件是否存在
-	if targetStorage.Exists(file) {
-		// 如果目标文件存在，检查是否需要更新
-		var targetData []byte
-		if err := targetStorage.Load(file, &targetData); err != nil {
-			return fmt.Errorf("读取目标文件失败: %v", err)
-		}
-
-		// 计算目标文件哈希
-		targetHash := calculateFileHash(targetData)
-		if targetHash == info.Hash {
-			// 文件相同，不需要更新
-			s.logger.Debug("文件未变更，跳过同步", interfaces.Fields{
-				"file": file,
-				"hash": info.Hash,
-			})
-			return nil
-		}
-	}
-
-	// 保存文件
-	if err := targetStorage.Save(file, data); err != nil {
-		return fmt.Errorf("保存目标文件失败: %v", err)
-	}
-
-	s.logger.Debug("文件同步完成", interfaces.Fields{
-		"file": file,
-		"mode": "push",
-	})
-
-	return nil
-}
-
-// packSync 执行打包同步
-func (s *SyncService) packSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
-	// 读取源文件
-	var data []byte
-	if err := s.storage.Load(file, &data); err != nil {
-		return fmt.Errorf("读取源文件失败: %v", err)
-	}
-
-	// 创建临时目录
-	tempDir, err := os.MkdirTemp("", "synctools_pack_*")
-	if err != nil {
-		return fmt.Errorf("创建临时目录失败: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// 创建临时文件
-	tempFile := filepath.Join(tempDir, filepath.Base(file))
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		return fmt.Errorf("写入临时文件失败: %v", err)
-	}
-
-	// 创建zip文件
-	zipFile, err := os.Create(filepath.Join(tempDir, "temp.zip"))
-	if err != nil {
-		return fmt.Errorf("创建zip文件失败: %v", err)
-	}
-	defer zipFile.Close()
-
-	// 创建zip写入器
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
-
-	// 添加文件到zip
-	fileToZip, err := os.Open(tempFile)
-	if err != nil {
-		return fmt.Errorf("打开临时文件失败: %v", err)
-	}
-	defer fileToZip.Close()
-
-	// 获取文件信息
-	fileInfo, err := fileToZip.Stat()
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %v", err)
-	}
-
-	// 创建zip文件头
-	header, err := zip.FileInfoHeader(fileInfo)
-	if err != nil {
-		return fmt.Errorf("创建文件头失败: %v", err)
-	}
-
-	// 设置压缩方法
-	header.Method = zip.Deflate
-
-	// 创建zip文件
-	writer, err := zipWriter.CreateHeader(header)
-	if err != nil {
-		return fmt.Errorf("创建压缩文件失败: %v", err)
-	}
-
-	// 写入文件内容
-	if _, err := io.Copy(writer, fileToZip); err != nil {
-		return fmt.Errorf("写入压缩文件失败: %v", err)
-	}
-
-	// 关闭zip写入器
-	if err := zipWriter.Close(); err != nil {
-		return fmt.Errorf("关闭zip写入器失败: %v", err)
-	}
-
-	// 读取压缩后的文件
-	zipData, err := os.ReadFile(filepath.Join(tempDir, "temp.zip"))
-	if err != nil {
-		return fmt.Errorf("读取压缩文件失败: %v", err)
-	}
-
-	// 保存压缩文件到目标存储
-	if err := targetStorage.Save(file, zipData); err != nil {
-		return fmt.Errorf("保存压缩文件失败: %v", err)
-	}
-
-	s.logger.Info("文件打包完成", interfaces.Fields{
-		"file": file,
-		"size": len(zipData),
-	})
-
-	return nil
-}
-
-// autoSync 执行自动同步
-func (s *SyncService) autoSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
-	// 根据文件类型选择同步方式
-	ext := filepath.Ext(file)
-	switch ext {
-	case ".zip", ".rar", ".7z":
-		return s.packSync(file, info, targetStorage)
-	case ".exe", ".dll", ".jar":
-		return s.mirrorSync(file, info, targetStorage)
-	default:
-		return s.pushSync(file, info, targetStorage)
-	}
-}
-
-// manualSync 执行手动同步
-func (s *SyncService) manualSync(file string, info *interfaces.FileInfo) error {
-	// 记录变更等待用户确认
-	s.logger.Info("等待用户确认同步", interfaces.Fields{
-		"file": file,
-		"hash": info.Hash,
-		"size": info.Size,
-	})
-	return nil
-}
-
-// HandleSyncRequest 实现 interfaces.SyncService 接口
-func (s *SyncService) HandleSyncRequest(request interface{}) error {
-	req, ok := request.(*interfaces.SyncRequest)
-	if !ok {
-		s.logger.Error("请求类型错误", interfaces.Fields{
-			"type": fmt.Sprintf("%T", request),
-		})
-		return fmt.Errorf("无效的请求类型")
-	}
-
-	// 获取服务端的同步目录
-	sourcePath := s.config.SyncDir
-	if sourcePath == "" {
-		s.logger.Error("服务端同步目录未配置", interfaces.Fields{})
-		return fmt.Errorf("服务端同步目录未配置")
-	}
-
-	// 检查并创建存储服务
-	targetStorage := req.Storage
-	if targetStorage == nil {
-		s.logger.Debug("创建目标存储服务", interfaces.Fields{
-			"path": req.Path,
-		})
-		var err error
-		targetStorage, err = storage.NewFileStorage(req.Path, s.logger)
-		if err != nil {
-			s.logger.Error("创建存储服务失败", interfaces.Fields{
-				"error": err,
-				"path":  req.Path,
-			})
-			return fmt.Errorf("创建存储服务失败: %v", err)
-		}
-		req.Storage = targetStorage
-	}
-
-	// 遍历配置的同步文件夹
-	for _, folder := range s.config.SyncFolders {
-		sourceFolderPath := filepath.Join(sourcePath, folder.Path)
-		targetFolderPath := filepath.Join(req.Path, folder.Path)
-
-		// 应用重定向规则
-		for _, redirect := range s.config.FolderRedirects {
-			if redirect.ServerPath == folder.Path {
-				targetFolderPath = filepath.Join(req.Path, redirect.ClientPath)
-				break
-			}
-		}
-
-		s.logger.Info("处理同步文件夹", interfaces.Fields{
-			"source": sourceFolderPath,
-			"target": targetFolderPath,
-			"mode":   folder.SyncMode,
-		})
-
-		// 创建目标目录
-		if err := os.MkdirAll(targetFolderPath, 0755); err != nil {
-			s.logger.Error("创建目标目录失败", interfaces.Fields{
-				"path":  targetFolderPath,
-				"error": err,
-			})
-			continue
-		}
-
-		// 获取源文件夹中的所有文件
-		files, err := filepath.Glob(filepath.Join(sourceFolderPath, "*"))
-		if err != nil {
-			s.logger.Error("获取源文件列表失败", interfaces.Fields{
-				"path":  sourceFolderPath,
-				"error": err,
-			})
-			continue
-		}
-
-		// 处理每个文件
-		for _, file := range files {
-			relPath, err := filepath.Rel(sourcePath, file)
-			if err != nil {
-				s.logger.Error("获取相对路径失败", interfaces.Fields{
-					"file":  file,
-					"error": err,
-				})
-				continue
-			}
-
-			// 检查是否在忽略列表中
-			ignored := false
-			for _, pattern := range s.config.IgnoreList {
-				if matched, _ := filepath.Match(pattern, filepath.Base(file)); matched {
-					ignored = true
-					break
-				}
-			}
-			if ignored {
-				s.logger.Debug("忽略文件", interfaces.Fields{
-					"file": relPath,
-				})
-				continue
-			}
-
-			// 根据同步模式处理文件
-			if err := s.syncFile(file, relPath, folder.SyncMode, targetStorage); err != nil {
-				s.logger.Error("同步文件失败", interfaces.Fields{
-					"file":  file,
-					"error": err,
-				})
-				continue
-			}
-		}
-	}
-
-	return nil
-}
-
 // syncFile 同步单个文件
 func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncMode, storage interfaces.Storage) error {
-	// 参数验证
 	if sourcePath == "" {
 		return fmt.Errorf("源文件路径不能为空")
 	}
@@ -774,7 +637,6 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 		return fmt.Errorf("存储服务不能为空")
 	}
 
-	// 检查源文件是否存在
 	if _, err := os.Stat(sourcePath); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("源文件不存在: %s", sourcePath)
@@ -782,13 +644,11 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 		return fmt.Errorf("检查源文件失败: %v", err)
 	}
 
-	// 读取源文件数据
 	data, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return fmt.Errorf("读取源文件失败: %v", err)
 	}
 
-	// 应用重定向规则到目标路径
 	targetPath := relPath
 	if s.config != nil && s.config.FolderRedirects != nil {
 		for _, redirect := range s.config.FolderRedirects {
@@ -804,10 +664,8 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 		}
 	}
 
-	// 根据同步模式处理
 	switch mode {
 	case interfaces.PushSync:
-		// 检查文件是否存在及哈希值是否相同
 		if storage.Exists(targetPath) {
 			var existingData []byte
 			if err := storage.Load(targetPath, &existingData); err != nil {
@@ -821,12 +679,10 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 			}
 		}
 	case interfaces.MirrorSync:
-		// 直接覆盖
 		s.logger.Debug("执行镜像同步", interfaces.Fields{
 			"file": targetPath,
 		})
 	case interfaces.PackSync:
-		// TODO: 实现打包逻辑
 		s.logger.Debug("暂不支持pack模式", interfaces.Fields{
 			"file": targetPath,
 		})
@@ -835,7 +691,6 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 		return fmt.Errorf("未知的同步模式: %s", mode)
 	}
 
-	// 确保目标目录存在
 	targetDir := filepath.Dir(targetPath)
 	if targetDir != "." {
 		if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -843,7 +698,6 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 		}
 	}
 
-	// 保存文件
 	if err := storage.Save(targetPath, data); err != nil {
 		return fmt.Errorf("保存文件失败: %v", err)
 	}
@@ -858,11 +712,243 @@ func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncM
 	return nil
 }
 
-// calculateFileHash 计算文件哈希值
-func calculateFileHash(data []byte) string {
-	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:])
+// ==================== 4. 同步模式实现 ====================
+
+// mirrorSync 执行镜像同步
+func (s *SyncService) mirrorSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
+	var data []byte
+	if err := s.storage.Load(file, &data); err != nil {
+		return fmt.Errorf("读取源文件失败: %v", err)
+	}
+
+	targetDir := filepath.Dir(file)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		s.logger.Error("创建目标目录失败", interfaces.Fields{
+			"dir":   targetDir,
+			"error": err,
+		})
+		return fmt.Errorf("创建目标目录失败: %v", err)
+	}
+
+	if err := targetStorage.Save(file, data); err != nil {
+		return fmt.Errorf("保存目标文件失败: %v", err)
+	}
+
+	s.logger.Debug("文件同步完成", interfaces.Fields{
+		"file": file,
+		"mode": "mirror",
+	})
+
+	return nil
 }
+
+// pushSync 执行推送同步
+func (s *SyncService) pushSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
+	var data []byte
+	if err := s.storage.Load(file, &data); err != nil {
+		return fmt.Errorf("读取源文件失败: %v", err)
+	}
+
+	targetDir := filepath.Dir(file)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		s.logger.Error("创建目标目录失败", interfaces.Fields{
+			"dir":   targetDir,
+			"error": err,
+		})
+		return fmt.Errorf("创建目标目录失败: %v", err)
+	}
+
+	if targetStorage.Exists(file) {
+		var targetData []byte
+		if err := targetStorage.Load(file, &targetData); err != nil {
+			return fmt.Errorf("读取目标文件失败: %v", err)
+		}
+
+		targetHash := calculateFileHash(targetData)
+		if targetHash == info.Hash {
+			s.logger.Debug("文件未变更，跳过同步", interfaces.Fields{
+				"file": file,
+				"hash": info.Hash,
+			})
+			return nil
+		}
+	}
+
+	if err := targetStorage.Save(file, data); err != nil {
+		return fmt.Errorf("保存目标文件失败: %v", err)
+	}
+
+	s.logger.Debug("文件同步完成", interfaces.Fields{
+		"file": file,
+		"mode": "push",
+	})
+
+	return nil
+}
+
+// packSync 执行打包同步
+func (s *SyncService) packSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
+	var data []byte
+	if err := s.storage.Load(file, &data); err != nil {
+		return fmt.Errorf("读取源文件失败: %v", err)
+	}
+
+	tempDir, err := os.MkdirTemp("", "synctools_pack_*")
+	if err != nil {
+		return fmt.Errorf("创建临时目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tempFile := filepath.Join(tempDir, filepath.Base(file))
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return fmt.Errorf("写入临时文件失败: %v", err)
+	}
+
+	zipFile, err := os.Create(filepath.Join(tempDir, "temp.zip"))
+	if err != nil {
+		return fmt.Errorf("创建zip文件失败: %v", err)
+	}
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	fileToZip, err := os.Open(tempFile)
+	if err != nil {
+		return fmt.Errorf("打开临时文件失败: %v", err)
+	}
+	defer fileToZip.Close()
+
+	fileInfo, err := fileToZip.Stat()
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %v", err)
+	}
+
+	header, err := zip.FileInfoHeader(fileInfo)
+	if err != nil {
+		return fmt.Errorf("创建文件头失败: %v", err)
+	}
+
+	header.Method = zip.Deflate
+
+	writer, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		return fmt.Errorf("创建压缩文件失败: %v", err)
+	}
+
+	if _, err := io.Copy(writer, fileToZip); err != nil {
+		return fmt.Errorf("写入压缩文件失败: %v", err)
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return fmt.Errorf("关闭zip写入器失败: %v", err)
+	}
+
+	zipData, err := os.ReadFile(filepath.Join(tempDir, "temp.zip"))
+	if err != nil {
+		return fmt.Errorf("读取压缩文件失败: %v", err)
+	}
+
+	if err := targetStorage.Save(file, zipData); err != nil {
+		return fmt.Errorf("保存压缩文件失败: %v", err)
+	}
+
+	s.logger.Info("文件打包完成", interfaces.Fields{
+		"file": file,
+		"size": len(zipData),
+	})
+
+	return nil
+}
+
+// autoSync 执行自动同步
+func (s *SyncService) autoSync(file string, info *interfaces.FileInfo, targetStorage interfaces.Storage) error {
+	ext := filepath.Ext(file)
+	switch ext {
+	case ".zip", ".rar", ".7z":
+		return s.packSync(file, info, targetStorage)
+	case ".exe", ".dll", ".jar":
+		return s.mirrorSync(file, info, targetStorage)
+	default:
+		return s.pushSync(file, info, targetStorage)
+	}
+}
+
+// manualSync 执行手动同步
+func (s *SyncService) manualSync(file string, info *interfaces.FileInfo) error {
+	s.logger.Info("等待用户确认同步", interfaces.Fields{
+		"file": file,
+		"hash": info.Hash,
+		"size": info.Size,
+	})
+	return nil
+}
+
+// ==================== 5. 网络服务管理 ====================
+
+// StartServer 启动网络服务器
+func (s *SyncService) StartServer() error {
+	s.logger.Info("服务操作", interfaces.Fields{
+		"action": "start_server",
+	})
+
+	if s.server == nil {
+		s.logger.Debug("创建网络服务器", interfaces.Fields{})
+		s.server = network.NewServer(s.config, s, s.logger)
+	}
+
+	if err := s.server.Start(); err != nil {
+		s.running = false
+		s.logger.Error("启动服务器失败", interfaces.Fields{
+			"error": err,
+		})
+		return err
+	}
+
+	s.running = true
+	s.logger.Info("服务器已启动", interfaces.Fields{})
+	return nil
+}
+
+// StopServer 停止网络服务器
+func (s *SyncService) StopServer() error {
+	s.logger.Info("服务操作", interfaces.Fields{
+		"action": "stop_server",
+	})
+
+	if s.server == nil {
+		s.running = false
+		s.logger.Debug("服务器未启动", interfaces.Fields{})
+		return nil
+	}
+
+	if err := s.server.Stop(); err != nil {
+		s.logger.Error("停止服务器失败", interfaces.Fields{
+			"error": err,
+		})
+		return err
+	}
+
+	s.server = nil
+	s.running = false
+	s.logger.Info("服务器已停止", interfaces.Fields{})
+	return nil
+}
+
+// SetServer 实现服务器设置
+func (s *SyncService) SetServer(server interfaces.NetworkServer) {
+	if s.server != nil {
+		s.StopServer()
+	}
+	s.server = server
+}
+
+// GetNetworkServer 获取网络服务器实例
+func (s *SyncService) GetNetworkServer() interfaces.NetworkServer {
+	return s.server
+}
+
+// ==================== 6. 状态管理 ====================
 
 // GetSyncStatus 实现 interfaces.SyncService 接口
 func (s *SyncService) GetSyncStatus() string {
@@ -881,183 +967,44 @@ func (s *SyncService) setStatus(status string) {
 	})
 }
 
-// IsRunning 实现 interfaces.SyncService 接口
-func (s *SyncService) IsRunning() bool {
-	// 返回服务的运行状态
-	return s.running
-}
-
-// GetCurrentConfig 实现 interfaces.SyncService 接口
-func (s *SyncService) GetCurrentConfig() *interfaces.Config {
-	return s.config
-}
-
-// ListConfigs 实现配置列表功能
-func (s *SyncService) ListConfigs() ([]*interfaces.Config, error) {
-	// 使用storage接口来获取所有配置文件
-	files, err := s.storage.List()
-	if err != nil {
-		return nil, fmt.Errorf("列出配置文件失败: %v", err)
-	}
-
-	configs := make([]*interfaces.Config, 0)
-	for _, file := range files {
-		// 只处理.json文件
-		if !strings.HasSuffix(file, ".json") {
-			continue
-		}
-
-		var config interfaces.Config
-		if err := s.storage.Load(file, &config); err != nil {
-			s.logger.Error("读取配置文件失败", interfaces.Fields{
-				"file":  file,
-				"error": err,
-			})
-			continue
-		}
-
-		configs = append(configs, &config)
-	}
-
-	return configs, nil
-}
-
-// LoadConfig 实现配置加载功能
-func (s *SyncService) LoadConfig(id string) error {
-	// 构造配置文件名
-	filename := fmt.Sprintf("%s.json", id)
-
-	// 读取配置文件
-	var config interfaces.Config
-	if err := s.storage.Load(filename, &config); err != nil {
-		return fmt.Errorf("读取配置文件失败: %v", err)
-	}
-
-	// 更新当前配置
-	s.config = &config
-
-	// 触发配置变更回调
-	if s.onConfigChanged != nil {
-		s.onConfigChanged()
-	}
-
-	return nil
-}
-
-// SaveConfig 实现配置保存功能
-func (s *SyncService) SaveConfig(config *interfaces.Config) error {
-	// 验证配置
-	if err := s.ValidateConfig(config); err != nil {
-		return fmt.Errorf("配置验证失败: %v", err)
-	}
-
-	// 保存配置文件
-	filename := fmt.Sprintf("%s.json", config.UUID)
-	if err := s.storage.Save(filename, config); err != nil {
-		return fmt.Errorf("保存配置文件失败: %v", err)
-	}
-
-	// 更新当前配置
-	s.config = config
-
-	// 触发配置变更回调
-	if s.onConfigChanged != nil {
-		s.onConfigChanged()
-	}
-
-	return nil
-}
-
-// DeleteConfig 实现配置删除功能
-func (s *SyncService) DeleteConfig(uuid string) error {
-	// 构造配置文件名
-	filename := fmt.Sprintf("%s.json", uuid)
-
-	// 删除配置文件
-	if err := s.storage.Delete(filename); err != nil {
-		return fmt.Errorf("删除配置文件失败: %v", err)
-	}
-
-	// 如果删除的是当前配置，清空当前配置
-	if s.config != nil && s.config.UUID == uuid {
-		s.config = nil
-	}
-
-	return nil
-}
-
-// ValidateConfig 实现配置验证功能
-func (s *SyncService) ValidateConfig(config *interfaces.Config) error {
-	if config == nil {
-		return errors.NewError("CONFIG_INVALID", "配置不能为空", nil)
-	}
-
-	// 验证基本字段
-	if config.UUID == "" {
-		return errors.NewError("CONFIG_INVALID", "UUID不能为空", nil)
-	}
-	if config.Name == "" {
-		return errors.NewError("CONFIG_INVALID", "名称不能为空", nil)
-	}
-	if config.Version == "" {
-		return errors.NewError("CONFIG_INVALID", "版本不能为空", nil)
-	}
-	if config.Host == "" {
-		return errors.NewError("CONFIG_INVALID", "主机地址不能为空", nil)
-	}
-	if config.Port <= 0 || config.Port > 65535 {
-		return errors.NewError("CONFIG_INVALID", "端口号无效", nil)
-	}
-	if config.SyncDir == "" {
-		return errors.NewError("CONFIG_INVALID", "同步目录不能为空", nil)
-	}
-
-	// 验证同步文件夹
-	for i, folder := range config.SyncFolders {
-		if folder.Path == "" {
-			return errors.NewError("CONFIG_INVALID", fmt.Sprintf("同步文件夹 #%d 路径不能为空", i+1), nil)
-		}
-		if !filepath.IsAbs(folder.Path) {
-			absPath := filepath.Join(config.SyncDir, folder.Path)
-			if !filepath.HasPrefix(absPath, config.SyncDir) {
-				return errors.NewError("CONFIG_INVALID", fmt.Sprintf("同步文件夹 #%d 路径必须在同步目录内", i+1), nil)
-			}
-		}
-	}
-
-	// 验证重定向配置
-	for i, redirect := range config.FolderRedirects {
-		if redirect.ServerPath == "" {
-			return errors.NewError("CONFIG_INVALID", fmt.Sprintf("重定向 #%d 服务器路径不能为空", i+1), nil)
-		}
-		if redirect.ClientPath == "" {
-			return errors.NewError("CONFIG_INVALID", fmt.Sprintf("重定向 #%d 客户端路径不能为空", i+1), nil)
-		}
-	}
-
-	return nil
-}
-
-// SetOnConfigChanged 实现配置变更回调
-func (s *SyncService) SetOnConfigChanged(callback func()) {
-	s.onConfigChanged = callback
-}
-
 // SetProgressCallback 实现进度回调
 func (s *SyncService) SetProgressCallback(callback func(progress *interfaces.Progress)) {
 	s.progressCallback = callback
 }
 
-// SetServer 实现服务器设置
-func (s *SyncService) SetServer(server interfaces.NetworkServer) {
-	if s.server != nil {
-		// 如果已有服务器在运行，先停止它
-		s.StopServer()
-	}
-	s.server = server
+// ==================== 7. 工具方法 ====================
+
+// calculateFileHash 计算文件哈希值
+func calculateFileHash(data []byte) string {
+	hash := sha256.Sum256(data)
+	return hex.EncodeToString(hash[:])
 }
 
-// GetNetworkServer 获取网络服务器实例
-func (s *SyncService) GetNetworkServer() interfaces.NetworkServer {
-	return s.server
+// isIgnored 检查文件是否在忽略列表中
+func (s *SyncService) isIgnored(file string) bool {
+	for _, pattern := range s.config.IgnoreList {
+		matched, err := filepath.Match(pattern, filepath.Base(file))
+		if err != nil {
+			s.logger.Error("匹配忽略模式失败", interfaces.Fields{
+				"pattern": pattern,
+				"file":    file,
+				"error":   err,
+			})
+			continue
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// getSyncMode 获取文件的同步模式
+func (s *SyncService) getSyncMode(file string) interfaces.SyncMode {
+	for _, folder := range s.config.SyncFolders {
+		if strings.HasPrefix(file, folder.Path) {
+			return folder.SyncMode
+		}
+	}
+	return interfaces.AutoSync
 }
