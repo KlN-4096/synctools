@@ -225,14 +225,104 @@ func (c *Client) handleMessage(msg *interfaces.Message) {
 		"type":   msg.Type,
 	})
 
-	// 处理消息
-	if err := c.server.syncService.HandleSyncRequest(msg); err != nil {
-		c.server.logger.Error("处理消息失败", interfaces.Fields{
-			"client": c.ID,
-			"type":   msg.Type,
-			"error":  err,
+	switch msg.Type {
+	case "init":
+		if err := c.handleInitMessage(msg); err != nil {
+			c.server.logger.Error("处理初始化消息失败", interfaces.Fields{
+				"error": err,
+				"uuid":  msg.UUID,
+			})
+		}
+	case "sync_request":
+		if err := c.handleSyncRequest(msg); err != nil {
+			c.server.logger.Error("处理同步请求失败", interfaces.Fields{
+				"error": err,
+				"uuid":  msg.UUID,
+			})
+		}
+	default:
+		c.server.logger.Error("未知的消息类型", interfaces.Fields{
+			"type": msg.Type,
 		})
 	}
+}
+
+// handleSyncRequest 处理同步请求
+func (c *Client) handleSyncRequest(msg *interfaces.Message) error {
+	var syncRequest interfaces.SyncRequest
+	if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
+		c.server.logger.Error("解析同步请求失败", interfaces.Fields{
+			"error": err,
+		})
+		return sendSyncErrorResponse(c, msg.UUID, fmt.Sprintf("解析同步请求失败: %v", err))
+	}
+
+	// 执行同步操作
+	if err := c.server.syncService.HandleSyncRequest(&syncRequest); err != nil {
+		return sendSyncErrorResponse(c, msg.UUID, err.Error())
+	}
+
+	// 发送成功响应
+	return sendSyncSuccessResponse(c, msg.UUID)
+}
+
+// sendSyncErrorResponse 发送同步错误响应
+func sendSyncErrorResponse(c *Client, uuid string, errMsg string) error {
+	response := &interfaces.Message{
+		Type: "sync_response",
+		UUID: uuid,
+		Payload: json.RawMessage(`{
+			"success": false,
+			"error": "` + errMsg + `"
+		}`),
+	}
+	return c.server.networkOps.WriteJSON(c.conn, response)
+}
+
+// sendSyncSuccessResponse 发送同步成功响应
+func sendSyncSuccessResponse(c *Client, uuid string) error {
+	response := &interfaces.Message{
+		Type: "sync_response",
+		UUID: uuid,
+		Payload: json.RawMessage(`{
+			"success": true
+		}`),
+	}
+	return c.server.networkOps.WriteJSON(c.conn, response)
+}
+
+// handleInitMessage 处理初始化消息
+func (c *Client) handleInitMessage(msg *interfaces.Message) error {
+	// 保存客户端UUID
+	c.UUID = msg.UUID
+
+	// 获取当前服务器配置
+	config := c.server.syncService.GetCurrentConfig()
+
+	// 构造响应数据结构
+	responseData := struct {
+		Success bool               `json:"success"`
+		Config  *interfaces.Config `json:"config"`
+	}{
+		Success: true,
+		Config:  config,
+	}
+
+	// 序列化响应数据
+	responseJSON, err := json.Marshal(responseData)
+	if err != nil {
+		return fmt.Errorf("序列化响应数据失败: %v", err)
+	}
+
+	// 准备响应消息
+	response := &interfaces.Message{
+		Type:    "init_response",
+		UUID:    msg.UUID,
+		Payload: responseJSON,
+	}
+
+	// 发送响应
+	return c.server.networkOps.WriteJSON(c.conn, response)
 }
 
 // Close 关闭客户端连接

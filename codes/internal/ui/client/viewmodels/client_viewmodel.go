@@ -25,7 +25,6 @@ import (
 
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/network"
-	"synctools/codes/pkg/storage"
 )
 
 // MainViewModel 客户端主视图模型
@@ -681,7 +680,7 @@ func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
 	return vm.syncService.GetCurrentConfig()
 }
 
-// StartSync 开始同步
+// StartSync 开始执行同步
 func (vm *MainViewModel) StartSync() error {
 	vm.logger.Debug("开始执行同步", interfaces.Fields{
 		"isConnected": vm.IsConnected(),
@@ -700,48 +699,61 @@ func (vm *MainViewModel) StartSync() error {
 		return fmt.Errorf("同步路径未设置")
 	}
 
-	vm.logger.Debug("准备同步请求", interfaces.Fields{
-		"path":   path,
-		"config": vm.GetCurrentConfig(),
-	})
+	// 创建同步请求数据
+	syncRequestData := &interfaces.SyncRequest{
+		Path:      path,
+		Mode:      interfaces.MirrorSync,
+		Direction: interfaces.DirectionPull,
+	}
 
-	// 创建存储服务
-	storage, err := storage.NewFileStorage(path, vm.logger)
+	// 序列化请求数据
+	payload, err := json.Marshal(syncRequestData)
 	if err != nil {
-		vm.logger.Error("创建存储服务失败", interfaces.Fields{
+		vm.logger.Error("序列化同步请求失败", interfaces.Fields{
 			"error": err,
 			"path":  path,
 		})
-		return fmt.Errorf("创建存储服务失败: %v", err)
+		return fmt.Errorf("序列化同步请求失败: %v", err)
 	}
 
-	vm.logger.Debug("创建存储服务成功", interfaces.Fields{
-		"path":    path,
-		"baseDir": storage.BaseDir(),
-	})
-
-	// 创建同步请求
-	syncRequest := &interfaces.SyncRequest{
-		Path:    path,
-		Storage: storage,
+	// 发送同步请求
+	syncMsg := &interfaces.Message{
+		Type:    "sync_request",
+		UUID:    vm.syncService.GetCurrentConfig().UUID,
+		Payload: payload,
 	}
 
-	vm.logger.Debug("发送同步请求", interfaces.Fields{
-		"request": syncRequest,
-	})
-
-	// 执行同步
-	if err := vm.syncService.HandleSyncRequest(syncRequest); err != nil {
-		vm.logger.Error("同步失败", interfaces.Fields{
+	if err := vm.networkOps.WriteJSON(vm.conn, syncMsg); err != nil {
+		vm.logger.Error("发送同步请求失败", interfaces.Fields{
 			"error": err,
-			"path":  path,
 		})
-		return fmt.Errorf("同步失败: %v", err)
+		return fmt.Errorf("发送同步请求失败: %v", err)
 	}
 
-	vm.logger.Info("同步完成", interfaces.Fields{
-		"path": path,
-	})
+	// 等待同步响应
+	var response interfaces.Message
+	if err := vm.networkOps.ReadJSON(vm.conn, &response); err != nil {
+		vm.logger.Error("读取同步响应失败", interfaces.Fields{
+			"error": err,
+		})
+		return fmt.Errorf("读取同步响应失败: %v", err)
+	}
+
+	// 解析响应
+	var syncResponse struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(response.Payload, &syncResponse); err != nil {
+		vm.logger.Error("解析同步响应失败", interfaces.Fields{
+			"error": err,
+		})
+		return fmt.Errorf("解析同步响应失败: %v", err)
+	}
+
+	if !syncResponse.Success {
+		return fmt.Errorf("同步失败: %s", syncResponse.Error)
+	}
 
 	return nil
 }
