@@ -34,6 +34,7 @@ import (
 type LineEditIface interface {
 	Text() string
 	SetText(text string) error
+	SetEnabled(enabled bool)
 }
 
 // TableViewIface 定义 TableView 接口
@@ -43,6 +44,7 @@ type TableViewIface interface {
 	CurrentIndex() int
 	Width() int
 	Columns() *walk.TableViewColumnList
+	SetEnabled(enabled bool)
 }
 
 // ViewModelLogger 日志接口
@@ -60,6 +62,11 @@ type ViewModelLogger interface {
 	DebugLog(format string, v ...interface{})
 	SetDebugMode(enabled bool)
 	GetDebugMode() bool
+}
+
+// EnabledSetter 定义可设置启用状态的接口
+type EnabledSetter interface {
+	SetEnabled(enabled bool)
 }
 
 // ConfigViewModel 配置视图模型
@@ -90,8 +97,13 @@ type ConfigViewModel struct {
 	ignoreEdit  *walk.TextEdit
 
 	// 按钮
-	startServerButton *walk.PushButton
-	saveButton        *walk.PushButton
+	browseSyncDirButton *walk.PushButton
+	startServerButton   *walk.PushButton
+	saveButton          *walk.PushButton
+	newConfigButton     *walk.PushButton
+	delConfigButton     *walk.PushButton
+	addSyncFolderButton *walk.PushButton
+	delSyncFolderButton *walk.PushButton
 }
 
 // NewConfigViewModel 创建新的配置视图模型
@@ -139,11 +151,16 @@ func (vm *ConfigViewModel) SetupUI(
 	versionEdit LineEditIface,
 	hostEdit LineEditIface,
 	portEdit LineEditIface,
+	browseSyncDirButton *walk.PushButton,
 	syncDirEdit LineEditIface,
 	ignoreEdit *walk.TextEdit,
 	syncFolderTable TableViewIface,
 	startServerButton *walk.PushButton,
 	saveButton *walk.PushButton,
+	newConfigButton *walk.PushButton,
+	delConfigButton *walk.PushButton,
+	addSyncFolderButton *walk.PushButton,
+	delSyncFolderButton *walk.PushButton,
 ) {
 	vm.logger.Info("视图操作", interfaces.Fields{
 		"action": "setup",
@@ -165,10 +182,15 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.versionEdit = versionEdit
 	vm.hostEdit = hostEdit
 	vm.portEdit = portEdit
+	vm.browseSyncDirButton = browseSyncDirButton
 	vm.syncDirEdit = syncDirEdit
 	vm.ignoreEdit = ignoreEdit
 	vm.startServerButton = startServerButton
 	vm.saveButton = saveButton
+	vm.newConfigButton = newConfigButton
+	vm.delConfigButton = delConfigButton
+	vm.addSyncFolderButton = addSyncFolderButton
+	vm.delSyncFolderButton = delSyncFolderButton
 	vm.window = startServerButton.Form().(*walk.MainWindow)
 
 	// 检查服务器初始状态
@@ -202,6 +224,23 @@ func (vm *ConfigViewModel) SetupUI(
 	vm.logger.Debug("UI组件设置完成", nil)
 }
 
+// setControlsEnabled 设置一组控件的启用状态
+func (vm *ConfigViewModel) setControlsEnabled(enabled bool, controls ...interface{}) {
+	for _, control := range controls {
+		if control == nil {
+			continue
+		}
+		if setter, ok := control.(EnabledSetter); ok {
+			setter.SetEnabled(enabled)
+			if btn, ok := control.(*walk.PushButton); ok {
+				vm.logger.Debug("设置控件状态", interfaces.Fields{"enabled": enabled, "type": "Button", "text": btn.Text()})
+			} else {
+				vm.logger.Debug("设置控件状态", interfaces.Fields{"enabled": enabled})
+			}
+		}
+	}
+}
+
 // UpdateUI 更新 UI 显示
 func (vm *ConfigViewModel) UpdateUI() {
 	vm.logger.Info("视图操作", interfaces.Fields{
@@ -217,6 +256,26 @@ func (vm *ConfigViewModel) UpdateUI() {
 		})
 		return
 	}
+
+	// 根据服务器运行状态设置编辑控件的启用状态
+	editEnabled := !vm.serverRunning
+	vm.setControlsEnabled(editEnabled,
+		vm.nameEdit,
+		vm.versionEdit,
+		vm.hostEdit,
+		vm.portEdit,
+		vm.browseSyncDirButton,
+		vm.syncDirEdit,
+		vm.ignoreEdit,
+		vm.configTable,
+		vm.redirectTable,
+		vm.syncFolderTable,
+		vm.saveButton,
+		vm.newConfigButton,
+		vm.delConfigButton,
+		vm.addSyncFolderButton,
+		vm.delSyncFolderButton,
+	)
 
 	// 更新配置表格
 	if vm.configTable != nil {

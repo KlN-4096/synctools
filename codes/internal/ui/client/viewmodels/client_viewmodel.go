@@ -267,9 +267,6 @@ func (vm *MainViewModel) Connect() error {
 
 	vm.conn = conn
 
-	// 启动连接监听协程
-	go vm.monitorConnection()
-
 	// 设置读写超时
 	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
@@ -344,6 +341,9 @@ func (vm *MainViewModel) Connect() error {
 		"remoteAddr": conn.RemoteAddr().String(),
 	})
 
+	// 启动连接监听协程
+	go vm.monitorConnection()
+
 	// 更新UI状态
 	vm.updateUIState()
 	return nil
@@ -356,29 +356,47 @@ func (vm *MainViewModel) monitorConnection() {
 			return
 		}
 
-		// 创建一个临时的缓冲区用于测试连接
-		tmp := make([]byte, 1)
+		// 使用较短的超时时间
+		vm.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 
-		// 设置读取超时
-		vm.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		// 使用一个小buffer来检测连接状态
+		buffer := make([]byte, 1)
+		_, err := vm.conn.Read(buffer)
 
-		// 尝试读取数据（不会实际读取任何数据，只是测试连接是否断开）
-		if _, err := vm.conn.Read(tmp); err != nil {
-			if err == io.EOF || isTimeout(err) {
-				vm.logger.Warn("连接已断开", interfaces.Fields{
-					"error": err,
-				})
-				// 在UI线程中执行断开操作
-				vm.window.Synchronize(func() {
-					vm.Disconnect()
-				})
+		if err != nil {
+			if err == io.EOF {
+				// 服务器关闭了连接
+				vm.logger.Debug("服务器关闭了连接", interfaces.Fields{})
+				vm.handleConnectionLost()
 				return
 			}
-			// 如果是超时错误，继续监听
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+
+			// 忽略超时错误
+			if nErr, ok := err.(net.Error); ok && nErr.Timeout() {
 				continue
 			}
+
+			// 其他错误表示连接可能已断开
+			vm.logger.Debug("连接异常", interfaces.Fields{
+				"error": err,
+			})
+			vm.handleConnectionLost()
+			return
 		}
+	}
+}
+
+// 新增一个处理连接断开的方法
+func (vm *MainViewModel) handleConnectionLost() {
+	if vm.window != nil {
+		vm.window.Synchronize(func() {
+			vm.connected = false
+			vm.updateUIState()
+			if vm.conn != nil {
+				vm.conn.Close()
+				vm.conn = nil
+			}
+		})
 	}
 }
 
@@ -678,82 +696,4 @@ func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
 		return nil
 	}
 	return vm.syncService.GetCurrentConfig()
-}
-
-// StartSync 开始执行同步
-func (vm *MainViewModel) StartSync() error {
-	vm.logger.Debug("开始执行同步", interfaces.Fields{
-		"isConnected": vm.IsConnected(),
-		"syncPath":    vm.GetSyncPath(),
-	})
-
-	if !vm.IsConnected() {
-		vm.logger.Error("未连接到服务器", interfaces.Fields{})
-		return fmt.Errorf("未连接到服务器")
-	}
-
-	// 获取同步路径
-	path := vm.GetSyncPath()
-	if path == "" {
-		vm.logger.Error("同步路径未设置", interfaces.Fields{})
-		return fmt.Errorf("同步路径未设置")
-	}
-
-	// 创建同步请求数据
-	syncRequestData := &interfaces.SyncRequest{
-		Path:      path,
-		Mode:      interfaces.MirrorSync,
-		Direction: interfaces.DirectionPull,
-	}
-
-	// 序列化请求数据
-	payload, err := json.Marshal(syncRequestData)
-	if err != nil {
-		vm.logger.Error("序列化同步请求失败", interfaces.Fields{
-			"error": err,
-			"path":  path,
-		})
-		return fmt.Errorf("序列化同步请求失败: %v", err)
-	}
-
-	// 发送同步请求
-	syncMsg := &interfaces.Message{
-		Type:    "sync_request",
-		UUID:    vm.syncService.GetCurrentConfig().UUID,
-		Payload: payload,
-	}
-
-	if err := vm.networkOps.WriteJSON(vm.conn, syncMsg); err != nil {
-		vm.logger.Error("发送同步请求失败", interfaces.Fields{
-			"error": err,
-		})
-		return fmt.Errorf("发送同步请求失败: %v", err)
-	}
-
-	// 等待同步响应
-	var response interfaces.Message
-	if err := vm.networkOps.ReadJSON(vm.conn, &response); err != nil {
-		vm.logger.Error("读取同步响应失败", interfaces.Fields{
-			"error": err,
-		})
-		return fmt.Errorf("读取同步响应失败: %v", err)
-	}
-
-	// 解析响应
-	var syncResponse struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
-	}
-	if err := json.Unmarshal(response.Payload, &syncResponse); err != nil {
-		vm.logger.Error("解析同步响应失败", interfaces.Fields{
-			"error": err,
-		})
-		return fmt.Errorf("解析同步响应失败: %v", err)
-	}
-
-	if !syncResponse.Success {
-		return fmt.Errorf("同步失败: %s", syncResponse.Error)
-	}
-
-	return nil
 }

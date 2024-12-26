@@ -32,17 +32,22 @@ type ConfigTab struct {
 	*walk.TabPage
 
 	// UI 组件
-	configTable       *walk.TableView
-	StatusBar         *walk.StatusBarItem
-	nameEdit          *walk.LineEdit
-	versionEdit       *walk.LineEdit
-	hostEdit          *walk.LineEdit
-	portEdit          *walk.LineEdit
-	syncDirEdit       *walk.LineEdit
-	ignoreEdit        *walk.TextEdit
-	syncFolderTable   *walk.TableView
-	startServerButton *walk.PushButton
-	saveButton        *walk.PushButton
+	configTable         *walk.TableView
+	StatusBar           *walk.StatusBarItem
+	nameEdit            *walk.LineEdit
+	versionEdit         *walk.LineEdit
+	hostEdit            *walk.LineEdit
+	portEdit            *walk.LineEdit
+	browseSyncDirButton *walk.PushButton
+	syncDirEdit         *walk.LineEdit
+	ignoreEdit          *walk.TextEdit
+	syncFolderTable     *walk.TableView
+	startServerButton   *walk.PushButton
+	saveButton          *walk.PushButton
+	newConfigButton     *walk.PushButton
+	delConfigButton     *walk.PushButton
+	addSyncFolderButton *walk.PushButton
+	delSyncFolderButton *walk.PushButton
 
 	viewModel *viewmodels.ConfigViewModel
 
@@ -100,11 +105,13 @@ func (t *ConfigTab) Setup() error {
 									},
 									PushButton{
 										Text:      "新建配置",
+										AssignTo:  &t.newConfigButton,
 										MinSize:   Size{Width: 80},
 										OnClicked: t.onNewConfig,
 									},
 									PushButton{
 										Text:      "删除配置",
+										AssignTo:  &t.delConfigButton,
 										MinSize:   Size{Width: 80},
 										OnClicked: t.onDeleteConfig,
 									},
@@ -139,6 +146,7 @@ func (t *ConfigTab) Setup() error {
 											},
 											PushButton{
 												Text:      "...",
+												AssignTo:  &t.browseSyncDirButton,
 												MaxSize:   Size{Width: 30},
 												OnClicked: t.onBrowseDir,
 											},
@@ -199,11 +207,13 @@ func (t *ConfigTab) Setup() error {
 											HSpacer{},
 											PushButton{
 												Text:      "添加文件夹",
+												AssignTo:  &t.addSyncFolderButton,
 												MinSize:   Size{Width: 80},
 												OnClicked: t.onAddSyncFolder,
 											},
 											PushButton{
 												Text:      "删除文件夹",
+												AssignTo:  &t.delSyncFolderButton,
 												MinSize:   Size{Width: 80},
 												OnClicked: t.onDeleteSyncFolder,
 											},
@@ -229,11 +239,16 @@ func (t *ConfigTab) Setup() error {
 		t.versionEdit,
 		t.hostEdit,
 		t.portEdit,
+		t.browseSyncDirButton,
 		t.syncDirEdit,
 		t.ignoreEdit,
 		t.syncFolderTable,
 		t.startServerButton,
 		t.saveButton,
+		t.newConfigButton,
+		t.delConfigButton,
+		t.addSyncFolderButton,
+		t.delSyncFolderButton,
 	)
 
 	return nil

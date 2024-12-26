@@ -98,8 +98,8 @@ func (s *Server) Stop() error {
 // HandleClient 实现 interfaces.NetworkServer 接口
 func (s *Server) HandleClient(conn net.Conn) {
 	// 设置连接超时
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
 
 	defer func() {
 		conn.Close()
@@ -249,6 +249,10 @@ func (c *Client) handleMessage(msg *interfaces.Message) {
 
 // handleSyncRequest 处理同步请求
 func (c *Client) handleSyncRequest(msg *interfaces.Message) error {
+	// 重置连接超时
+	c.conn.SetReadDeadline(time.Time{})  // 清除读取超时
+	c.conn.SetWriteDeadline(time.Time{}) // 清除写入超时
+
 	var syncRequest interfaces.SyncRequest
 	if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
 		c.server.logger.Error("解析同步请求失败", interfaces.Fields{
@@ -261,6 +265,10 @@ func (c *Client) handleSyncRequest(msg *interfaces.Message) error {
 	if err := c.server.syncService.HandleSyncRequest(&syncRequest); err != nil {
 		return sendSyncErrorResponse(c, msg.UUID, err.Error())
 	}
+
+	// 同步完成后重新设置超时
+	c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 
 	// 发送成功响应
 	return sendSyncSuccessResponse(c, msg.UUID)
@@ -333,7 +341,7 @@ func (c *Client) Close() {
 
 // checkTimeout 检查客户端是否超时
 func (c *Client) checkTimeout() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -365,6 +373,19 @@ func (o *Operations) WriteJSON(conn net.Conn, data interface{}) error {
 	if conn == nil {
 		return errors.NewNetworkError("WriteJSON", "连接为空", nil)
 	}
+
+	// 打印连接信息
+	o.logger.Debug("连接信息", interfaces.Fields{
+		"localAddr":  conn.LocalAddr().String(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"type":       fmt.Sprintf("%T", conn),
+	})
+
+	// 打印数据内容
+	dataBytes, _ := json.MarshalIndent(data, "", "  ")
+	o.logger.Debug("准备发送的JSON数据", interfaces.Fields{
+		"data": string(dataBytes),
+	})
 
 	encoder := json.NewEncoder(conn)
 	if err := encoder.Encode(data); err != nil {

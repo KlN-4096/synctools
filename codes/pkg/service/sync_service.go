@@ -303,6 +303,86 @@ func (s *SyncService) SyncFiles(path string) error {
 	return nil
 }
 
+// syncFile 同步单个文件
+func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncMode, storage interfaces.Storage) error {
+	if sourcePath == "" {
+		return fmt.Errorf("源文件路径不能为空")
+	}
+	if relPath == "" {
+		return fmt.Errorf("相对路径不能为空")
+	}
+	if storage == nil {
+		return fmt.Errorf("存储服务不能为空")
+	}
+
+	if _, err := os.Stat(sourcePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("源文件不存在: %s", sourcePath)
+		}
+		return fmt.Errorf("检查源文件失败: %v", err)
+	}
+
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("读取源文件失败: %v", err)
+	}
+
+	targetPath := relPath
+	if s.config != nil && s.config.FolderRedirects != nil {
+		for _, redirect := range s.config.FolderRedirects {
+			if redirect.ServerPath != "" && strings.HasPrefix(relPath, redirect.ServerPath) {
+				targetPath = strings.Replace(relPath, redirect.ServerPath, redirect.ClientPath, 1)
+				s.logger.Debug("应用重定向规则", interfaces.Fields{
+					"source": relPath,
+					"target": targetPath,
+					"rule":   fmt.Sprintf("%s -> %s", redirect.ServerPath, redirect.ClientPath),
+				})
+				break
+			}
+		}
+	}
+
+	switch mode {
+	case interfaces.PushSync:
+		if storage.Exists(targetPath) {
+			var existingData []byte
+			if err := storage.Load(targetPath, &existingData); err != nil {
+				return fmt.Errorf("读取目标文件失败: %v", err)
+			}
+			if calculateFileHash(data) == calculateFileHash(existingData) {
+				s.logger.Debug("文件未变更，跳过同步", interfaces.Fields{
+					"file": targetPath,
+				})
+				return nil
+			}
+		}
+	case interfaces.MirrorSync:
+		s.logger.Debug("执行镜像同步", interfaces.Fields{
+			"file": targetPath,
+		})
+	case interfaces.PackSync:
+		s.logger.Debug("暂不支持pack模式", interfaces.Fields{
+			"file": targetPath,
+		})
+		return fmt.Errorf("暂不支持pack模式")
+	default:
+		return fmt.Errorf("未知的同步模式: %s", mode)
+	}
+
+	if err := storage.Save(targetPath, data); err != nil {
+		return fmt.Errorf("保存文件失败: %v", err)
+	}
+
+	s.logger.Debug("文件同步完成", interfaces.Fields{
+		"source": sourcePath,
+		"target": targetPath,
+		"mode":   mode,
+		"size":   len(data),
+	})
+
+	return nil
+}
+
 // HandleSyncRequest 实现 interfaces.SyncService 接口
 func (s *SyncService) HandleSyncRequest(request interface{}) error {
 	req, ok := request.(*interfaces.SyncRequest)
@@ -393,6 +473,9 @@ func (s *SyncService) HandleSyncRequest(request interface{}) error {
 				})
 				continue
 			}
+			s.logger.Info("测试:", interfaces.Fields{
+				"relPath": relPath,
+			})
 
 			if err := s.syncFile(file, relPath, folder.SyncMode, targetStorage); err != nil {
 				s.logger.Error("同步文件失败", interfaces.Fields{
@@ -408,6 +491,7 @@ func (s *SyncService) HandleSyncRequest(request interface{}) error {
 }
 
 // handleFileSync 根据同步模式处理文件
+// TODO 可能要删除,因为这个方法好像没有用到
 func (s *SyncService) handleFileSync(file string, info *interfaces.FileInfo, mode interfaces.SyncMode, targetStorage interfaces.Storage) error {
 	s.logger.Debug("开始处理文件同步", interfaces.Fields{
 		"file": file,
@@ -621,93 +705,6 @@ func (s *SyncService) handleFileSync(file string, info *interfaces.FileInfo, mod
 			})
 		}
 	}
-
-	return nil
-}
-
-// syncFile 同步单个文件
-func (s *SyncService) syncFile(sourcePath, relPath string, mode interfaces.SyncMode, storage interfaces.Storage) error {
-	if sourcePath == "" {
-		return fmt.Errorf("源文件路径不能为空")
-	}
-	if relPath == "" {
-		return fmt.Errorf("相对路径不能为空")
-	}
-	if storage == nil {
-		return fmt.Errorf("存储服务不能为空")
-	}
-
-	if _, err := os.Stat(sourcePath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("源文件不存在: %s", sourcePath)
-		}
-		return fmt.Errorf("检查源文件失败: %v", err)
-	}
-
-	data, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return fmt.Errorf("读取源文件失败: %v", err)
-	}
-
-	targetPath := relPath
-	if s.config != nil && s.config.FolderRedirects != nil {
-		for _, redirect := range s.config.FolderRedirects {
-			if redirect.ServerPath != "" && strings.HasPrefix(relPath, redirect.ServerPath) {
-				targetPath = strings.Replace(relPath, redirect.ServerPath, redirect.ClientPath, 1)
-				s.logger.Debug("应用重定向规则", interfaces.Fields{
-					"source": relPath,
-					"target": targetPath,
-					"rule":   fmt.Sprintf("%s -> %s", redirect.ServerPath, redirect.ClientPath),
-				})
-				break
-			}
-		}
-	}
-
-	switch mode {
-	case interfaces.PushSync:
-		if storage.Exists(targetPath) {
-			var existingData []byte
-			if err := storage.Load(targetPath, &existingData); err != nil {
-				return fmt.Errorf("读取目标文件失败: %v", err)
-			}
-			if calculateFileHash(data) == calculateFileHash(existingData) {
-				s.logger.Debug("文件未变更，跳过同步", interfaces.Fields{
-					"file": targetPath,
-				})
-				return nil
-			}
-		}
-	case interfaces.MirrorSync:
-		s.logger.Debug("执行镜像同步", interfaces.Fields{
-			"file": targetPath,
-		})
-	case interfaces.PackSync:
-		s.logger.Debug("暂不支持pack模式", interfaces.Fields{
-			"file": targetPath,
-		})
-		return fmt.Errorf("暂不支持pack模式")
-	default:
-		return fmt.Errorf("未知的同步模式: %s", mode)
-	}
-
-	targetDir := filepath.Dir(targetPath)
-	if targetDir != "." {
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			return fmt.Errorf("创建目标目录失败: %v", err)
-		}
-	}
-
-	if err := storage.Save(targetPath, data); err != nil {
-		return fmt.Errorf("保存文件失败: %v", err)
-	}
-
-	s.logger.Debug("文件同步完成", interfaces.Fields{
-		"source": sourcePath,
-		"target": targetPath,
-		"mode":   mode,
-		"size":   len(data),
-	})
 
 	return nil
 }
