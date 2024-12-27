@@ -265,40 +265,57 @@ func (s *SyncService) SetOnConfigChanged(callback func()) {
 // ==================== 3. 同步操作 ====================
 
 // SyncFiles 同步指定目录的文件
-func (s *SyncService) SyncFiles(path string) error {
+func (s *SyncService) SyncFiles(sourcePath string) error {
 	if !s.running {
 		return errors.ErrServiceNotRunning
 	}
 
-	storage, err := storage.NewFileStorage(path, s.logger)
+	s.setStatus("同步中")
+	defer func() {
+		s.setStatus("同步完成")
+		s.logger.Info("同步完成", interfaces.Fields{
+			"path": sourcePath,
+		})
+	}()
+
+	// 获取源文件夹下的所有文件
+	files, err := filepath.Glob(filepath.Join(sourcePath, "*"))
 	if err != nil {
-		s.logger.Error("创建存储服务失败", interfaces.Fields{
+		s.logger.Error("获取源文件列表失败", interfaces.Fields{
+			"path":  sourcePath,
 			"error": err,
-			"path":  path,
 		})
-		return err
+		return fmt.Errorf("获取源文件列表失败: %v", err)
 	}
 
-	s.logger.Debug("创建存储服务成功", interfaces.Fields{
-		"path": path,
-	})
+	// 遍历处理每个文件
+	for _, file := range files {
+		relPath, err := filepath.Rel(sourcePath, file)
+		if err != nil {
+			s.logger.Error("获取相对路径失败", interfaces.Fields{
+				"file":  file,
+				"error": err,
+			})
+			continue
+		}
 
-	request := &interfaces.SyncRequest{
-		Path:    path,
-		Storage: storage,
+		// 检查是否在忽略列表中
+		if s.isIgnored(relPath) {
+			s.logger.Debug("忽略文件", interfaces.Fields{
+				"file": relPath,
+			})
+			continue
+		}
+
+		// 同步文件
+		if err := s.syncFile(file, relPath, interfaces.MirrorSync, s.storage); err != nil {
+			s.logger.Error("同步文件失败", interfaces.Fields{
+				"file":  file,
+				"error": err,
+			})
+			continue
+		}
 	}
-
-	if err := s.HandleSyncRequest(request); err != nil {
-		s.logger.Error("同步失败", interfaces.Fields{
-			"error": err,
-			"path":  path,
-		})
-		return fmt.Errorf("同步失败: %v", err)
-	}
-
-	s.logger.Info("同步完成", interfaces.Fields{
-		"path": path,
-	})
 
 	return nil
 }

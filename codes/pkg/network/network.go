@@ -374,6 +374,10 @@ func (o *Operations) WriteJSON(conn net.Conn, data interface{}) error {
 		return errors.NewNetworkError("WriteJSON", "连接为空", nil)
 	}
 
+	// 设置写入超时
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetWriteDeadline(time.Time{})
+
 	// 打印连接信息
 	o.logger.Debug("连接信息", interfaces.Fields{
 		"localAddr":  conn.LocalAddr().String(),
@@ -399,6 +403,10 @@ func (o *Operations) ReadJSON(conn net.Conn, data interface{}) error {
 	if conn == nil {
 		return errors.NewNetworkError("ReadJSON", "连接为空", nil)
 	}
+
+	// 设置读取超时
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
 
 	decoder := json.NewDecoder(conn)
 	if err := decoder.Decode(data); err != nil {
