@@ -54,27 +54,6 @@ type NetworkServer interface {
 	IsRunning() bool
 }
 
-// NetworkOperations 定义网络操作接口
-type NetworkOperations interface {
-	// WriteJSON writes JSON data to connection
-	WriteJSON(conn net.Conn, data interface{}) error
-
-	// ReadJSON reads JSON data from connection
-	ReadJSON(conn net.Conn, data interface{}) error
-
-	// SendFile sends file through connection
-	SendFile(conn net.Conn, path string, progress chan<- Progress) error
-
-	// ReceiveFile receives file through connection
-	ReceiveFile(conn net.Conn, path string, progress chan<- Progress) error
-
-	// SendFiles sends multiple files through connection
-	SendFiles(conn net.Conn, files []string, progress chan<- Progress) error
-
-	// ReceiveFiles receives multiple files through connection
-	ReceiveFiles(conn net.Conn, destDir string, progress chan<- Progress) error
-}
-
 // FileTransfer 定义文件传输操作接口
 type FileTransfer interface {
 	// CopyFile copies file with progress reporting

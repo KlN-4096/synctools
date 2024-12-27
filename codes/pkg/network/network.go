@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/errors"
+	"synctools/codes/pkg/network/message"
 )
 
 // Server 网络服务器实现
@@ -24,7 +23,6 @@ type Server struct {
 	logger      interfaces.Logger
 	running     bool
 	status      string
-	networkOps  interfaces.NetworkOperations
 }
 
 // NewServer 创建新的网络服务器
@@ -35,11 +33,10 @@ func NewServer(config *interfaces.Config, syncService interfaces.SyncService, lo
 		clients:     make(map[string]*Client),
 		logger:      logger,
 		status:      "初始化",
-		networkOps:  NewOperations(logger),
 	}
 }
 
-// Start 实现 interfaces.NetworkServer 接口
+// Start 启动服务器
 func (s *Server) Start() error {
 	if s.running {
 		return errors.ErrNetworkServerStart
@@ -62,13 +59,11 @@ func (s *Server) Start() error {
 		"address": s.listener.Addr().String(),
 	})
 
-	// 在新的 goroutine 中处理客户端连接
 	go s.acceptLoop()
-
 	return nil
 }
 
-// Stop 实现 interfaces.NetworkServer 接口
+// Stop 停止服务器
 func (s *Server) Stop() error {
 	if !s.running {
 		return nil
@@ -95,9 +90,8 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// HandleClient 实现 interfaces.NetworkServer 接口
+// HandleClient 处理客户端连接
 func (s *Server) HandleClient(conn net.Conn) {
-	// 设置连接超时
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
 
@@ -111,15 +105,15 @@ func (s *Server) HandleClient(conn net.Conn) {
 
 	client := NewClient(conn, s)
 	s.addClient(client)
-	client.Start() // 直接调用，不使用 goroutine
+	client.Start()
 }
 
-// GetStatus 实现 interfaces.NetworkServer 接口
+// GetStatus 获取服务器状态
 func (s *Server) GetStatus() string {
 	return s.status
 }
 
-// IsRunning 实现 interfaces.NetworkServer 接口
+// IsRunning 检查服务器是否运行中
 func (s *Server) IsRunning() bool {
 	return s.running
 }
@@ -180,6 +174,7 @@ type Client struct {
 	conn         net.Conn
 	server       *Server
 	lastActivity time.Time
+	msgSender    *message.MessageSender
 }
 
 // NewClient 创建新的客户端
@@ -189,11 +184,10 @@ func NewClient(conn net.Conn, server *Server) *Client {
 		conn:         conn,
 		server:       server,
 		lastActivity: time.Now(),
+		msgSender:    message.NewMessageSender(server.logger),
 	}
 
-	// 启动超时检查
 	go client.checkTimeout()
-
 	return client
 }
 
@@ -202,8 +196,8 @@ func (c *Client) Start() {
 	defer c.Close()
 
 	for {
-		var msg interfaces.Message
-		if err := c.server.networkOps.ReadJSON(c.conn, &msg); err != nil {
+		msg, err := c.msgSender.ReceiveMessage(c.conn)
+		if err != nil {
 			if err != io.EOF {
 				c.server.logger.Error("读取消息失败", interfaces.Fields{
 					"client": c.ID,
@@ -214,7 +208,7 @@ func (c *Client) Start() {
 		}
 
 		c.lastActivity = time.Now()
-		c.handleMessage(&msg)
+		c.handleMessage(msg)
 	}
 }
 
@@ -240,6 +234,8 @@ func (c *Client) handleMessage(msg *interfaces.Message) {
 				"uuid":  msg.UUID,
 			})
 		}
+	case "heartbeat":
+		c.lastActivity = time.Now()
 	default:
 		c.server.logger.Error("未知的消息类型", interfaces.Fields{
 			"type": msg.Type,
@@ -247,90 +243,36 @@ func (c *Client) handleMessage(msg *interfaces.Message) {
 	}
 }
 
-// handleSyncRequest 处理同步请求
-func (c *Client) handleSyncRequest(msg *interfaces.Message) error {
-	// 重置连接超时
-	c.conn.SetReadDeadline(time.Time{})  // 清除读取超时
-	c.conn.SetWriteDeadline(time.Time{}) // 清除写入超时
-
-	var syncRequest interfaces.SyncRequest
-	if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
-		c.server.logger.Error("解析同步请求失败", interfaces.Fields{
-			"error": err,
-		})
-		return sendSyncErrorResponse(c, msg.UUID, fmt.Sprintf("解析同步请求失败: %v", err))
-	}
-
-	// 执行同步操作
-	if err := c.server.syncService.HandleSyncRequest(&syncRequest); err != nil {
-		return sendSyncErrorResponse(c, msg.UUID, err.Error())
-	}
-
-	// 同步完成后重新设置超时
-	c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-
-	// 发送成功响应
-	return sendSyncSuccessResponse(c, msg.UUID)
-}
-
-// sendSyncErrorResponse 发送同步错误响应
-func sendSyncErrorResponse(c *Client, uuid string, errMsg string) error {
-	response := &interfaces.Message{
-		Type: "sync_response",
-		UUID: uuid,
-		Payload: json.RawMessage(`{
-			"success": false,
-			"error": "` + errMsg + `"
-		}`),
-	}
-	return c.server.networkOps.WriteJSON(c.conn, response)
-}
-
-// sendSyncSuccessResponse 发送同步成功响应
-func sendSyncSuccessResponse(c *Client, uuid string) error {
-	response := &interfaces.Message{
-		Type: "sync_response",
-		UUID: uuid,
-		Payload: json.RawMessage(`{
-			"success": true
-		}`),
-	}
-	return c.server.networkOps.WriteJSON(c.conn, response)
-}
-
 // handleInitMessage 处理初始化消息
 func (c *Client) handleInitMessage(msg *interfaces.Message) error {
-	// 保存客户端UUID
 	c.UUID = msg.UUID
+	return c.msgSender.SendSyncResponse(c.conn, msg.UUID, true, "初始化成功")
+}
 
-	// 获取当前服务器配置
-	config := c.server.syncService.GetCurrentConfig()
+// handleSyncRequest 处理同步请求
+func (c *Client) handleSyncRequest(msg *interfaces.Message) error {
+	c.conn.SetReadDeadline(time.Time{})
+	c.conn.SetWriteDeadline(time.Time{})
+	defer func() {
+		c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	}()
 
-	// 构造响应数据结构
-	responseData := struct {
-		Success bool               `json:"success"`
-		Config  *interfaces.Config `json:"config"`
-	}{
-		Success: true,
-		Config:  config,
-	}
-
-	// 序列化响应数据
-	responseJSON, err := json.Marshal(responseData)
+	var syncRequest interfaces.SyncRequest
+	syncMsg, err := c.msgSender.ReceiveMessage(c.conn)
 	if err != nil {
-		return fmt.Errorf("序列化响应数据失败: %v", err)
+		return c.msgSender.SendSyncResponse(c.conn, msg.UUID, false, fmt.Sprintf("接收同步请求失败: %v", err))
 	}
 
-	// 准备响应消息
-	response := &interfaces.Message{
-		Type:    "init_response",
-		UUID:    msg.UUID,
-		Payload: responseJSON,
+	if err := json.Unmarshal(syncMsg.Payload, &syncRequest); err != nil {
+		return c.msgSender.SendSyncResponse(c.conn, msg.UUID, false, fmt.Sprintf("解析同步请求失败: %v", err))
 	}
 
-	// 发送响应
-	return c.server.networkOps.WriteJSON(c.conn, response)
+	if err := c.server.syncService.HandleSyncRequest(&syncRequest); err != nil {
+		return c.msgSender.SendSyncResponse(c.conn, msg.UUID, false, err.Error())
+	}
+
+	return c.msgSender.SendSyncResponse(c.conn, msg.UUID, true, "同步成功")
 }
 
 // Close 关闭客户端连接
@@ -354,203 +296,4 @@ func (c *Client) checkTimeout() {
 			return
 		}
 	}
-}
-
-// Operations 实现网络操作接口
-type Operations struct {
-	logger interfaces.Logger
-}
-
-// NewOperations 创建网络操作实例
-func NewOperations(logger interfaces.Logger) interfaces.NetworkOperations {
-	return &Operations{
-		logger: logger,
-	}
-}
-
-// WriteJSON 写入JSON数据
-func (o *Operations) WriteJSON(conn net.Conn, data interface{}) error {
-	if conn == nil {
-		return errors.NewNetworkError("WriteJSON", "连接为空", nil)
-	}
-
-	// 设置写入超时
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	defer conn.SetWriteDeadline(time.Time{})
-
-	// 打印连接信息
-	o.logger.Debug("连接信息", interfaces.Fields{
-		"localAddr":  conn.LocalAddr().String(),
-		"remoteAddr": conn.RemoteAddr().String(),
-		"type":       fmt.Sprintf("%T", conn),
-	})
-
-	// 打印数据内容
-	dataBytes, _ := json.MarshalIndent(data, "", "  ")
-	o.logger.Debug("准备发送的JSON数据", interfaces.Fields{
-		"data": string(dataBytes),
-	})
-
-	encoder := json.NewEncoder(conn)
-	if err := encoder.Encode(data); err != nil {
-		return errors.NewNetworkError("WriteJSON", "编码JSON数据失败", err)
-	}
-	return nil
-}
-
-// ReadJSON 读取JSON数据
-func (o *Operations) ReadJSON(conn net.Conn, data interface{}) error {
-	if conn == nil {
-		return errors.NewNetworkError("ReadJSON", "连接为空", nil)
-	}
-
-	// 设置读取超时
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	defer conn.SetReadDeadline(time.Time{})
-
-	decoder := json.NewDecoder(conn)
-	if err := decoder.Decode(data); err != nil {
-		return errors.NewNetworkError("ReadJSON", "解码JSON数据失败", err)
-	}
-	return nil
-}
-
-// SendFile 发送文件
-func (o *Operations) SendFile(conn net.Conn, path string, progress chan<- interfaces.Progress) error {
-	if conn == nil {
-		return errors.NewNetworkError("SendFile", "连接为空", nil)
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		return errors.NewNetworkError("SendFile", "打开文件失败", err)
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return errors.NewNetworkError("SendFile", "获取文件信息失败", err)
-	}
-
-	buffer := make([]byte, 32*1024)
-	totalWritten := int64(0)
-	startTime := time.Now()
-
-	for {
-		n, err := file.Read(buffer)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return errors.NewNetworkError("SendFile", "读取文件失败", err)
-		}
-
-		written, err := conn.Write(buffer[:n])
-		if err != nil {
-			return errors.NewNetworkError("SendFile", "写入数据失败", err)
-		}
-
-		totalWritten += int64(written)
-
-		if progress != nil {
-			elapsed := time.Since(startTime).Seconds()
-			speed := float64(totalWritten) / elapsed
-			remaining := int64((float64(info.Size()-totalWritten) / speed))
-
-			progress <- interfaces.Progress{
-				Total:     info.Size(),
-				Current:   totalWritten,
-				Speed:     speed,
-				Remaining: remaining,
-				FileName:  filepath.Base(path),
-				Status:    "sending",
-			}
-		}
-	}
-
-	return nil
-}
-
-// ReceiveFile 接收文件
-func (o *Operations) ReceiveFile(conn net.Conn, path string, progress chan<- interfaces.Progress) error {
-	if conn == nil {
-		return errors.NewNetworkError("ReceiveFile", "连接为空", nil)
-	}
-
-	// 确保目录存在
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return errors.NewNetworkError("ReceiveFile", "创建目录失败", err)
-	}
-
-	file, err := os.Create(path)
-	if err != nil {
-		return errors.NewNetworkError("ReceiveFile", "创建文件失败", err)
-	}
-	defer file.Close()
-
-	buffer := make([]byte, 32*1024)
-	totalRead := int64(0)
-	startTime := time.Now()
-
-	for {
-		n, err := conn.Read(buffer)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return errors.NewNetworkError("ReceiveFile", "读取数据失败", err)
-		}
-
-		written, err := file.Write(buffer[:n])
-		if err != nil {
-			return errors.NewNetworkError("ReceiveFile", "写入文件失败", err)
-		}
-
-		totalRead += int64(written)
-
-		if progress != nil {
-			elapsed := time.Since(startTime).Seconds()
-			speed := float64(totalRead) / elapsed
-
-			progress <- interfaces.Progress{
-				Total:     -1, // 未知总大小
-				Current:   totalRead,
-				Speed:     speed,
-				Remaining: -1, // 未知剩余时间
-				FileName:  filepath.Base(path),
-				Status:    "receiving",
-			}
-		}
-	}
-
-	return nil
-}
-
-// SendFiles 发送多个文件
-func (o *Operations) SendFiles(conn net.Conn, files []string, progress chan<- interfaces.Progress) error {
-	for _, file := range files {
-		if err := o.SendFile(conn, file, progress); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ReceiveFiles 接收多个文件
-func (o *Operations) ReceiveFiles(conn net.Conn, destDir string, progress chan<- interfaces.Progress) error {
-	for {
-		var fileInfo interfaces.FileInfo
-		if err := o.ReadJSON(conn, &fileInfo); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return err
-		}
-
-		destPath := filepath.Join(destDir, fileInfo.Path)
-		if err := o.ReceiveFile(conn, destPath, progress); err != nil {
-			return err
-		}
-	}
-	return nil
 }

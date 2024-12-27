@@ -56,7 +56,7 @@ func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logg
 		serverAddr:    "localhost",
 		serverPort:    "9527",
 		syncPath:      "",
-		networkClient: client.NewNetworkClient(logger),
+		networkClient: client.NewNetworkClient(logger, syncService),
 	}
 
 	// 从配置中读取服务器地址和端口
@@ -216,12 +216,16 @@ func (vm *MainViewModel) updateUIState() {
 
 // Connect 连接到服务器
 func (vm *MainViewModel) Connect() error {
-	return vm.networkClient.Connect(vm.serverAddr, vm.serverPort)
+	vm.networkClient.Connect(vm.serverAddr, vm.serverPort)
+	vm.updateUIState()
+	return nil
 }
 
 // Disconnect 断开连接
 func (vm *MainViewModel) Disconnect() error {
-	return vm.networkClient.Disconnect()
+	vm.networkClient.Disconnect()
+	vm.updateUIState()
+	return nil
 }
 
 // IsConnected 检查是否已连接

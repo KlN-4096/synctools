@@ -1,31 +1,34 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"time"
 
 	"synctools/codes/internal/interfaces"
-	"synctools/codes/pkg/network"
+	"synctools/codes/pkg/network/message"
 )
 
 // NetworkClient 网络客户端结构体
 type NetworkClient struct {
-	logger     interfaces.Logger
-	conn       net.Conn
-	networkOps interfaces.NetworkOperations
-	serverAddr string
-	serverPort string
-	connected  bool
-	onConnLost func()
+	logger      interfaces.Logger
+	conn        net.Conn
+	serverAddr  string
+	serverPort  string
+	connected   bool
+	onConnLost  func()
+	syncService interfaces.SyncService
+	msgSender   *message.MessageSender
 }
 
 // NewNetworkClient 创建新的网络客户端
-func NewNetworkClient(logger interfaces.Logger) *NetworkClient {
+func NewNetworkClient(logger interfaces.Logger, syncService interfaces.SyncService) *NetworkClient {
 	return &NetworkClient{
-		logger:     logger,
-		networkOps: network.NewOperations(logger),
-		connected:  false,
+		logger:      logger,
+		connected:   false,
+		syncService: syncService,
+		msgSender:   message.NewMessageSender(logger),
 	}
 }
 
@@ -35,10 +38,6 @@ func (c *NetworkClient) Connect(addr, port string) error {
 		"serverAddr": addr,
 		"serverPort": port,
 	})
-
-	if c.IsConnected() {
-		return fmt.Errorf("已经连接到服务器")
-	}
 
 	// 验证地址和端口
 	if addr == "" || port == "" {
@@ -61,8 +60,71 @@ func (c *NetworkClient) Connect(addr, port string) error {
 	c.conn = conn
 	c.connected = true
 
-	// 启动连接监控
+	// 发送初始化消息
+	config := c.syncService.GetCurrentConfig()
+	if err := c.msgSender.SendInitMessage(conn, config.UUID); err != nil {
+		c.logger.Error("发送初始化消息失败", interfaces.Fields{
+			"error": err,
+		})
+		c.conn.Close()
+		c.conn = nil
+		c.connected = false
+		return fmt.Errorf("发送初始化消息失败: %v", err)
+	}
+
+	// 等待初始化响应
+	if err := c.waitInitResponse(); err != nil {
+		c.logger.Error("等待初始化响应失败", interfaces.Fields{
+			"error": err,
+		})
+		c.conn.Close()
+		c.conn = nil
+		c.connected = false
+		return fmt.Errorf("等待初始化响应失败: %v", err)
+	}
+
 	go c.monitorConnection()
+
+	return nil
+}
+
+// waitInitResponse 等待初始化响应
+func (c *NetworkClient) waitInitResponse() error {
+	// 设置读取超时
+	c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	defer c.conn.SetReadDeadline(time.Time{})
+
+	msg, err := c.msgSender.ReceiveMessage(c.conn)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	if msg.Type != "init_response" {
+		return fmt.Errorf("收到意外的响应类型: %s", msg.Type)
+	}
+
+	// 解析配置响应
+	var configResponse struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Config  struct {
+			HeartbeatInterval int `json:"heartbeat_interval"`
+			ReadTimeout       int `json:"read_timeout"`
+		} `json:"config"`
+	}
+
+	if err := json.Unmarshal(msg.Payload, &configResponse); err != nil {
+		return fmt.Errorf("解析配置响应失败: %v", err)
+	}
+
+	if !configResponse.Success {
+		return fmt.Errorf("服务器拒绝连接: %s", configResponse.Message)
+	}
+
+	c.logger.Debug("连接初始化成功", interfaces.Fields{
+		"heartbeatInterval": configResponse.Config.HeartbeatInterval,
+		"readTimeout":       configResponse.Config.ReadTimeout,
+	})
 
 	return nil
 }
@@ -100,7 +162,8 @@ func (c *NetworkClient) SendData(data interface{}) error {
 		return fmt.Errorf("未连接到服务器")
 	}
 
-	return c.networkOps.WriteJSON(c.conn, data)
+	config := c.syncService.GetCurrentConfig()
+	return c.msgSender.SendMessage(c.conn, "data", config.UUID, data)
 }
 
 // ReceiveData 接收数据
@@ -109,7 +172,12 @@ func (c *NetworkClient) ReceiveData(v interface{}) error {
 		return fmt.Errorf("未连接到服务器")
 	}
 
-	return c.networkOps.ReadJSON(c.conn, v)
+	msg, err := c.msgSender.ReceiveMessage(c.conn)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(msg.Payload, v)
 }
 
 // SetConnectionLostCallback 设置连接丢失回调
