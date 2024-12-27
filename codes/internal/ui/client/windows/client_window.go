@@ -25,51 +25,59 @@ import (
 )
 
 // handleWindowClosing 处理窗口关闭事件
-func handleWindowClosing(viewModel *viewmodels.MainViewModel) {
+func handleWindowClosing(viewModel *viewmodels.MainViewModel, logger interfaces.Logger) {
 	if viewModel == nil {
 		return
 	}
 
-	viewModel.LogDebug("窗口正在关闭")
+	logger.Debug("窗口正在关闭", interfaces.Fields{})
 
 	// 断开连接
 	if viewModel.IsConnected() {
 		if err := viewModel.Disconnect(); err != nil {
-			viewModel.LogError("断开连接失败", err)
+			logger.Error("断开连接失败", interfaces.Fields{
+				"error": err,
+			})
 		}
 	}
 
-	viewModel.LogDebug("应用程序正在退出")
+	logger.Debug("应用程序正在退出", interfaces.Fields{})
 }
 
 // CreateMainWindow 创建客户端主窗口
-func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
+func CreateMainWindow(viewModel *viewmodels.MainViewModel, logger interfaces.Logger) error {
 	// 设置panic处理
 	defer func() {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
-				viewModel.LogError("程序崩溃", err)
+				logger.Error("程序崩溃", interfaces.Fields{
+					"error": err,
+				})
 			} else {
-				viewModel.LogError("程序崩溃", fmt.Errorf("%v", r))
+				logger.Error("程序崩溃", interfaces.Fields{
+					"error": fmt.Errorf("%v", r),
+				})
 			}
 			debug.PrintStack()
 		}
 	}()
 
-	viewModel.LogDebug("开始创建主窗口")
+	logger.Debug("开始创建主窗口", interfaces.Fields{})
 
 	// 创建客户端标签页
-	viewModel.LogDebug("正在创建客户端标签页")
+	logger.Debug("正在创建客户端标签页", interfaces.Fields{})
 	clientTab, err := views.NewClientTab(viewModel)
 	if err != nil {
-		viewModel.LogError("创建客户端标签页失败", err)
+		logger.Error("创建客户端标签页失败", interfaces.Fields{
+			"error": err,
+		})
 		return err
 	}
 	if clientTab == nil {
-		viewModel.LogError("客户端标签页为空", nil)
+		logger.Error("客户端标签页为空", interfaces.Fields{})
 		return fmt.Errorf("客户端标签页为空")
 	}
-	viewModel.LogDebug("客户端标签页创建成功")
+	logger.Debug("客户端标签页创建成功", interfaces.Fields{})
 
 	var mainWindow *walk.MainWindow
 
@@ -87,7 +95,7 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 					declarative.Action{
 						Text: "退出(&X)",
 						OnTriggered: func() {
-							handleWindowClosing(viewModel)
+							handleWindowClosing(viewModel, logger)
 							mainWindow.Close()
 						},
 					},
@@ -121,12 +129,12 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 									declarative.CheckBox{
 										AssignTo: &debugCheckBox,
 										Text:     "调试模式",
-										Checked:  viewModel.GetLogger().GetLevel() == interfaces.DEBUG,
+										Checked:  logger.GetLevel() == interfaces.DEBUG,
 										OnCheckedChanged: func() {
 											if debugCheckBox.Checked() {
-												viewModel.GetLogger().SetLevel(interfaces.DEBUG)
+												logger.SetLevel(interfaces.DEBUG)
 											} else {
-												viewModel.GetLogger().SetLevel(interfaces.INFO)
+												logger.SetLevel(interfaces.INFO)
 											}
 										},
 									},
@@ -160,38 +168,44 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 			},
 		},
 	}.Create()); err != nil {
-		viewModel.LogError("创建窗口失败", err)
+		logger.Error("创建窗口失败", interfaces.Fields{
+			"error": err,
+		})
 		return err
 	}
 	if mainWindow == nil {
-		viewModel.LogError("主窗口为空", nil)
+		logger.Error("主窗口为空", interfaces.Fields{})
 		return fmt.Errorf("主窗口为空")
 	}
-	viewModel.LogDebug("主窗口创建成功")
+	logger.Debug("主窗口创建成功", interfaces.Fields{})
 
 	// 初始化视图模型
-	viewModel.LogDebug("正在初始化视图模型")
+	logger.Debug("正在初始化视图模型", interfaces.Fields{})
 	if err := viewModel.Initialize(mainWindow); err != nil {
-		viewModel.LogError("初始化视图模型失败", err)
+		logger.Error("初始化视图模型失败", interfaces.Fields{
+			"error": err,
+		})
 		return err
 	}
-	viewModel.LogDebug("视图模型初始化成功")
+	logger.Debug("视图模型初始化成功", interfaces.Fields{})
 
 	// 设置客户端标签页的UI
-	viewModel.LogDebug("正在设置客户端标签页UI")
+	logger.Debug("正在设置客户端标签页UI", interfaces.Fields{})
 	if err := clientTab.Setup(); err != nil {
-		viewModel.LogError("设置客户端标签页UI失败", err)
+		logger.Error("设置客户端标签页UI失败", interfaces.Fields{
+			"error": err,
+		})
 		return err
 	}
-	viewModel.LogDebug("客户端标签页UI设置成功")
+	logger.Debug("客户端标签页UI设置成功", interfaces.Fields{})
 
 	// 设置关闭事件处理
 	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		handleWindowClosing(viewModel)
+		handleWindowClosing(viewModel, logger)
 	})
 
 	// 显示窗口
-	viewModel.LogDebug("正在显示主窗口")
+	logger.Debug("正在显示主窗口", interfaces.Fields{})
 	mainWindow.Run()
 	return nil
 }

@@ -88,7 +88,7 @@ func main() {
 	}
 
 	// 创建并运行主窗口
-	if err := windows.CreateMainWindow(mainViewModel); err != nil {
+	if err := windows.CreateMainWindow(mainViewModel, c.GetLogger()); err != nil {
 		logger.Fatal("创建主窗口失败", interfaces.Fields{
 			"error": err,
 		})
