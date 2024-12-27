@@ -44,7 +44,7 @@ import (
 
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/errors"
-	"synctools/codes/pkg/network"
+	network "synctools/codes/pkg/network/server"
 	"synctools/codes/pkg/storage"
 )
 

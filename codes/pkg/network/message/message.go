@@ -56,17 +56,6 @@ func (s *MessageSender) SendMessage(conn net.Conn, msgType string, uuid string, 
 	return encoder.Encode(msg)
 }
 
-// SendMessageToAddr 发送消息到指定地址
-func (s *MessageSender) SendMessageToAddr(addr string, msgType string, uuid string, payload interface{}) error {
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("连接到 %s 失败: %v", addr, err)
-	}
-	defer conn.Close()
-
-	return s.SendMessage(conn, msgType, uuid, payload)
-}
-
 // ReceiveMessage 从连接接收消息
 func (s *MessageSender) ReceiveMessage(conn net.Conn) (*interfaces.Message, error) {
 	if conn == nil {
@@ -86,33 +75,6 @@ func (s *MessageSender) ReceiveMessage(conn net.Conn) (*interfaces.Message, erro
 	})
 
 	return &msg, nil
-}
-
-// SendInitMessage 发送初始化消息
-func (s *MessageSender) SendInitMessage(conn net.Conn, uuid string) error {
-	return s.SendMessage(conn, "init", uuid, nil)
-}
-
-// SendSyncRequest 发送同步请求
-func (s *MessageSender) SendSyncRequest(conn net.Conn, uuid string, request *interfaces.SyncRequest) error {
-	return s.SendMessage(conn, "sync_request", uuid, request)
-}
-
-// SendSyncResponse 发送同步响应
-func (s *MessageSender) SendSyncResponse(conn net.Conn, uuid string, success bool, message string) error {
-	response := struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-	}{
-		Success: success,
-		Message: message,
-	}
-	return s.SendMessage(conn, "sync_response", uuid, response)
-}
-
-// SendHeartbeat 发送心跳包
-func (s *MessageSender) SendHeartbeat(conn net.Conn, uuid string) error {
-	return s.SendMessage(conn, "heartbeat", uuid, nil)
 }
 
 // SendFile 发送文件

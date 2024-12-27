@@ -24,7 +24,7 @@ import (
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/config"
 	"synctools/codes/pkg/logger"
-	"synctools/codes/pkg/network"
+	network "synctools/codes/pkg/network/server"
 	"synctools/codes/pkg/service"
 	"synctools/codes/pkg/storage"
 )
