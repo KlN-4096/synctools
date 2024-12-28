@@ -249,12 +249,11 @@ func (vm *MainViewModel) SaveConfig() error {
 	if port <= 0 {
 		return fmt.Errorf("无效的端口号")
 	}
+	config := vm.GetCurrentConfig()
 
-	config := &interfaces.Config{
-		Host:    vm.serverAddr,
-		Port:    port,
-		SyncDir: vm.syncPath,
-	}
+	config.Host = vm.serverAddr
+	config.Port = port
+	config.SyncDir = vm.syncPath
 
 	if err := vm.syncService.ValidateConfig(config); err != nil {
 		return fmt.Errorf("配置验证失败: %v", err)

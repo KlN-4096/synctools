@@ -562,8 +562,7 @@ func (vm *ConfigViewModel) StopServer() error {
 func (vm *ConfigViewModel) BrowseSyncDir() error {
 	dlg := walk.FileDialog{
 		Title:          "选择同步目录",
-		FilePath:       vm.syncDirEdit.Text(),
-		InitialDirPath: filepath.Dir(vm.syncDirEdit.Text()),
+		InitialDirPath: "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
 	}
 
 	if ok, err := dlg.ShowBrowseFolder(vm.window); err != nil {
