@@ -271,17 +271,22 @@ func (s *Server) HandleClient(conn net.Conn) {
 			}
 
 			// 如果是获取文件列表的请求
-			if syncRequest.Mode == interfaces.MirrorSync && syncRequest.Direction == interfaces.DirectionPull && syncRequest.Path == "" {
+			if syncRequest.Mode == interfaces.MirrorSync && syncRequest.Direction == interfaces.DirectionPull && syncRequest.Path != "" {
+				s.logger.Debug("处理获取文件列表请求", interfaces.Fields{
+					"folder": syncRequest.Path,
+				})
+
 				// 获取同步目录
-				syncDir := s.config.SyncDir
-				if syncRequest.Path != "" {
-					syncDir = filepath.Join(syncDir, syncRequest.Path)
-				}
+				syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
 
 				// 获取文件列表和MD5
 				md5Map := make(map[string]string)
 				err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
 					if err != nil {
+						if os.IsNotExist(err) {
+							// 如果目录不存在，返回空列表
+							return nil
+						}
 						return err
 					}
 					if !info.IsDir() {
@@ -304,8 +309,9 @@ func (s *Server) HandleClient(conn net.Conn) {
 						md5Map[relPath] = md5sum
 
 						s.logger.Debug("计算文件MD5", interfaces.Fields{
-							"file": relPath,
-							"md5":  md5sum,
+							"folder": syncRequest.Path,
+							"file":   relPath,
+							"md5":    md5sum,
 						})
 					}
 					return nil
@@ -313,7 +319,8 @@ func (s *Server) HandleClient(conn net.Conn) {
 
 				if err != nil {
 					s.logger.Error("获取文件MD5失败", interfaces.Fields{
-						"error": err,
+						"folder": syncRequest.Path,
+						"error":  err,
 					})
 					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
 						"success": false,
@@ -323,7 +330,8 @@ func (s *Server) HandleClient(conn net.Conn) {
 				}
 
 				s.logger.Info("返回文件MD5列表", interfaces.Fields{
-					"count": len(md5Map),
+					"folder": syncRequest.Path,
+					"count":  len(md5Map),
 				})
 
 				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
@@ -334,7 +342,7 @@ func (s *Server) HandleClient(conn net.Conn) {
 			}
 
 			// 处理文件下载请求
-			if syncRequest.Direction == interfaces.DirectionPull && syncRequest.Path != "" {
+			if syncRequest.Direction == interfaces.DirectionPull && syncRequest.Path != "" && syncRequest.Mode != interfaces.MirrorSync {
 				// 处理文件下载请求
 				filePath := filepath.Join(s.config.SyncDir, syncRequest.Path)
 				s.logger.Debug("处理文件下载请求", interfaces.Fields{
