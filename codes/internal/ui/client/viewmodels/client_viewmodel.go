@@ -299,9 +299,6 @@ func (vm *MainViewModel) GetSyncPath() string {
 
 // SyncFiles 同步文件
 func (vm *MainViewModel) SyncFiles(path string) error {
-	if !vm.IsConnected() {
-		return fmt.Errorf("未连接到服务器")
-	}
 
 	if vm.syncService == nil {
 		return fmt.Errorf("同步服务未初始化")

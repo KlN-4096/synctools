@@ -78,10 +78,6 @@ func (s *ClientSyncService) IsConnected() bool {
 
 // SyncFiles 同步文件
 func (s *ClientSyncService) SyncFiles(sourcePath string) error {
-	if !s.IsConnected() {
-		return fmt.Errorf("未连接到服务器")
-	}
-
 	s.SetStatus("同步中")
 	defer s.SetStatus("同步完成")
 
