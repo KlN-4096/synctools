@@ -132,12 +132,12 @@ func (c *NetworkClient) IsConnected() bool {
 }
 
 // SendData 发送数据
-func (c *NetworkClient) SendData(data interface{}) error {
+func (c *NetworkClient) SendData(msgType string, data interface{}) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("未连接到服务器")
 	}
 	config := c.syncService.GetCurrentConfig()
-	return c.msgSender.SendMessage(c.conn, "data", config.UUID, data)
+	return c.msgSender.SendMessage(c.conn, msgType, config.UUID, data)
 }
 
 // ReceiveData 接收数据

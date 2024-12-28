@@ -3,11 +3,9 @@ package message
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"time"
 
 	"synctools/codes/internal/interfaces"
 )
@@ -85,70 +83,37 @@ func (s *MessageSender) SendFile(conn net.Conn, uuid string, path string, progre
 		return fmt.Errorf("获取文件信息失败: %v", err)
 	}
 
-	info := interfaces.FileInfo{
-		Path: filepath.Base(path),
-		Size: fileInfo.Size(),
-	}
-
-	if err := s.SendMessage(conn, "file_info", uuid, info); err != nil {
-		return fmt.Errorf("发送文件信息失败: %v", err)
-	}
-
-	// 2. 发送文件内容
-	file, err := os.Open(path)
+	// 2. 读取整个文件内容
+	fileContent, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("打开文件失败: %v", err)
+		return fmt.Errorf("读取文件失败: %v", err)
 	}
-	defer file.Close()
 
-	buffer := make([]byte, 32*1024)
-	totalWritten := int64(0)
-	startTime := time.Now()
+	// 3. 发送文件内容
+	chunk := struct {
+		Data []byte `json:"data"`
+	}{
+		Data: fileContent,
+	}
+	if err := s.SendMessage(conn, "file_data", uuid, chunk); err != nil {
+		return fmt.Errorf("发送文件数据失败: %v", err)
+	}
 
-	for {
-		n, err := file.Read(buffer)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("读取文件失败: %v", err)
-		}
-
-		// 发送文件块
-		chunk := struct {
-			Data []byte `json:"data"`
-		}{
-			Data: buffer[:n],
-		}
-		if err := s.SendMessage(conn, "file_data", uuid, chunk); err != nil {
-			return fmt.Errorf("发送文件数据失败: %v", err)
-		}
-
-		totalWritten += int64(n)
-
-		if progress != nil {
-			elapsed := time.Since(startTime).Seconds()
-			speed := float64(totalWritten) / elapsed
-			remaining := int64((float64(fileInfo.Size()-totalWritten) / speed))
-
-			progress <- interfaces.Progress{
-				Total:     fileInfo.Size(),
-				Current:   totalWritten,
-				Speed:     speed,
-				Remaining: remaining,
-				FileName:  filepath.Base(path),
-				Status:    "sending",
-			}
+	if progress != nil {
+		progress <- interfaces.Progress{
+			Total:     fileInfo.Size(),
+			Current:   fileInfo.Size(),
+			Speed:     float64(fileInfo.Size()),
+			Remaining: 0,
 		}
 	}
 
-	// 3. 发送文件结束标记
-	return s.SendMessage(conn, "file_end", uuid, nil)
+	return nil
 }
 
 // ReceiveFile 接收文件
 func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan<- interfaces.Progress) error {
-	// 接收文件信息
+	// 1. 接收文件信息
 	msg, err := s.ReceiveMessage(conn)
 	if err != nil {
 		return fmt.Errorf("接收文件信息失败: %v", err)
@@ -158,10 +123,10 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 		return fmt.Errorf("收到意外的消息类型: %s", msg.Type)
 	}
 
-	// 解析文件信息
 	var fileInfo struct {
 		Name string `json:"name"`
 		Size int64  `json:"size"`
+		MD5  string `json:"md5"`
 	}
 	if err := json.Unmarshal(msg.Payload, &fileInfo); err != nil {
 		return fmt.Errorf("解析文件信息失败: %v", err)
@@ -172,47 +137,42 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 		"size": fileInfo.Size,
 	})
 
-	// 创建目标文件
-	destPath := filepath.Join(destDir, fileInfo.Name)
-	file, err := os.Create(destPath)
+	// 2. 接收文件内容
+	msg, err = s.ReceiveMessage(conn)
 	if err != nil {
-		return fmt.Errorf("创建文件失败: %v", err)
+		return fmt.Errorf("接收文件内容失败: %v", err)
 	}
-	defer file.Close()
 
-	// 接收文件内容
-	var totalReceived int64
-	buffer := make([]byte, 32*1024) // 32KB buffer
+	if msg.Type != "file_data" {
+		return fmt.Errorf("收到意外的消息类型: %s", msg.Type)
+	}
 
-	for totalReceived < fileInfo.Size {
-		n, err := conn.Read(buffer)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("接收文件内容失败: %v", err)
-		}
+	var chunk struct {
+		Data []byte `json:"data"`
+	}
+	if err := json.Unmarshal(msg.Payload, &chunk); err != nil {
+		return fmt.Errorf("解析文件内容失败: %v", err)
+	}
 
-		if n > 0 {
-			if _, err := file.Write(buffer[:n]); err != nil {
-				return fmt.Errorf("写入文件失败: %v", err)
-			}
-			totalReceived += int64(n)
+	// 3. 写入文件
+	filePath := filepath.Join(destDir, fileInfo.Name)
+	if err := os.WriteFile(filePath, chunk.Data, 0644); err != nil {
+		return fmt.Errorf("写入文件失败: %v", err)
+	}
 
-			// 报告进度
-			if progress != nil {
-				progress <- interfaces.Progress{
-					Total:   fileInfo.Size,
-					Current: totalReceived,
-				}
-			}
+	if progress != nil {
+		progress <- interfaces.Progress{
+			Total:     fileInfo.Size,
+			Current:   fileInfo.Size,
+			Speed:     float64(fileInfo.Size),
+			Remaining: 0,
 		}
 	}
 
 	s.logger.Debug("文件接收完成", interfaces.Fields{
 		"name":     fileInfo.Name,
 		"size":     fileInfo.Size,
-		"received": totalReceived,
+		"received": len(chunk.Data),
 	})
 
 	return nil

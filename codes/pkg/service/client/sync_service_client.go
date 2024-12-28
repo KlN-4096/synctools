@@ -269,7 +269,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 // downloadFile 从服务器下载文件
 func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath string) error {
 	// 发送下载请求
-	if err := s.networkClient.SendData(req); err != nil {
+	if err := s.networkClient.SendData("file_request", req); err != nil {
 		return fmt.Errorf("发送下载请求失败: %v", err)
 	}
 
@@ -318,7 +318,7 @@ func (s *ClientSyncService) getServerFiles() ([]string, error) {
 		Direction: interfaces.DirectionPull,
 	}
 
-	if err := s.networkClient.SendData(req); err != nil {
+	if err := s.networkClient.SendData("list_request", req); err != nil {
 		return nil, err
 	}
 
@@ -356,7 +356,7 @@ func (s *ClientSyncService) deleteRemoteFile(file string) error {
 		Path:      file,
 	}
 
-	if err := s.networkClient.SendData(req); err != nil {
+	if err := s.networkClient.SendData("delete_request", req); err != nil {
 		return err
 	}
 
@@ -410,38 +410,6 @@ func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string,
 	return files, err
 }
 
-// getServerFilesWithMD5 获取服务器文件列表和MD5
-func (s *ClientSyncService) getServerFilesWithMD5() (map[string]string, error) {
-	req := &interfaces.SyncRequest{
-		Mode:      interfaces.MirrorSync,
-		Direction: interfaces.DirectionPull,
-	}
-
-	if err := s.networkClient.SendData(req); err != nil {
-		return nil, fmt.Errorf("发送获取MD5请求失败: %v", err)
-	}
-
-	var resp struct {
-		Success bool              `json:"success"`
-		MD5Map  map[string]string `json:"md5_map"` // path -> md5
-		Message string            `json:"message"`
-	}
-
-	if err := s.networkClient.ReceiveData(&resp); err != nil {
-		return nil, fmt.Errorf("接收MD5列表失败: %v", err)
-	}
-
-	if !resp.Success {
-		return nil, fmt.Errorf("获取服务器MD5列表失败: %s", resp.Message)
-	}
-
-	s.Logger.Debug("获取服务器MD5列表成功", interfaces.Fields{
-		"count": len(resp.MD5Map),
-	})
-
-	return resp.MD5Map, nil
-}
-
 // calculateFileMD5 计算文件的MD5值
 func (s *ClientSyncService) calculateFileMD5(path string) (string, error) {
 	file, err := os.Open(path)
@@ -466,7 +434,7 @@ func (s *ClientSyncService) getServerFilesWithMD5WithFolder(folder string) (map[
 		Path:      folder,
 	}
 
-	if err := s.networkClient.SendData(req); err != nil {
+	if err := s.networkClient.SendData("md5_request", req); err != nil {
 		return nil, fmt.Errorf("发送获取MD5请求失败: %v", err)
 	}
 
