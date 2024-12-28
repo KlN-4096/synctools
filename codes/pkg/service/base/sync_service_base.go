@@ -256,16 +256,13 @@ func (s *BaseSyncService) IsIgnored(file string) bool {
 
 // GetSyncMode 获取文件的同步模式
 func (s *BaseSyncService) GetSyncMode(file string) interfaces.SyncMode {
-	if s.Config == nil || s.Config.SyncFolders == nil {
-		return interfaces.AutoSync
-	}
 
 	for _, folder := range s.Config.SyncFolders {
 		if filepath.HasPrefix(file, folder.Path) {
 			return folder.SyncMode
 		}
 	}
-	return interfaces.AutoSync
+	return interfaces.PushSync
 }
 
 // ReportProgress 报告进度

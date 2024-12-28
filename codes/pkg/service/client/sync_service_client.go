@@ -151,12 +151,10 @@ func (s *ClientSyncService) syncFile(sourcePath, file string) error {
 	switch mode {
 	case interfaces.MirrorSync:
 		return s.mirrorSync(fullPath, info, req)
-	case interfaces.PushSync:
-		return s.pushSync(fullPath, info, req)
 	case interfaces.PackSync:
 		return s.packSync(fullPath, info, req)
 	default:
-		return s.autoSync(fullPath, info, req)
+		return s.pushSync(fullPath, info, req)
 	}
 }
 
@@ -226,20 +224,6 @@ func (s *ClientSyncService) pushSync(path string, info os.FileInfo, req *interfa
 func (s *ClientSyncService) packSync(path string, info os.FileInfo, req *interfaces.SyncRequest) error {
 	// TODO: 实现打包同步逻辑
 	return fmt.Errorf("暂不支持打包同步")
-}
-
-// autoSync 自动同步
-func (s *ClientSyncService) autoSync(path string, info os.FileInfo, req *interfaces.SyncRequest) error {
-	// 根据文件类型选择同步模式
-	ext := filepath.Ext(path)
-	switch ext {
-	case ".zip", ".rar", ".7z":
-		return s.packSync(path, info, req)
-	case ".exe", ".dll", ".jar":
-		return s.mirrorSync(path, info, req)
-	default:
-		return s.pushSync(path, info, req)
-	}
 }
 
 // 辅助方法

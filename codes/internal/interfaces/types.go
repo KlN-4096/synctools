@@ -38,7 +38,6 @@ const (
 type SyncMode string
 
 const (
-	AutoSync   SyncMode = "auto"   // 自动选择同步模式
 	MirrorSync SyncMode = "mirror" // 镜像同步
 	PushSync   SyncMode = "push"   // 推送同步
 	PackSync   SyncMode = "pack"   // 打包同步
