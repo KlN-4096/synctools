@@ -176,20 +176,22 @@ func (c *NetworkClient) SetConnectionLostCallback(callback func()) {
 
 // monitorConnection 监控连接状态
 func (c *NetworkClient) monitorConnection() {
-	buffer := make([]byte, 1)
-	for c.IsConnected() {
-		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		_, err := c.conn.Read(buffer)
-		if err != nil {
-			if isTimeout(err) {
-				continue
-			}
-			c.logger.Error("连接监控检测到错误", interfaces.Fields{"error": err})
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if !c.IsConnected() {
+			return
+		}
+
+		// 发送心跳
+		if err := c.msgSender.SendMessage(c.conn, "heartbeat", "", nil); err != nil {
+			c.logger.Error("发送心跳失败", interfaces.Fields{"error": err})
 			if c.onConnLost != nil {
 				c.onConnLost()
 			}
 			c.Disconnect()
-			break
+			return
 		}
 	}
 }

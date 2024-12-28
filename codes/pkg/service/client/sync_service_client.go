@@ -2,9 +2,12 @@ package client
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
+	"crypto/md5"
+	"encoding/hex"
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/network/client"
 	"synctools/codes/pkg/service/base"
@@ -60,100 +63,178 @@ func (s *ClientSyncService) IsConnected() bool {
 
 // SyncFiles 同步文件
 func (s *ClientSyncService) SyncFiles(sourcePath string) error {
-
 	s.SetStatus("同步中")
+	s.Logger.Info("开始同步", interfaces.Fields{
+		"source_path": sourcePath,
+	})
 
-	// 获取本地文件列表
-	localFiles, err := s.getLocalFiles(sourcePath)
+	// 获取本地文件列表和MD5
+	localFiles, err := s.getLocalFilesWithMD5(sourcePath)
 	if err != nil {
 		return fmt.Errorf("获取本地文件列表失败: %v", err)
 	}
+	s.Logger.Info("获取本地文件列表", interfaces.Fields{
+		"count": len(localFiles),
+		"files": localFiles,
+	})
 
-	// 获取服务器文件列表
-	serverFiles, err := s.getServerFiles()
+	// 获取服务器文件列表和MD5
+	serverFiles, err := s.getServerFilesWithMD5()
 	if err != nil {
 		return fmt.Errorf("获取服务器文件列表失败: %v", err)
 	}
+	s.Logger.Info("获取服务器文件列表", interfaces.Fields{
+		"count": len(serverFiles),
+		"files": serverFiles,
+	})
 
 	// 分析差异并同步
-	for _, file := range localFiles {
-		if err := s.syncFile(sourcePath, file); err != nil {
-			s.Logger.Error("同步文件失败", interfaces.Fields{
-				"file":  file,
-				"error": err,
-			})
-			continue
-		}
-	}
+	var downloadCount, deleteCount, skipCount, failedCount int
+	mode := s.GetSyncMode("") // 获取默认同步模式
 
-	// 处理需要删除的文件
-	for _, file := range serverFiles {
-		if !s.fileExists(localFiles, file) {
-			if err := s.deleteRemoteFile(file); err != nil {
-				s.Logger.Error("删除远程文件失败", interfaces.Fields{
-					"file":  file,
-					"error": err,
+	s.Logger.Info("开始文件对比", interfaces.Fields{
+		"mode": mode,
+	})
+
+	// 处理本地多余的文件
+	if mode == interfaces.MirrorSync {
+		for localPath := range localFiles {
+			if _, exists := serverFiles[localPath]; !exists {
+				s.Logger.Info("发现本地多余文件", interfaces.Fields{
+					"file": localPath,
+					"md5":  localFiles[localPath],
 				})
+				fullPath := filepath.Join(sourcePath, localPath)
+				s.Logger.Debug("删除本地多余文件", interfaces.Fields{
+					"file": localPath,
+				})
+				if err := os.Remove(fullPath); err != nil {
+					s.Logger.Error("删除本地文件失败", interfaces.Fields{
+						"file":  localPath,
+						"error": err,
+					})
+					failedCount++
+					continue
+				}
+				deleteCount++
 			}
 		}
 	}
-	defer s.SetStatus("同步完成")
 
+	// 从服务器下载文件
+	for serverPath, serverMD5 := range serverFiles {
+		localMD5, exists := localFiles[serverPath]
+		needDownload := true
+
+		if exists {
+			s.Logger.Info("对比文件MD5", interfaces.Fields{
+				"file":       serverPath,
+				"local_md5":  localMD5,
+				"server_md5": serverMD5,
+				"match":      localMD5 == serverMD5,
+			})
+
+			if localMD5 == serverMD5 {
+				needDownload = false
+				skipCount++
+				s.Logger.Debug("文件无需更新", interfaces.Fields{
+					"file": serverPath,
+					"md5":  serverMD5,
+				})
+			} else {
+				s.Logger.Info("文件需要更新", interfaces.Fields{
+					"file":       serverPath,
+					"local_md5":  localMD5,
+					"server_md5": serverMD5,
+				})
+			}
+		} else {
+			s.Logger.Info("发现新文件", interfaces.Fields{
+				"file": serverPath,
+				"md5":  serverMD5,
+			})
+		}
+
+		if needDownload {
+			fullPath := filepath.Join(sourcePath, serverPath)
+			// 确保目标目录存在
+			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+				s.Logger.Error("创建目录失败", interfaces.Fields{
+					"path":  filepath.Dir(fullPath),
+					"error": err,
+				})
+				failedCount++
+				continue
+			}
+
+			// 发送下载请求
+			req := &interfaces.SyncRequest{
+				Mode:      mode,
+				Direction: interfaces.DirectionPull,
+				Path:      serverPath,
+			}
+
+			s.Logger.Info("开始下载文件", interfaces.Fields{
+				"file": serverPath,
+				"mode": mode,
+			})
+
+			if err := s.downloadFile(req, fullPath); err != nil {
+				s.Logger.Error("下载文件失败", interfaces.Fields{
+					"file":  serverPath,
+					"error": err,
+				})
+				failedCount++
+				continue
+			}
+
+			// 验证下载后的文件MD5
+			downloadedMD5, err := s.calculateFileMD5(fullPath)
+			if err != nil {
+				s.Logger.Error("计算下载文件MD5失败", interfaces.Fields{
+					"file":  serverPath,
+					"error": err,
+				})
+			} else {
+				s.Logger.Info("验证下载文件MD5", interfaces.Fields{
+					"file":           serverPath,
+					"server_md5":     serverMD5,
+					"downloaded_md5": downloadedMD5,
+					"match":          downloadedMD5 == serverMD5,
+				})
+			}
+
+			downloadCount++
+			s.Logger.Debug("文件下载成功", interfaces.Fields{
+				"file": serverPath,
+				"md5":  serverMD5,
+			})
+		}
+	}
+
+	s.Logger.Info("同步完成", interfaces.Fields{
+		"total_local":  len(localFiles),
+		"total_server": len(serverFiles),
+		"downloaded":   downloadCount,
+		"deleted":      deleteCount,
+		"skipped":      skipCount,
+		"failed":       failedCount,
+		"source_path":  sourcePath,
+		"sync_mode":    mode,
+	})
+
+	s.SetStatus("同步完成")
 	return nil
 }
 
-// syncFile 同步单个文件
-func (s *ClientSyncService) syncFile(sourcePath, file string) error {
-	fullPath := filepath.Join(sourcePath, file)
-
-	// 获取文件信息
-	info, err := os.Stat(fullPath)
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %v", err)
-	}
-
-	// 检查是否需要忽略
-	if s.IsIgnored(file) {
-		s.Logger.Debug("忽略文件", interfaces.Fields{
-			"file": file,
-		})
-		return nil
-	}
-
-	// 获取同步模式
-	mode := s.GetSyncMode(file)
-
-	// 创建同步请求
-	req := &interfaces.SyncRequest{
-		Mode:      mode,
-		Direction: interfaces.DirectionPush,
-		Path:      file,
-	}
-
-	// 根据同步模式处理
-	switch mode {
-	case interfaces.MirrorSync:
-		return s.mirrorSync(fullPath, info, req)
-	case interfaces.PackSync:
-		return s.packSync(fullPath, info, req)
-	default:
-		return s.pushSync(fullPath, info, req)
-	}
-}
-
-// mirrorSync 镜像同步
-func (s *ClientSyncService) mirrorSync(path string, info os.FileInfo, req *interfaces.SyncRequest) error {
-	// 检查文件是否存在和可读
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("检查文件失败: %v", err)
-	}
-
-	// 发送同步请求
+// downloadFile 从服务器下载文件
+func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath string) error {
+	// 发送下载请求
 	if err := s.networkClient.SendData(req); err != nil {
-		return fmt.Errorf("发送同步请求失败: %v", err)
+		return fmt.Errorf("发送下载请求失败: %v", err)
 	}
 
-	// 发送文件数据
+	// 接收文件
 	progress := make(chan interfaces.Progress, 1)
 	defer close(progress)
 
@@ -163,50 +244,11 @@ func (s *ClientSyncService) mirrorSync(path string, info os.FileInfo, req *inter
 		}
 	}()
 
-	if err := s.networkClient.SendFile(path, progress); err != nil {
-		return fmt.Errorf("发送文件失败: %v", err)
+	if err := s.networkClient.ReceiveFile(filepath.Dir(destPath), progress); err != nil {
+		return fmt.Errorf("接收文件失败: %v", err)
 	}
 
 	return nil
-}
-
-// pushSync 推送同步
-func (s *ClientSyncService) pushSync(path string, info os.FileInfo, req *interfaces.SyncRequest) error {
-	// 检查服务器上是否存在该文件
-	serverFiles, err := s.getServerFiles()
-	if err != nil {
-		return err
-	}
-
-	relPath, err := filepath.Rel(s.GetCurrentConfig().SyncDir, path)
-	if err != nil {
-		return err
-	}
-
-	needUpdate := true
-	for _, serverFile := range serverFiles {
-		if serverFile == relPath {
-			// TODO: 检查文件哈希值
-			needUpdate = false
-			break
-		}
-	}
-
-	if !needUpdate {
-		s.Logger.Debug("文件无需更新", interfaces.Fields{
-			"file": path,
-		})
-		return nil
-	}
-
-	// 执行推送
-	return s.mirrorSync(path, info, req)
-}
-
-// packSync 打包同步
-func (s *ClientSyncService) packSync(path string, info os.FileInfo, req *interfaces.SyncRequest) error {
-	// TODO: 实现打包同步逻辑
-	return fmt.Errorf("暂不支持打包同步")
 }
 
 // 辅助方法
@@ -291,4 +333,83 @@ func (s *ClientSyncService) SetConnectionLostCallback(callback func()) {
 			s.onConnLost()
 		}
 	})
+}
+
+// getLocalFilesWithMD5 获取本地文件列表和MD5
+func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string, error) {
+	files := make(map[string]string)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			relPath, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			// 检查是否需要忽略
+			if s.IsIgnored(relPath) {
+				s.Logger.Debug("忽略文件", interfaces.Fields{
+					"file": relPath,
+				})
+				return nil
+			}
+			// 计算MD5
+			md5, err := s.calculateFileMD5(path)
+			if err != nil {
+				return err
+			}
+			files[relPath] = md5
+		}
+		return nil
+	})
+	return files, err
+}
+
+// getServerFilesWithMD5 获取服务器文件列表和MD5
+func (s *ClientSyncService) getServerFilesWithMD5() (map[string]string, error) {
+	req := &interfaces.SyncRequest{
+		Mode:      interfaces.MirrorSync,
+		Direction: interfaces.DirectionPull,
+	}
+
+	if err := s.networkClient.SendData(req); err != nil {
+		return nil, fmt.Errorf("发送获取MD5请求失败: %v", err)
+	}
+
+	var resp struct {
+		Success bool              `json:"success"`
+		MD5Map  map[string]string `json:"md5_map"` // path -> md5
+		Message string            `json:"message"`
+	}
+
+	if err := s.networkClient.ReceiveData(&resp); err != nil {
+		return nil, fmt.Errorf("接收MD5列表失败: %v", err)
+	}
+
+	if !resp.Success {
+		return nil, fmt.Errorf("获取服务器MD5列表失败: %s", resp.Message)
+	}
+
+	s.Logger.Debug("获取服务器MD5列表成功", interfaces.Fields{
+		"count": len(resp.MD5Map),
+	})
+
+	return resp.MD5Map, nil
+}
+
+// calculateFileMD5 计算文件的MD5值
+func (s *ClientSyncService) calculateFileMD5(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

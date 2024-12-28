@@ -67,10 +67,14 @@ func (c *Container) Get(name string) interface{} {
 // InitializeServices 初始化所有服务
 func (c *Container) InitializeServices(baseDir string, cfg *interfaces.Config) error {
 	if cfg == nil {
-		c.logger.Warn("初始化服务", interfaces.Fields{
-			"status": "no_config",
-		})
-		return nil
+		c.logger.Info("使用内存配置初始化服务器", interfaces.Fields{})
+		// 创建内存配置
+		cfg = &interfaces.Config{
+			Type:        interfaces.ConfigTypeServer,
+			Host:        "0.0.0.0",
+			Port:        25000,
+			ConnTimeout: 300,
+		}
 	}
 
 	c.logger.Info("初始化服务", interfaces.Fields{

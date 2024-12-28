@@ -148,77 +148,72 @@ func (s *MessageSender) SendFile(conn net.Conn, uuid string, path string, progre
 
 // ReceiveFile 接收文件
 func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan<- interfaces.Progress) error {
-	// 1. 接收文件信息
+	// 接收文件信息
 	msg, err := s.ReceiveMessage(conn)
 	if err != nil {
 		return fmt.Errorf("接收文件信息失败: %v", err)
 	}
-	if msg.Type != "file_info" {
+
+	if msg.Type != "file" {
 		return fmt.Errorf("收到意外的消息类型: %s", msg.Type)
 	}
 
-	var fileInfo interfaces.FileInfo
+	// 解析文件信息
+	var fileInfo struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	}
 	if err := json.Unmarshal(msg.Payload, &fileInfo); err != nil {
 		return fmt.Errorf("解析文件信息失败: %v", err)
 	}
 
-	// 2. 创建目标文件
-	destPath := filepath.Join(destDir, fileInfo.Path)
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-		return fmt.Errorf("创建目录失败: %v", err)
-	}
+	s.logger.Debug("接收文件信息", interfaces.Fields{
+		"name": fileInfo.Name,
+		"size": fileInfo.Size,
+	})
 
-	file, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY, 0644)
+	// 创建目标文件
+	destPath := filepath.Join(destDir, fileInfo.Name)
+	file, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("创建文件失败: %v", err)
 	}
 	defer file.Close()
 
-	// 3. 接收文件内容
-	totalReceived := int64(0)
-	startTime := time.Now()
+	// 接收文件内容
+	var totalReceived int64
+	buffer := make([]byte, 32*1024) // 32KB buffer
 
-	for {
-		msg, err := s.ReceiveMessage(conn)
+	for totalReceived < fileInfo.Size {
+		n, err := conn.Read(buffer)
 		if err != nil {
-			return fmt.Errorf("接收文件数据失败: %v", err)
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("接收文件内容失败: %v", err)
 		}
 
-		switch msg.Type {
-		case "file_data":
-			var chunk struct {
-				Data []byte `json:"data"`
-			}
-			if err := json.Unmarshal(msg.Payload, &chunk); err != nil {
-				return fmt.Errorf("解析文件数据失败: %v", err)
-			}
-
-			written, err := file.Write(chunk.Data)
-			if err != nil {
+		if n > 0 {
+			if _, err := file.Write(buffer[:n]); err != nil {
 				return fmt.Errorf("写入文件失败: %v", err)
 			}
+			totalReceived += int64(n)
 
-			totalReceived += int64(written)
-
+			// 报告进度
 			if progress != nil {
-				elapsed := time.Since(startTime).Seconds()
-				speed := float64(totalReceived) / elapsed
-
 				progress <- interfaces.Progress{
-					Total:     fileInfo.Size,
-					Current:   totalReceived,
-					Speed:     speed,
-					Remaining: int64((float64(fileInfo.Size-totalReceived) / speed)),
-					FileName:  fileInfo.Path,
-					Status:    "receiving",
+					Total:   fileInfo.Size,
+					Current: totalReceived,
 				}
 			}
-
-		case "file_end":
-			return nil
-
-		default:
-			return fmt.Errorf("收到意外的消息类型: %s", msg.Type)
 		}
 	}
+
+	s.logger.Debug("文件接收完成", interfaces.Fields{
+		"name":     fileInfo.Name,
+		"size":     fileInfo.Size,
+		"received": totalReceived,
+	})
+
+	return nil
 }
