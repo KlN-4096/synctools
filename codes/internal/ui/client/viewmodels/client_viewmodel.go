@@ -61,6 +61,10 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 
 	// 从配置中读取服务器地址和端口
 	if syncService != nil {
+		config := syncService.GetCurrentConfig()
+		vm.logger.Debug("测试", interfaces.Fields{
+			"config": config,
+		})
 		if config := syncService.GetCurrentConfig(); config != nil {
 			vm.serverAddr = config.Host
 			vm.serverPort = fmt.Sprintf("%d", config.Port)

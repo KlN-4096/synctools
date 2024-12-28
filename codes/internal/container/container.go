@@ -81,11 +81,11 @@ func (c *Container) InitializeServices(baseDir string, cfg *interfaces.Config) e
 	switch cfg.Type {
 	case interfaces.ConfigTypeClient:
 		// 创建客户端服务
-		syncService = client.NewClientSyncService(c.GetLogger(), c.GetStorage())
+		syncService = client.NewClientSyncService(cfg, c.GetLogger(), c.GetStorage())
 
 	case interfaces.ConfigTypeServer:
 		// 创建服务器服务
-		syncService = server.NewServerSyncService(c.GetLogger(), c.GetStorage())
+		syncService = server.NewServerSyncService(cfg, c.GetLogger(), c.GetStorage())
 
 	default:
 		return fmt.Errorf("未知的配置类型: %s", cfg.Type)

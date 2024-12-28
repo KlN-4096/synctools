@@ -41,8 +41,9 @@ func (s *BaseSyncService) GetStatus() string {
 }
 
 // NewBaseSyncService 创建基础同步服务
-func NewBaseSyncService(Logger interfaces.Logger, Storage interfaces.Storage) *BaseSyncService {
+func NewBaseSyncService(Config *interfaces.Config, Logger interfaces.Logger, Storage interfaces.Storage) *BaseSyncService {
 	return &BaseSyncService{
+		Config:  Config,
 		Logger:  Logger,
 		Storage: Storage,
 		Status:  "初始化",

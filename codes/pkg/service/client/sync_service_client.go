@@ -19,8 +19,8 @@ type ClientSyncService struct {
 }
 
 // NewClientSyncService 创建客户端同步服务
-func NewClientSyncService(logger interfaces.Logger, storage interfaces.Storage) *ClientSyncService {
-	base := base.NewBaseSyncService(logger, storage)
+func NewClientSyncService(config *interfaces.Config, logger interfaces.Logger, storage interfaces.Storage) *ClientSyncService {
+	base := base.NewBaseSyncService(config, logger, storage)
 	srv := &ClientSyncService{
 		BaseSyncService: base,
 		serverAddr:      "localhost",

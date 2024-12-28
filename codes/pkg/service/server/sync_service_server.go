@@ -20,9 +20,9 @@ type ServerSyncService struct {
 }
 
 // NewServerSyncService 创建服务端同步服务
-func NewServerSyncService(Logger interfaces.Logger, storage interfaces.Storage) *ServerSyncService {
+func NewServerSyncService(config *interfaces.Config, Logger interfaces.Logger, storage interfaces.Storage) *ServerSyncService {
 	return &ServerSyncService{
-		BaseSyncService: base.NewBaseSyncService(Logger, storage),
+		BaseSyncService: base.NewBaseSyncService(config, Logger, storage),
 	}
 }
 
