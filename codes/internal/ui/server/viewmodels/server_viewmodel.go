@@ -3,30 +3,15 @@ package viewmodels
 import (
 	"fmt"
 
+	"github.com/lxn/walk"
+
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/logger"
-
-	"github.com/lxn/walk"
 )
-
-/*
-文件作用:
-- 实现主窗口的视图模型
-- 管理全局状态
-- 协调各个子视图模型
-- 处理主窗口事件
-
-主要方法:
-- NewMainViewModel: 创建主窗口视图模型
-- InitializeViewModels: 初始化子视图模型
-- HandleCommand: 处理命令
-- UpdateStatus: 更新状态
-- ShowDialog: 显示对话框
-*/
 
 // MainViewModel 主窗口视图模型
 type MainViewModel struct {
-	syncService     interfaces.SyncService
+	syncService     interfaces.ServerSyncService // 修改为服务器服务接口
 	logger          *logger.LoggerAdapter
 	window          *walk.MainWindow
 	status          string
@@ -35,14 +20,20 @@ type MainViewModel struct {
 
 // NewMainViewModel 创建主视图模型
 func NewMainViewModel(syncService interfaces.SyncService, log interfaces.Logger) *MainViewModel {
+	// 类型转换检查
+	serverService, ok := syncService.(interfaces.ServerSyncService)
+	if !ok {
+		panic("必须提供服务器同步服务实例")
+	}
+
 	vm := &MainViewModel{
-		syncService: syncService,
+		syncService: serverService,
 		logger:      logger.NewLoggerAdapter(log),
 		status:      "就绪",
 	}
 
 	// 创建配置视图模型
-	vm.ConfigViewModel = NewConfigViewModel(syncService, vm.logger)
+	vm.ConfigViewModel = NewConfigViewModel(serverService, vm.logger)
 
 	return vm
 }
@@ -76,30 +67,6 @@ func (vm *MainViewModel) SetStatus(status string) {
 	vm.logger.Info("状态更新", interfaces.Fields{
 		"status": status,
 	})
-}
-
-// StartSync 开始同步
-func (vm *MainViewModel) StartSync(path string) error {
-	vm.logger.Info("开始同步", interfaces.Fields{
-		"path": path,
-	})
-
-	if vm.syncService == nil {
-		return fmt.Errorf("同步服务未初始化")
-	}
-
-	if err := vm.syncService.SyncFiles(path); err != nil {
-		vm.logger.Error("同步失败", interfaces.Fields{
-			"error": err,
-		})
-		if vm.window != nil {
-			walk.MsgBox(vm.window, "同步失败", err.Error(), walk.MsgBoxIconError)
-		}
-		return err
-	}
-
-	vm.logger.Info("同步完成", nil)
-	return nil
 }
 
 // HandleSyncRequest 处理同步请求

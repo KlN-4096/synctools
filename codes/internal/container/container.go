@@ -1,19 +1,3 @@
-/*
-文件作用:
-- 实现依赖注入容器
-- 管理所有服务实例的生命周期
-- 提供服务注册和获取功能
-- 负责服务的初始化和关闭
-
-主要方法:
-- New: 创建新的依赖注入容器
-- Register: 注册服务到容器
-- Get: 从容器获取服务
-- InitializeServices: 初始化所有服务
-- GetLogger/GetConfigManager/GetNetworkServer/GetSyncService/GetStorage: 获取特定服务
-- Shutdown: 关闭所有服务
-*/
-
 package container
 
 import (
@@ -24,8 +8,8 @@ import (
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/config"
 	"synctools/codes/pkg/logger"
-	network "synctools/codes/pkg/network/server"
-	"synctools/codes/pkg/service"
+	"synctools/codes/pkg/service/client"
+	"synctools/codes/pkg/service/server"
 	"synctools/codes/pkg/storage"
 )
 
@@ -82,13 +66,32 @@ func (c *Container) Get(name string) interface{} {
 
 // InitializeServices 初始化所有服务
 func (c *Container) InitializeServices(baseDir string, cfg *interfaces.Config) error {
-	// 初始化网络服务器
-	server := network.NewServer(cfg, c.GetSyncService(), c.logger)
-	c.Register("network_server", server)
+	if cfg == nil {
+		c.logger.Warn("初始化服务", interfaces.Fields{
+			"status": "no_config",
+		})
+		return nil
+	}
 
-	// 初始化同步服务
-	store := c.GetStorage()
-	syncService := service.NewSyncService(cfg, c.logger, store)
+	c.logger.Info("初始化服务", interfaces.Fields{
+		"type": cfg.Type,
+	})
+
+	var syncService interfaces.SyncService
+	switch cfg.Type {
+	case interfaces.ConfigTypeClient:
+		// 创建客户端服务
+		syncService = client.NewClientSyncService(c.GetLogger(), c.GetStorage())
+
+	case interfaces.ConfigTypeServer:
+		// 创建服务器服务
+		syncService = server.NewServerSyncService(c.GetLogger(), c.GetStorage())
+
+	default:
+		return fmt.Errorf("未知的配置类型: %s", cfg.Type)
+	}
+
+	// 注册同步服务
 	c.Register("sync_service", syncService)
 
 	return nil
@@ -109,8 +112,10 @@ func (c *Container) GetConfigManager() interfaces.ConfigManager {
 
 // GetNetworkServer 获取网络服务器
 func (c *Container) GetNetworkServer() interfaces.NetworkServer {
-	if svc := c.Get("network_server"); svc != nil {
-		return svc.(interfaces.NetworkServer)
+	if svc := c.GetSyncService(); svc != nil {
+		if serverService, ok := svc.(interfaces.ServerSyncService); ok {
+			return serverService.GetNetworkServer()
+		}
 	}
 	return nil
 }
@@ -137,15 +142,14 @@ func (c *Container) Shutdown() error {
 
 	// 停止同步服务
 	if svc := c.GetSyncService(); svc != nil {
+		if serverService, ok := svc.(interfaces.ServerSyncService); ok {
+			// 如果是服务器类型，需要先停止网络服务器
+			if err := serverService.StopServer(); err != nil {
+				errs = append(errs, fmt.Errorf("停止网络服务器失败: %v", err))
+			}
+		}
 		if err := svc.Stop(); err != nil {
 			errs = append(errs, fmt.Errorf("停止同步服务失败: %v", err))
-		}
-	}
-
-	// 停止网络服务器
-	if svc := c.GetNetworkServer(); svc != nil {
-		if err := svc.Stop(); err != nil {
-			errs = append(errs, fmt.Errorf("停止网络服务器失败: %v", err))
 		}
 	}
 

@@ -76,7 +76,7 @@ func main() {
 
 	// 创建主视图模型
 	mainViewModel := viewmodels.NewMainViewModel(
-		c.GetSyncService(),
+		c.GetSyncService().(interfaces.ClientSyncService),
 		c.GetLogger(),
 	)
 

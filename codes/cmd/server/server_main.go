@@ -82,7 +82,7 @@ func main() {
 	}
 
 	// 创建主视图模型
-	mainViewModel := viewmodels.NewMainViewModel(c.GetSyncService(), logger)
+	mainViewModel := viewmodels.NewMainViewModel(c.GetSyncService().(interfaces.ServerSyncService), logger)
 
 	// 创建退出通道
 	exitChan := make(chan struct{})

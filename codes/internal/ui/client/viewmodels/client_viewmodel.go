@@ -25,7 +25,7 @@ import (
 
 // MainViewModel 客户端主视图模型
 type MainViewModel struct {
-	syncService interfaces.SyncService
+	syncService interfaces.ClientSyncService
 	logger      interfaces.Logger
 	window      *walk.MainWindow
 	serverAddr  string
@@ -49,7 +49,7 @@ type MainViewModel struct {
 }
 
 // NewMainViewModel 创建新的主视图模型
-func NewMainViewModel(syncService interfaces.SyncService, logger interfaces.Logger) *MainViewModel {
+func NewMainViewModel(syncService interfaces.ClientSyncService, logger interfaces.Logger) *MainViewModel {
 	vm := &MainViewModel{
 		syncService:   syncService,
 		logger:        logger,

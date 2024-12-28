@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"synctools/codes/internal/interfaces"
@@ -200,4 +202,152 @@ func isTimeout(err error) bool {
 		return netErr.Timeout()
 	}
 	return false
+}
+
+// SyncRequest 同步请求结构体
+type SyncRequest struct {
+	Operation string      `json:"operation"`
+	Path      string      `json:"path"`
+	Data      interface{} `json:"data"`
+}
+
+// SyncResponse 同步响应结构体
+type SyncResponse struct {
+	Success bool        `json:"success"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
+}
+
+// SyncFiles 同步文件到服务器
+func (c *NetworkClient) SyncFiles(sourcePath string) error {
+	if !c.IsConnected() {
+		return fmt.Errorf("未连接到服务器")
+	}
+
+	c.logger.Info("开始同步文件", interfaces.Fields{
+		"sourcePath": sourcePath,
+	})
+
+	// 1. 扫描本地文件
+	files, err := c.scanLocalFiles(sourcePath)
+	if err != nil {
+		return fmt.Errorf("扫描本地文件失败: %v", err)
+	}
+
+	// 2. 获取服务器文件列表
+	serverFiles, err := c.getServerFileList()
+	if err != nil {
+		return fmt.Errorf("获取服务器文件列表失败: %v", err)
+	}
+
+	// 3. 对比文件差异
+	diffFiles := c.compareFiles(files, serverFiles)
+
+	// 4. 同步差异文件
+	for _, file := range diffFiles {
+		if err := c.syncFile(file); err != nil {
+			c.logger.Error("同步文件失败", interfaces.Fields{
+				"file":  file,
+				"error": err,
+			})
+			continue
+		}
+	}
+
+	return nil
+}
+
+// scanLocalFiles 扫描本地文件
+func (c *NetworkClient) scanLocalFiles(sourcePath string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			relPath, err := filepath.Rel(sourcePath, path)
+			if err != nil {
+				return err
+			}
+			files = append(files, relPath)
+		}
+		return nil
+	})
+	return files, err
+}
+
+// getServerFileList 获取服务器文件列表
+func (c *NetworkClient) getServerFileList() ([]string, error) {
+	request := &SyncRequest{
+		Operation: "get_file_list",
+	}
+
+	if err := c.SendData(request); err != nil {
+		return nil, err
+	}
+
+	var response SyncResponse
+	if err := c.ReceiveData(&response); err != nil {
+		return nil, err
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("获取服务器文件列表失败: %s", response.Message)
+	}
+
+	files, ok := response.Data.([]string)
+	if !ok {
+		return nil, fmt.Errorf("服务器返回的文件列表格式无效")
+	}
+
+	return files, nil
+}
+
+// compareFiles 对比文件差异
+func (c *NetworkClient) compareFiles(localFiles, serverFiles []string) []string {
+	var diffFiles []string
+	localMap := make(map[string]bool)
+
+	// 将本地文件列表转换为map
+	for _, file := range localFiles {
+		localMap[file] = true
+	}
+
+	// 检查服务器上没有的文件
+	for _, file := range localFiles {
+		found := false
+		for _, serverFile := range serverFiles {
+			if file == serverFile {
+				found = true
+				break
+			}
+		}
+		if !found {
+			diffFiles = append(diffFiles, file)
+		}
+	}
+
+	return diffFiles
+}
+
+// syncFile 同步单个文件
+func (c *NetworkClient) syncFile(file string) error {
+	// 创建进度通道
+	progress := make(chan interfaces.Progress, 1)
+	defer close(progress)
+
+	// 启动goroutine监控进度
+	go func() {
+		for p := range progress {
+			c.logger.Debug("同步进度", interfaces.Fields{
+				"file":      p.FileName,
+				"progress":  fmt.Sprintf("%.2f%%", float64(p.Current)/float64(p.Total)*100),
+				"speed":     fmt.Sprintf("%.2f MB/s", p.Speed/1024/1024),
+				"remaining": fmt.Sprintf("%ds", p.Remaining),
+			})
+		}
+	}()
+
+	// 发送文件
+	return c.SendFile(file, progress)
 }

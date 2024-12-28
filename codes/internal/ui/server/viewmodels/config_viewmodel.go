@@ -71,7 +71,7 @@ type EnabledSetter interface {
 
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
-	syncService interfaces.SyncService
+	syncService interfaces.ServerSyncService
 	logger      ViewModelLogger
 
 	// UI 状态
@@ -107,7 +107,7 @@ type ConfigViewModel struct {
 }
 
 // NewConfigViewModel 创建新的配置视图模型
-func NewConfigViewModel(syncService interfaces.SyncService, logger ViewModelLogger) *ConfigViewModel {
+func NewConfigViewModel(syncService interfaces.ServerSyncService, logger ViewModelLogger) *ConfigViewModel {
 	vm := &ConfigViewModel{
 		syncService: syncService,
 		logger:      logger,
