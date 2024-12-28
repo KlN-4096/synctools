@@ -20,7 +20,6 @@ import (
 	"github.com/lxn/walk"
 
 	"synctools/codes/internal/interfaces"
-	"synctools/codes/pkg/network/client"
 )
 
 // MainViewModel 客户端主视图模型
@@ -41,9 +40,6 @@ type MainViewModel struct {
 	saveButton       *walk.PushButton
 	syncPathEdit     *walk.LineEdit
 
-	// 网络客户端
-	networkClient *client.NetworkClient
-
 	// UI 更新回调
 	onUIUpdate func()
 }
@@ -51,12 +47,11 @@ type MainViewModel struct {
 // NewMainViewModel 创建新的主视图模型
 func NewMainViewModel(syncService interfaces.ClientSyncService, logger interfaces.Logger) *MainViewModel {
 	vm := &MainViewModel{
-		syncService:   syncService,
-		logger:        logger,
-		serverAddr:    "localhost",
-		serverPort:    "9527",
-		syncPath:      "",
-		networkClient: client.NewNetworkClient(logger, syncService),
+		syncService: syncService,
+		logger:      logger,
+		serverAddr:  "localhost",
+		serverPort:  "9527",
+		syncPath:    "",
 	}
 
 	// 从配置中读取服务器地址和端口
@@ -79,7 +74,7 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 	})
 
 	// 设置连接丢失回调
-	vm.networkClient.SetConnectionLostCallback(vm.handleConnectionLost)
+	vm.syncService.SetConnectionLostCallback(vm.handleConnectionLost)
 
 	return vm
 }
@@ -220,21 +215,21 @@ func (vm *MainViewModel) updateUIState() {
 
 // Connect 连接到服务器
 func (vm *MainViewModel) Connect() error {
-	vm.networkClient.Connect(vm.serverAddr, vm.serverPort)
+	vm.syncService.Connect(vm.serverAddr, vm.serverPort)
 	vm.updateUIState()
 	return nil
 }
 
 // Disconnect 断开连接
 func (vm *MainViewModel) Disconnect() error {
-	vm.networkClient.Disconnect()
+	vm.syncService.Disconnect()
 	vm.updateUIState()
 	return nil
 }
 
 // IsConnected 检查是否已连接
 func (vm *MainViewModel) IsConnected() bool {
-	return vm.networkClient.IsConnected()
+	return vm.syncService.IsConnected()
 }
 
 // handleConnectionLost 处理连接丢失
@@ -303,7 +298,7 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 	if vm.syncService == nil {
 		return fmt.Errorf("同步服务未初始化")
 	}
-
+	fmt.Println(vm.IsConnected())
 	return vm.syncService.SyncFiles(path)
 }
 

@@ -148,9 +148,6 @@ func (c *Container) Shutdown() error {
 				errs = append(errs, fmt.Errorf("停止网络服务器失败: %v", err))
 			}
 		}
-		if err := svc.Stop(); err != nil {
-			errs = append(errs, fmt.Errorf("停止同步服务失败: %v", err))
-		}
 	}
 
 	if len(errs) > 0 {

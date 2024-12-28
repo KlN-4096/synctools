@@ -14,8 +14,7 @@ import (
 type ClientSyncService struct {
 	*base.BaseSyncService
 	networkClient *client.NetworkClient
-	serverAddr    string
-	serverPort    string
+	onConnLost    func() // 添加回调字段
 }
 
 // NewClientSyncService 创建客户端同步服务
@@ -23,43 +22,26 @@ func NewClientSyncService(config *interfaces.Config, logger interfaces.Logger, s
 	base := base.NewBaseSyncService(config, logger, storage)
 	srv := &ClientSyncService{
 		BaseSyncService: base,
-		serverAddr:      "localhost",
-		serverPort:      "25000",
 	}
 	srv.networkClient = client.NewNetworkClient(logger, srv)
 	return srv
 }
 
-// Connect 连接到服务器
+// Connect 连接服务器(指向client_network.go)
 func (s *ClientSyncService) Connect(addr, port string) error {
-	if s.IsConnected() {
-		return fmt.Errorf("已连接到服务器")
-	}
-
-	s.serverAddr = addr
-	s.serverPort = port
-
 	// 连接服务器
 	if err := s.networkClient.Connect(addr, port); err != nil {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
 	// 标记服务开始运行
-	if err := s.Start(); err != nil {
-		s.Disconnect()
-		return err
-	}
-
+	s.Start()
 	s.SetStatus("已连接")
 	return nil
 }
 
 // Disconnect 断开连接
 func (s *ClientSyncService) Disconnect() error {
-	if !s.IsConnected() {
-		return nil
-	}
-
 	// 断开网络连接
 	if err := s.networkClient.Disconnect(); err != nil {
 		return fmt.Errorf("断开连接失败: %v", err)
@@ -78,8 +60,8 @@ func (s *ClientSyncService) IsConnected() bool {
 
 // SyncFiles 同步文件
 func (s *ClientSyncService) SyncFiles(sourcePath string) error {
+
 	s.SetStatus("同步中")
-	defer s.SetStatus("同步完成")
 
 	// 获取本地文件列表
 	localFiles, err := s.getLocalFiles(sourcePath)
@@ -115,6 +97,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 			}
 		}
 	}
+	defer s.SetStatus("同步完成")
 
 	return nil
 }
@@ -297,4 +280,15 @@ func (s *ClientSyncService) deleteRemoteFile(file string) error {
 	}
 
 	return nil
+}
+
+// 添加设置回调的方法
+func (s *ClientSyncService) SetConnectionLostCallback(callback func()) {
+	s.onConnLost = callback
+	// 将回调传递给 networkClient
+	s.networkClient.SetConnectionLostCallback(func() {
+		if s.onConnLost != nil {
+			s.onConnLost()
+		}
+	})
 }

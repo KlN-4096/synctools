@@ -137,7 +137,7 @@ type ClientSyncService interface {
 	Connect(addr, port string) error
 	Disconnect() error
 	IsConnected() bool
-
+	SetConnectionLostCallback(callback func())
 	// 同步操作
 	SyncFiles(path string) error
 }

@@ -86,7 +86,7 @@ func (t *ClientTab) Setup() error {
 									},
 									PushButton{
 										AssignTo: &t.browseButton,
-										Text:     "浏览...",
+										Text:     "...",
 										MaxSize:  Size{Width: 60},
 										OnClicked: func() {
 											t.onBrowse()
@@ -214,11 +214,6 @@ func (t *ClientTab) onSync() {
 		walk.MsgBox(t.Form(), "错误", "同步失败: "+err.Error(), walk.MsgBoxIconError)
 		return
 	}
-}
-
-// Activating 实现 walk.Form 接口
-func (t *ClientTab) Activating() bool {
-	return true
 }
 
 // UpdateUI 更新界面状态

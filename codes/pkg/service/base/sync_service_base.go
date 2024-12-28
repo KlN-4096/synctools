@@ -50,14 +50,14 @@ func NewBaseSyncService(Config *interfaces.Config, Logger interfaces.Logger, Sto
 	}
 }
 
-// Start 启动服务
+// Start 启动服务,只是一个提示
 func (s *BaseSyncService) Start() error {
 	if s.Running {
 		return errors.ErrServiceStart
 	}
 
 	s.Running = true
-	s.setStatus("运行中")
+	s.setStatus("已连接")
 	return nil
 }
 
