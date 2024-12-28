@@ -309,31 +309,41 @@ func (s *Server) HandleClient(conn net.Conn) {
 					}
 					return err
 				}
-				if !info.IsDir() {
-					relPath, err := filepath.Rel(syncDir, path)
-					if err != nil {
-						return err
-					}
-					// 计算MD5
-					file, err := os.Open(path)
-					if err != nil {
-						return err
-					}
-					defer file.Close()
 
-					hash := md5.New()
-					if _, err := io.Copy(hash, file); err != nil {
-						return err
-					}
-					md5sum := hex.EncodeToString(hash.Sum(nil))
-					md5Map[relPath] = md5sum
-
-					s.logger.Debug("计算文件MD5", interfaces.Fields{
-						"folder": syncRequest.Path,
-						"file":   relPath,
-						"md5":    md5sum,
-					})
+				// 获取相对路径
+				relPath, err := filepath.Rel(syncDir, path)
+				if err != nil {
+					return err
 				}
+
+				// 如果是目录，记录它但继续遍历
+				if info.IsDir() {
+					s.logger.Debug("发现目录", interfaces.Fields{
+						"folder": syncRequest.Path,
+						"dir":    relPath,
+					})
+					return nil
+				}
+
+				// 计算文件MD5
+				file, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer file.Close()
+
+				hash := md5.New()
+				if _, err := io.Copy(hash, file); err != nil {
+					return err
+				}
+				md5sum := hex.EncodeToString(hash.Sum(nil))
+				md5Map[relPath] = md5sum
+
+				s.logger.Debug("计算文件MD5", interfaces.Fields{
+					"folder": syncRequest.Path,
+					"file":   relPath,
+					"md5":    md5sum,
+				})
 				return nil
 			})
 
@@ -462,6 +472,7 @@ func (s *Server) HandleClient(conn net.Conn) {
 			// 获取同步目录
 			syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
 			var files []string
+			var dirs []string
 
 			err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
@@ -470,12 +481,30 @@ func (s *Server) HandleClient(conn net.Conn) {
 					}
 					return err
 				}
-				if !info.IsDir() {
-					relPath, err := filepath.Rel(syncDir, path)
-					if err != nil {
-						return err
-					}
+
+				// 获取相对路径
+				relPath, err := filepath.Rel(syncDir, path)
+				if err != nil {
+					return err
+				}
+
+				// 如果是根目录，跳过
+				if relPath == "." {
+					return nil
+				}
+
+				if info.IsDir() {
+					dirs = append(dirs, relPath)
+					s.logger.Debug("发现目录", interfaces.Fields{
+						"folder": syncRequest.Path,
+						"dir":    relPath,
+					})
+				} else {
 					files = append(files, relPath)
+					s.logger.Debug("发现文件", interfaces.Fields{
+						"folder": syncRequest.Path,
+						"file":   relPath,
+					})
 				}
 				return nil
 			})
@@ -492,12 +521,17 @@ func (s *Server) HandleClient(conn net.Conn) {
 			}
 
 			s.logger.Info("返回文件列表", interfaces.Fields{
-				"count": len(files),
+				"folder":     syncRequest.Path,
+				"file_count": len(files),
+				"dir_count":  len(dirs),
+				"files":      files,
+				"dirs":       dirs,
 			})
 
 			client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
 				"success": true,
 				"files":   files,
+				"dirs":    dirs,
 			})
 
 		case "delete_request":

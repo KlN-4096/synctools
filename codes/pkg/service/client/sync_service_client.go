@@ -152,6 +152,97 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 			}
 		}
 
+		// 在mirror模式下处理本地多余的目录
+		if mode == interfaces.MirrorSync {
+			// 获取服务器目录列表
+			req := &interfaces.SyncRequest{
+				Mode:      interfaces.MirrorSync,
+				Direction: interfaces.DirectionPull,
+				Path:      folder,
+			}
+
+			if err := s.networkClient.SendData("list_request", req); err != nil {
+				s.Logger.Error("获取服务器目录列表失败", interfaces.Fields{
+					"folder": folder,
+					"error":  err,
+				})
+			} else {
+				var resp struct {
+					Success bool     `json:"success"`
+					Files   []string `json:"files"`
+					Dirs    []string `json:"dirs"`
+				}
+
+				if err := s.networkClient.ReceiveData(&resp); err != nil {
+					s.Logger.Error("接收服务器目录列表失败", interfaces.Fields{
+						"folder": folder,
+						"error":  err,
+					})
+				} else if resp.Success {
+					// 将服务器目录转换为map便于查找
+					serverDirs := make(map[string]bool)
+					for _, dir := range resp.Dirs {
+						serverDirs[dir] = true
+					}
+
+					// 获取本地目录列表
+					var localDirs []string
+					err := filepath.Walk(localFolderPath, func(path string, info os.FileInfo, err error) error {
+						if err != nil {
+							return err
+						}
+						if info.IsDir() {
+							relPath, err := filepath.Rel(localFolderPath, path)
+							if err != nil {
+								return err
+							}
+							if relPath != "." {
+								localDirs = append(localDirs, relPath)
+							}
+						}
+						return nil
+					})
+
+					if err != nil {
+						s.Logger.Error("获取本地目录列表失败", interfaces.Fields{
+							"folder": folder,
+							"error":  err,
+						})
+					} else {
+						// 从最深层的目录开始删除
+						for i := len(localDirs) - 1; i >= 0; i-- {
+							localDir := localDirs[i]
+							if !serverDirs[localDir] {
+								fullPath := filepath.Join(localFolderPath, localDir)
+								s.Logger.Info("发现本地多余目录", interfaces.Fields{
+									"folder": folder,
+									"dir":    localDir,
+								})
+
+								// 尝试删除目录（如果不为空会失败）
+								if err := os.Remove(fullPath); err != nil {
+									if !os.IsNotExist(err) {
+										s.Logger.Error("删除目录失败", interfaces.Fields{
+											"folder": folder,
+											"dir":    localDir,
+											"error":  err,
+										})
+										totalFailedCount++
+									}
+								} else {
+									s.Logger.Debug("删除目录成功", interfaces.Fields{
+										"folder": folder,
+										"dir":    localDir,
+									})
+									totalDeleteCount++
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// 从服务器下载MD5信息
 		for serverPath, serverMD5 := range serverFiles {
 			localMD5, exists := localFiles[serverPath]
