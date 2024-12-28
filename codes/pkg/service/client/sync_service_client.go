@@ -78,10 +78,18 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	var totalDownloadCount, totalDeleteCount, totalSkipCount, totalFailedCount int
-	mode := s.Config.SyncFolders[0].SyncMode // 获取默认同步模式
 
 	// 遍历每个同步文件夹
 	for _, folder := range syncFolders {
+		// 获取当前文件夹的同步模式
+		var mode interfaces.SyncMode
+		for _, folderConfig := range s.Config.SyncFolders {
+			if folderConfig.Path == folder {
+				mode = folderConfig.SyncMode
+				break
+			}
+		}
+
 		s.Logger.Info("开始同步文件夹", interfaces.Fields{
 			"folder": folder,
 		})
@@ -342,16 +350,16 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 				})
 			}
 		}
-	}
 
-	s.Logger.Info("同步完成", interfaces.Fields{
-		"downloaded":  totalDownloadCount,
-		"deleted":     totalDeleteCount,
-		"skipped":     totalSkipCount,
-		"failed":      totalFailedCount,
-		"source_path": sourcePath,
-		"sync_mode":   mode,
-	})
+		s.Logger.Info("同步完成", interfaces.Fields{
+			"downloaded":  totalDownloadCount,
+			"deleted":     totalDeleteCount,
+			"skipped":     totalSkipCount,
+			"failed":      totalFailedCount,
+			"source_path": sourcePath,
+			"sync_mode":   mode,
+		})
+	}
 
 	s.SetStatus("同步完成")
 	return nil
