@@ -1,13 +1,15 @@
 package client
 
 import (
+	"archive/zip"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"crypto/md5"
-	"encoding/hex"
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/network/client"
 	"synctools/codes/pkg/service/base"
@@ -314,7 +316,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 					"mode":   mode,
 				})
 
-				if err := s.downloadFile(req, fullPath); err != nil {
+				if err := s.downloadFile(req, fullPath, mode); err != nil {
 					s.Logger.Error("下载文件失败", interfaces.Fields{
 						"folder": folder,
 						"file":   serverPath,
@@ -362,11 +364,19 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	s.SetStatus("同步完成")
+
+	// 同步完成后断开连接
+	if err := s.Disconnect(); err != nil {
+		s.Logger.Error("断开连接失败", interfaces.Fields{
+			"error": err,
+		})
+	}
+
 	return nil
 }
 
 // downloadFile 从服务器下载文件
-func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath string) error {
+func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath string, mode interfaces.SyncMode) error {
 	// 发送下载请求
 	if err := s.networkClient.SendData("file_request", req); err != nil {
 		return fmt.Errorf("发送下载请求失败: %v", err)
@@ -382,11 +392,136 @@ func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath s
 		}
 	}()
 
+	// 如果是打包同步模式，需要特殊处理
+	if mode == interfaces.PackSync {
+		s.Logger.Info("打包同步模式", interfaces.Fields{
+			"path": destPath,
+		})
+
+		// 创建临时目录
+		tempDir, err := os.MkdirTemp("", "synctools_pack_*")
+		if err != nil {
+			return fmt.Errorf("创建临时目录失败: %v", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		// 先将压缩包下载到临时目录
+		if err := s.networkClient.ReceiveFile(tempDir, progress); err != nil {
+			return fmt.Errorf("接收压缩包失败: %v", err)
+		}
+
+		// 获取下载的压缩包路径
+		packFile := filepath.Join(tempDir, filepath.Base(req.Path))
+
+		// 获取目标目录（移除.zip后缀）
+		targetDir := filepath.Dir(destPath)
+
+		// 解压文件
+		if err := s.unpackFile(packFile, targetDir); err != nil {
+			return fmt.Errorf("解压文件失败: %v", err)
+		}
+
+		s.Logger.Info("解压完成", interfaces.Fields{
+			"pack": packFile,
+			"dest": targetDir,
+		})
+		return nil
+	}
+
+	// 其他同步模式正常接收文件
 	if err := s.networkClient.ReceiveFile(filepath.Dir(destPath), progress); err != nil {
 		return fmt.Errorf("接收文件失败: %v", err)
 	}
 
 	return nil
+}
+
+// unpackFile 解压文件
+func (s *ClientSyncService) unpackFile(packFile, destPath string) error {
+	s.Logger.Info("开始解压文件", interfaces.Fields{
+		"pack": packFile,
+		"dest": destPath,
+	})
+
+	// 确保目标目录存在
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return fmt.Errorf("创建目标目录失败: %v", err)
+	}
+
+	// 打开压缩包
+	reader, err := zip.OpenReader(packFile)
+	if err != nil {
+		return fmt.Errorf("打开压缩包失败: %v", err)
+	}
+	defer reader.Close()
+
+	// 遍历压缩包中的文件
+	for _, file := range reader.File {
+		// 获取文件的重定向路径
+		targetPath := s.getRedirectedPath(file.Name, destPath)
+
+		if file.FileInfo().IsDir() {
+			// 创建目录
+			if err := os.MkdirAll(targetPath, file.Mode()); err != nil {
+				return fmt.Errorf("创建目录失败: %v", err)
+			}
+			continue
+		}
+
+		// 确保父目录存在
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return fmt.Errorf("创建父目录失败: %v", err)
+		}
+
+		// 创建目标文件
+		target, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.Mode())
+		if err != nil {
+			return fmt.Errorf("创建目标文件失败: %v", err)
+		}
+
+		// 打开压缩文件
+		source, err := file.Open()
+		if err != nil {
+			target.Close()
+			return fmt.Errorf("打开压缩文件失败: %v", err)
+		}
+
+		// 复制文件内容
+		if _, err := io.Copy(target, source); err != nil {
+			target.Close()
+			source.Close()
+			return fmt.Errorf("复制文件内容失败: %v", err)
+		}
+
+		target.Close()
+		source.Close()
+
+		s.Logger.Debug("解压文件完成", interfaces.Fields{
+			"file": targetPath,
+		})
+	}
+
+	return nil
+}
+
+// getRedirectedPath 获取重定向后的路径
+func (s *ClientSyncService) getRedirectedPath(originalPath, destPath string) string {
+	// 获取当前配置
+	config := s.GetCurrentConfig()
+	if config == nil || len(config.FolderRedirects) == 0 {
+		return filepath.Join(destPath, originalPath)
+	}
+
+	// 检查是否需要重定向
+	for _, redirect := range config.FolderRedirects {
+		if strings.HasPrefix(originalPath, redirect.ServerPath) {
+			// 替换路径前缀
+			relativePath := strings.TrimPrefix(originalPath, redirect.ServerPath)
+			return filepath.Join(destPath, redirect.ClientPath, relativePath)
+		}
+	}
+
+	return filepath.Join(destPath, originalPath)
 }
 
 // 辅助方法
@@ -475,6 +610,14 @@ func (s *ClientSyncService) SetConnectionLostCallback(callback func()) {
 
 // getLocalFilesWithMD5 获取本地文件列表和MD5
 func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string, error) {
+	// 检查是否是打包模式
+	for _, folder := range s.Config.SyncFolders {
+		if strings.HasSuffix(dir, folder.Path) && folder.SyncMode == interfaces.PackSync {
+			// 打包模式返回空映射
+			return make(map[string]string), nil
+		}
+	}
+
 	// 确保目录存在
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("创建目录失败: %v", err)
@@ -490,22 +633,23 @@ func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string,
 			if err != nil {
 				return err
 			}
+
 			// 检查是否需要忽略
 			if s.IsIgnored(relPath) {
-				s.Logger.Debug("忽略文件", interfaces.Fields{
-					"file": relPath,
-				})
 				return nil
 			}
-			// 计算MD5
-			md5, err := s.calculateFileMD5(path)
+
+			// 计算文件MD5
+			md5hash, err := s.calculateFileMD5(path)
 			if err != nil {
 				return err
 			}
-			files[relPath] = md5
+
+			files[relPath] = md5hash
 		}
 		return nil
 	})
+
 	return files, err
 }
 

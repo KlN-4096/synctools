@@ -31,12 +31,11 @@ type Server struct {
 
 // Client 客户端连接
 type Client struct {
-	ID           string
-	UUID         string
-	conn         net.Conn
-	server       *Server
-	lastActivity time.Time
-	msgSender    *message.MessageSender
+	ID        string
+	UUID      string
+	conn      net.Conn
+	server    *Server
+	msgSender *message.MessageSender
 }
 
 // SyncRequest 同步请求结构体
@@ -150,11 +149,10 @@ func (s *Server) HandleClient(conn net.Conn) {
 
 	// 创建客户端实例
 	client := &Client{
-		ID:           fmt.Sprintf("client-%s", conn.RemoteAddr()),
-		conn:         conn,
-		server:       s,
-		lastActivity: time.Now(),
-		msgSender:    message.NewMessageSender(s.logger),
+		ID:        fmt.Sprintf("client-%s", conn.RemoteAddr()),
+		conn:      conn,
+		server:    s,
+		msgSender: message.NewMessageSender(s.logger),
 	}
 
 	// 添加到客户端列表
@@ -166,9 +164,6 @@ func (s *Server) HandleClient(conn net.Conn) {
 		"id":   client.ID,
 		"addr": conn.RemoteAddr(),
 	})
-
-	// 启动超时检查
-	go s.monitorClient(client)
 
 	defer func() {
 		conn.Close()
@@ -192,8 +187,6 @@ func (s *Server) HandleClient(conn net.Conn) {
 			}
 			return
 		}
-
-		client.lastActivity = time.Now()
 
 		switch msg.Type {
 		case "init":
@@ -453,12 +446,6 @@ func (s *Server) HandleClient(conn net.Conn) {
 				"size": fileInfo.Size(),
 			})
 
-			// 发送成功响应
-			client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-				"success": true,
-				"message": "文件发送成功",
-			})
-
 		case "list_request":
 			var syncRequest interfaces.SyncRequest
 			if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
@@ -573,41 +560,10 @@ func (s *Server) HandleClient(conn net.Conn) {
 				"message": "文件删除成功",
 			})
 
-		case "heartbeat":
-			client.lastActivity = time.Now()
-			// 发送心跳响应
-			if err := client.msgSender.SendMessage(conn, "heartbeat_response", msg.UUID, nil); err != nil {
-				s.logger.Error("发送心跳响应失败", interfaces.Fields{
-					"error": err,
-					"uuid":  msg.UUID,
-				})
-			}
-
 		default:
 			s.logger.Error("未知的消息类型", interfaces.Fields{
 				"type": msg.Type,
 			})
-		}
-	}
-}
-
-// monitorClient 监控客户端连接状态
-func (s *Server) monitorClient(client *Client) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if !s.running {
-			return
-		}
-
-		if time.Since(client.lastActivity) > time.Duration(s.config.ConnTimeout)*time.Second {
-			s.logger.Info("客户端超时", interfaces.Fields{
-				"id":            client.ID,
-				"last_activity": client.lastActivity,
-			})
-			client.conn.Close()
-			return
 		}
 	}
 }

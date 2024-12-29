@@ -26,10 +26,39 @@ func NewServerSyncService(config *interfaces.Config, Logger interfaces.Logger, s
 	}
 }
 
+// validateConfig 验证服务器配置是否有效
+func (s *ServerSyncService) validateConfig() error {
+	config := s.GetCurrentConfig()
+	if config == nil {
+		return fmt.Errorf("请先配置服务器参数")
+	}
+
+	// 检查必要的配置项
+	if config.Port <= 0 {
+		return fmt.Errorf("端口号无效")
+	}
+
+	if config.Host == "" {
+		return fmt.Errorf("主机地址未设置")
+	}
+
+	if config.SyncDir == "" {
+		return fmt.Errorf("同步目录未设置")
+	}
+
+	return nil
+}
+
 // StartServer 启动服务器
 func (s *ServerSyncService) StartServer() error {
 	if s.IsRunning() {
 		return errors.ErrServiceStart
+	}
+
+	// 验证配置
+	if err := s.validateConfig(); err != nil {
+		s.SetStatus(fmt.Sprintf("启动失败: %s", err.Error()))
+		return err
 	}
 
 	if s.server == nil {
@@ -200,24 +229,34 @@ func (s *ServerSyncService) handlePushSync(req *interfaces.SyncRequest) error {
 
 // handlePackSync 处理打包同步
 func (s *ServerSyncService) handlePackSync(req *interfaces.SyncRequest) error {
-	// 创建临时目录
-	tempDir, err := os.MkdirTemp("", "synctools_pack_*")
-	if err != nil {
-		return fmt.Errorf("创建临时目录失败: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	s.Logger.Info("处理打包同步请求", interfaces.Fields{
+		"path": req.Path,
+	})
 
-	// 创建压缩包
-	packFile := filepath.Join(tempDir, "pack.zip")
-	if err := s.createPack(req.Path, packFile); err != nil {
-		return fmt.Errorf("创建压缩包失败: %v", err)
-	}
-
-	// 发送压缩包
-	if err := s.sendPack(packFile, req); err != nil {
-		return fmt.Errorf("发送压缩包失败: %v", err)
+	// 检查压缩包是否存在
+	packPath := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
+	if _, err := os.Stat(packPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("压缩包不存在: %s", packPath)
+		}
+		return fmt.Errorf("检查压缩包失败: %v", err)
 	}
 
+	// 复制压缩包到目标路径
+	targetPath := filepath.Join(req.Path, filepath.Base(packPath))
+	if err := s.copyFile(packPath, targetPath); err != nil {
+		s.Logger.Error("复制压缩包失败", interfaces.Fields{
+			"source": packPath,
+			"target": targetPath,
+			"error":  err,
+		})
+		return fmt.Errorf("复制压缩包失败: %v", err)
+	}
+
+	s.Logger.Info("打包同步完成", interfaces.Fields{
+		"source": packPath,
+		"target": targetPath,
+	})
 	return nil
 }
 
@@ -296,12 +335,5 @@ func (s *ServerSyncService) createPack(srcPath string, packFile string) error {
 
 	// TODO: 实现压缩逻辑
 	// 可以使用 archive/zip 包来实现
-	return nil
-}
-
-// sendPack 发送压缩包
-func (s *ServerSyncService) sendPack(packFile string, req *interfaces.SyncRequest) error {
-	// TODO: 实现发送逻辑
-	// 可以分块发送大文件
 	return nil
 }

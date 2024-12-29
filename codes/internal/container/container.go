@@ -71,7 +71,6 @@ func (c *Container) InitializeServices(baseDir string, cfg *interfaces.Config) e
 		// 创建内存配置
 		cfg = &interfaces.Config{
 			Type:        interfaces.ConfigTypeServer,
-			Host:        "0.0.0.0",
 			Port:        25000,
 			ConnTimeout: 300,
 		}

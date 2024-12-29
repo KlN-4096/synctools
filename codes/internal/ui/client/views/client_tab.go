@@ -214,6 +214,7 @@ func (t *ClientTab) onSync() {
 		walk.MsgBox(t.Form(), "错误", "同步失败: "+err.Error(), walk.MsgBoxIconError)
 		return
 	}
+	t.UpdateUI()
 }
 
 // UpdateUI 更新界面状态
