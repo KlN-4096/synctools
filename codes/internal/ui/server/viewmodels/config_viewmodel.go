@@ -603,22 +603,10 @@ func (m *ConfigListModel) refreshCache() {
 	for _, config := range configs {
 		if config.Type == interfaces.ConfigTypeServer {
 			serverConfigs = append(serverConfigs, config)
-			// m.logger.Debug("找到服务器配置", interfaces.Fields{
-			// 	"uuid":     config.UUID,
-			// 	"name":     config.Name,
-			// 	"version":  config.Version,
-			// 	"host":     config.Host,
-			// 	"port":     config.Port,
-			// 	"sync_dir": config.SyncDir,
-			// })
 		} else {
 		}
 	}
 	m.cachedConfigs = serverConfigs
-	// m.logger.Debug("服务器配置统计", interfaces.Fields{
-	// 	"total_configs":  len(configs),
-	// 	"server_configs": len(serverConfigs),
-	// })
 }
 
 // RowCount 返回行数
@@ -681,16 +669,6 @@ func (m *ConfigListModel) Value(row, col int) interface{} {
 		})
 		return nil
 	}
-
-	// m.logger.Debug("获取单元格值", interfaces.Fields{
-	// 	"row":      row,
-	// 	"col":      col,
-	// 	"value":    value,
-	// 	"config":   config.UUID,
-	// 	"name":     config.Name,
-	// 	"version":  config.Version,
-	// 	"sync_dir": config.SyncDir,
-	// })
 	return value
 }
 

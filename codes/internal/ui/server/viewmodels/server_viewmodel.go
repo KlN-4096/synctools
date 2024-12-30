@@ -1,8 +1,6 @@
 package viewmodels
 
 import (
-	"fmt"
-
 	"github.com/lxn/walk"
 
 	"synctools/codes/internal/interfaces"
@@ -43,52 +41,6 @@ func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
 	vm.logger.Info("初始化主视图模型", interfaces.Fields{
 		"status": vm.status,
 	})
-	return nil
-}
-
-// Shutdown 关闭视图模型
-func (vm *MainViewModel) Shutdown() error {
-	vm.logger.Info("关闭主视图模型", nil)
-	return nil
-}
-
-// GetStatus 获取状态
-func (vm *MainViewModel) GetStatus() string {
-	if vm.syncService != nil {
-		return vm.syncService.GetSyncStatus()
-	}
-	return vm.status
-}
-
-// SetStatus 设置状态
-func (vm *MainViewModel) SetStatus(status string) {
-	vm.status = status
-	vm.logger.Info("状态更新", interfaces.Fields{
-		"status": status,
-	})
-}
-
-// HandleSyncRequest 处理同步请求
-func (vm *MainViewModel) HandleSyncRequest(request interface{}) error {
-	vm.logger.Info("处理同步请求", interfaces.Fields{
-		"request": fmt.Sprintf("%+v", request),
-	})
-
-	if vm.syncService == nil {
-		return fmt.Errorf("同步服务未初始化")
-	}
-
-	if err := vm.syncService.HandleSyncRequest(request); err != nil {
-		vm.logger.Error("处理同步请求失败", interfaces.Fields{
-			"error": err,
-		})
-		if vm.window != nil {
-			walk.MsgBox(vm.window, "处理请求失败", err.Error(), walk.MsgBoxIconError)
-		}
-		return err
-	}
-
-	vm.logger.Info("请求处理完成", nil)
 	return nil
 }
 

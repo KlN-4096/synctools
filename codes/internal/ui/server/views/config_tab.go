@@ -18,6 +18,7 @@ package views
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/lxn/walk"
@@ -454,6 +455,12 @@ func (t *ConfigTab) onAddSyncFolder() {
 				Text:    "确定",
 				MinSize: Size{Width: 70},
 				OnClicked: func() {
+					if interfaces.SyncMode(modeComboBox.Text()) == interfaces.PackSync &&
+						!strings.HasSuffix(strings.ToLower(redirectPathEdit.Text()), ".zip") {
+						walk.MsgBox(dlg, "格式错误", "打包同步模式下，目标文件必须是ZIP压缩包格式", walk.MsgBoxIconWarning)
+						return
+					}
+
 					if err := t.viewModel.AddSyncFolder(pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text()), redirectPathEdit.Text()); err != nil {
 						walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 						return
