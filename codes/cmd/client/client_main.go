@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"synctools/codes/internal/container"
 	"synctools/codes/internal/interfaces"
@@ -129,6 +130,12 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 
 	// 尝试从configs文件夹加载client类型的配置
 	configsDir := filepath.Join(baseDir, "configs")
+
+	// 如果configs目录不存在，创建它
+	if err := os.MkdirAll(configsDir, 0755); err != nil {
+		return nil, fmt.Errorf("创建configs目录失败: %v", err)
+	}
+
 	files, err := os.ReadDir(configsDir)
 	if err != nil {
 		logger.Error("读取configs目录失败", interfaces.Fields{
@@ -163,8 +170,25 @@ func loadOrCreateConfig(c *container.Container, configFile string) (*interfaces.
 		}
 	}
 
-	logger.Info("未找到client配置文件", interfaces.Fields{
+	// 如果没有找到配置文件，创建默认配置
+	logger.Info("未找到client配置文件，创建默认配置", interfaces.Fields{
 		"path": configsDir,
 	})
-	return nil, fmt.Errorf("在configs目录下未找到client类型的配置文件")
+
+	defaultConfig := &interfaces.Config{
+		Type:        interfaces.ConfigTypeClient,
+		Name:        "default",
+		UUID:        fmt.Sprintf("%d", time.Now().UnixNano()),
+		Version:     "1.0.0",
+		Host:        "ddns.klno.top",
+		Port:        25000,
+		ConnTimeout: 300,
+	}
+
+	// 保存默认配置
+	if err := cfgManager.SaveConfig(defaultConfig); err != nil {
+		return nil, fmt.Errorf("保存默认配置失败: %v", err)
+	}
+
+	return defaultConfig, nil
 }

@@ -22,6 +22,12 @@ type ConfigManager interface {
 
 	// GetLastModified 获取最后修改时间
 	GetLastModified() time.Time
+
+	// ListConfigs 获取所有配置列表
+	ListConfigs() ([]*Config, error)
+
+	// SetOnChanged 设置配置变更回调
+	SetOnChanged(callback func())
 }
 
 // Logger 定义日志接口
@@ -54,6 +60,33 @@ type NetworkServer interface {
 	IsRunning() bool
 }
 
+// NetworkClient 定义网络客户端的核心接口
+type NetworkClient interface {
+	// Connect 连接到服务器
+	Connect(addr, port string) error
+
+	// Disconnect 断开连接
+	Disconnect() error
+
+	// IsConnected 检查是否已连接
+	IsConnected() bool
+
+	// SendData 发送数据
+	SendData(msgType string, data interface{}) error
+
+	// ReceiveData 接收数据
+	ReceiveData(v interface{}) error
+
+	// SendFile 发送文件
+	SendFile(path string, progress chan<- Progress) error
+
+	// ReceiveFile 接收文件
+	ReceiveFile(destDir string, progress chan<- Progress) error
+
+	// SetConnectionLostCallback 设置连接丢失回调
+	SetConnectionLostCallback(callback func())
+}
+
 // FileTransfer 定义文件传输操作接口
 type FileTransfer interface {
 	// CopyFile copies file with progress reporting
@@ -67,6 +100,12 @@ type FileTransfer interface {
 
 	// ListFiles lists files in directory
 	ListFiles(path string) ([]FileInfo, error)
+
+	// CompressFiles 压缩文件到ZIP
+	CompressFiles(srcPath, zipPath string, opts *CompressOptions) (*CompressProgress, error)
+
+	// DecompressFiles 从ZIP解压文件
+	DecompressFiles(zipPath, destPath string, progress chan<- Progress) error
 }
 
 // NetworkError 定义网络错误接口
@@ -92,6 +131,9 @@ type Storage interface {
 
 	// List 列出所有键
 	List() ([]string, error)
+
+	// BaseDir 获取基础目录
+	BaseDir() string
 }
 
 // SyncService 基础同步服务接口
@@ -138,6 +180,22 @@ type ClientSyncService interface {
 	Disconnect() error
 	IsConnected() bool
 	SetConnectionLostCallback(callback func())
+
 	// 同步操作
 	SyncFiles(path string) error
+}
+
+// CompressOptions 压缩选项接口
+type CompressOptions interface {
+	// GetIgnoreList 获取忽略文件列表
+	GetIgnoreList() []string
+
+	// SetIgnoreList 设置忽略文件列表
+	SetIgnoreList(ignoreList []string)
+
+	// AddIgnorePattern 添加忽略模式
+	AddIgnorePattern(pattern string)
+
+	// RemoveIgnorePattern 移除忽略模式
+	RemoveIgnorePattern(pattern string)
 }

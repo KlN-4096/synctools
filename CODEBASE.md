@@ -1,185 +1,316 @@
-# SyncTools 代码库说明
+# SyncTools 项目文档
 
 ## 项目概述
-SyncTools是一个基于Go语言开发的文件同步工具，采用客户端-服务器架构，具有图形用户界面。项目致力于提供高效、可靠的文件同步解决方案。
+SyncTools 是一个基于 Go 语言开发的文件同步工具，支持客户端-服务器架构，提供文件同步、传输和管理功能。项目采用模块化设计，使用依赖注入实现组件解耦，并提供了图形用户界面。
 
 ## 项目结构
 
-### 根目录文件
-- `go.mod`: Go项目依赖管理文件
-- `go.sum`: Go项目依赖版本锁定文件
-- `README.md`: 项目说明文档
-- `LICENSE`: 项目许可证
-- `client.exe`: 客户端可执行文件
-- `server.exe`: 服务端可执行文件
-- `app.manifest`: 应用程序清单文件
-- `CODEBASE.md`: 代码库说明文档
+### 命令行入口 (cmd/)
+- `cmd/client/client_main.go`: 客户端程序入口
+  - 初始化配置和组件
+  - 启动 GUI 界面
+  - 启动同步服务
+  
+- `cmd/server/server_main.go`: 服务器程序入口
+  - 初始化配置和组件
+  - 启动网络服务
+  - 启动 GUI 界面
 
-### cmd/ - 入口程序
-#### client/client_main.go
-- **文件作用**：
-  - 实现客户端的主程序入口
-  - 初始化客户端配置和组件
-  - 启动GUI界面和同步服务
-  - 管理客户端状态和配置
-- **主要方法**：
-  - main: 程序入口,初始化各个组件并启动GUI界面
-  - init: 初始化基础配置和命令行参数
-  - loadOrCreateConfig: 加载或创建默认配置文件
+### 内部实现 (internal/)
 
-#### server/server_main.go
-- **文件作用**：
-  - 实现服务器的主程序入口
-  - 初始化服务器配置和组件
-  - 启动网络服务和GUI界面
-  - 管理服务器状态和配置
-- **主要方法**：
-  - main: 程序入口,初始化各个组件并启动服务器
-  - init: 初始化基础配置和命令行参数
-  - loadOrCreateConfig: 加载或创建默认配置文件
+#### 容器 (internal/container/)
+- `container.go`: 依赖注入容器
+  - 服务注册和获取
+  - 组件生命周期管理
+  - 配置管理
 
-### internal/ - 内部包
+#### 接口定义 (internal/interfaces/)
+- `interfaces.go`: 核心接口定义
+  - 配置管理接口
+  - 网络接口
+  - 存储接口
+  - 同步服务接口
+  
+- `types.go`: 数据类型定义
+  - 配置相关类型
+  - 同步相关类型
+  - 消息相关类型
+  - 进度相关类型
 
-#### container/container.go
-- **文件作用**：
-  - 实现依赖注入容器
-  - 管理所有服务实例的生命周期
-  - 提供服务注册和获取功能
-  - 负责服务的初始化和关闭
-- **主要方法**：
-  - New: 创建新的依赖注入容器
-  - Register: 注册服务到容器
-  - Get: 从容器获取服务
-  - InitializeServices: 初始化所有服务
-  - GetLogger/GetConfigManager/GetNetworkServer/GetSyncService/GetStorage: 获取特定服务
-  - Shutdown: 关闭所有服务
+#### 用户界面 (internal/ui/)
 
-#### interfaces/ - 接口定义
-- `interfaces.go`: 定义核心接口
-- `types.go`: 定义共享数据类型
+##### 客户端 UI (internal/ui/client/)
+- `viewmodels/client_viewmodel.go`: 客户端视图模型
+  - 状态管理
+  - 业务逻辑处理
+  - UI 数据绑定
+  
+- `views/client_tab.go`: 客户端标签页
+  - UI 布局
+  - 用户交互处理
+  
+- `windows/client_window.go`: 客户端主窗口
+  - 窗口创建和初始化
+  - 事件处理
 
-#### ui/ - 用户界面
-##### client/ - 客户端UI
-- **views/client_tab.go**: 
-  - 实现客户端主界面的UI布局和交互
-  - 管理客户端界面的各个控件
-  - 处理用户界面事件
-  - 与视图模型层交互
+##### 服务器 UI (internal/ui/server/)
+- `viewmodels/server_viewmodel.go`: 服务器视图模型
+  - 服务器状态管理
+  - 同步请求处理
+  
+- `viewmodels/config_viewmodel.go`: 配置视图模型
+  - 配置数据管理
+  - 配置界面交互
+  
+- `views/config_tab.go`: 配置标签页
+  - 配置界面布局
+  - 配置操作处理
+  
+- `windows/server_window.go`: 服务器主窗口
+  - 窗口创建和初始化
+  - 事件处理
 
-- **viewmodels/client_viewmodel.go**:
-  - 实现客户端主视图模型
-  - 管理客户端状态
-  - 处理客户端业务逻辑
-  - 提供UI数据绑定
+### 包实现 (pkg/)
 
-- **windows/client_window.go**:
-  - 实现客户端主窗口界面
-  - 管理界面布局
-  - 处理用户交互
-  - 集成客户端功能模块
+#### 配置管理 (pkg/config/)
+- `manager.go`: 配置管理器
+  - 配置文件加载和保存
+  - 配置验证
+  - 配置列表管理
 
-##### server/ - 服务端UI
-- **views/config_tab.go**: 
-  - 实现配置界面的UI布局和交互
-  - 管理配置界面的各个控件
-  - 处理用户界面事件
-  - 与视图模型层交互
+#### 错误处理 (pkg/errors/)
+- `errors.go`: 错误处理
+  - 错误类型定义
+  - 错误创建和判断
 
-- **viewmodels/server_viewmodel.go**:
-  - 实现主窗口的视图模型
-  - 管理全局状态
-  - 协调各个子视图模型
-  - 处理主窗口事件
+#### 日志记录 (pkg/logger/)
+- `logger.go`: 日志记录器
+  - 日志级别管理
+  - 日志记录方法
+  - 日志适配器
 
-- **viewmodels/config_viewmodel.go**:
-  - 实现配置界面的视图模型
-  - 管理配置数据绑定
-  - 处理配置界面交互
-  - 提供配置操作接口
+#### 网络通信 (pkg/network/)
+- `client/client_network.go`: 客户端网络实现
+  - 连接管理
+  - 数据收发
+  - 文件传输
+  
+- `server/server_network.go`: 服务器网络实现
+  - 客户端连接管理
+  - 服务启动和停止
+  - 消息处理
+  
+- `message/message.go`: 消息处理
+  - 消息发送和接收
+  - 文件传输
 
-- **windows/server_window.go**:
-  - 实现主窗口界面
-  - 管理界面布局
-  - 处理用户交互
-  - 集成各个功能模块
+#### 同步服务 (pkg/service/)
+- `base/sync_service_base.go`: 同步服务基类
+  - 基础功能实现
+  - 状态管理
+  - 配置管理
+  
+- `client/sync_service_client.go`: 客户端同步服务
+  - 连接管理
+  - 文件同步
+  
+- `server/sync_service_server.go`: 服务器同步服务
+  - 同步请求处理
+  - 服务器状态管理
 
-##### common/logger/adapter.go
-- **文件作用**：
-  - 提供UI层通用的日志适配器
-  - 实现日志接口的包装
-  - 提供调试模式支持
-  - 统一日志格式化
+#### 存储管理 (pkg/storage/)
+- `storage.go`: 文件存储实现
+  - 文件操作
+  - 数据持久化
 
-### pkg/ - 可重用包
+## 主要功能
 
-#### archive/zip.go
-- **文件作用**：
-  - 实现文件压缩和解压功能
-  - 提供进度报告
-  - 处理文件完整性验证
-- **主要功能**：
-  - CompressFiles: 压缩文件到ZIP
-  - DecompressFiles: 解压ZIP文件
-  - ValidateZip: 验证ZIP文件完整性
+### 文件同步
+- 支持多种同步模式：镜像、推送、打包、手动
+- 文件变更检测和同步
+- 增量同步支持
+- 同步进度跟踪
 
-#### config/manager.go
-- **文件作用**：
-  - 实现配置管理器
-  - 负责配置文件的加载、保存和验证
-  - 管理配置的生命周期和变更通知
-  - 提供配置的CRUD操作
-- **主要方法**：
-  - NewManager: 创建配置管理器
-  - LoadConfig: 加载配置文件
-  - SaveConfig: 保存配置到文件
-  - ValidateConfig: 验证配置有效性
+### 网络通信
+- TCP 连接管理
+- 消息序列化和反序列化
+- 文件传输协议
+- 断线重连机制
 
-#### errors/ - 错误定义
-- `errors.go`: 定义错误类型和处理函数
-- `codes.go`: 定义错误代码常量
+### 配置管理
+- 配置文件加载和保存
+- 配置验证和更新
+- 多配置支持
+- 配置变更通知
 
-#### logger/default.go
-- **文件作用**：
-  - 实现默认日志记录器
-  - 支持不同日志级别
-  - 提供结构化日志记录
-- **主要功能**：
-  - Debug/Info/Warn/Error/Fatal: 不同级别的日志记录
-  - WithFields: 添加日志字段
-  - SetLevel: 设置日志级别
+### 用户界面
+- 客户端连接管理
+- 服务器状态监控
+- 配置界面
+- 同步进度显示
 
-#### network/network.go
-- **文件作用**：
-  - 实现网络通信功能
-  - 管理客户端连接
-  - 处理消息收发
-  - 提供网络操作接口
+### 文件处理
+- 文件压缩和解压
+- 文件完整性验证
+- 文件信息管理
+- 存储接口抽象
 
-#### service/sync_service.go
-- **文件作用**：
-  - 实现核心业务逻辑服务层
-  - 管理配置的存储和验证
-  - 管理文件同步状态和进度
-  - 处理同步请求和响应
-- **主要功能**：
-  - 配置管理: 配置的CRUD操作和验证
-  - 同步服务: 文件同步和进度跟踪
-  - 网络服务: 服务器管理和请求处理
-  - 状态管理: 同步状态和进度管理
+## 技术特点
+1. 模块化设计：清晰的模块划分，便于维护和扩展
+2. 依赖注入：使用容器管理组件依赖，降低耦合
+3. 接口抽象：通过接口定义实现组件解耦
+4. 错误处理：统一的错误处理机制
+5. 日志系统：完善的日志记录功能
+6. GUI支持：基于图形界面的操作交互
+7. 配置灵活：支持多种同步配置和模式
 
-#### storage/storage.go
-- **文件作用**：
-  - 实现文件存储接口
-  - 提供文件操作功能
-  - 管理文件系统交互
-  - 处理文件元数据
+## 开发规范
+1. 代码组织：按功能模块划分目录结构
+2. 接口设计：通过接口定义组件契约
+3. 错误处理：统一的错误码和错误类型
+4. 日志记录：分级的日志记录机制
+5. 注释规范：包含中文注释的代码文档
+6. 配置管理：结构化的配置定义和处理
 
-### test/ - 测试代码
-- `sync_service_test.go`: 同步服务的单元测试
+## 架构层级
 
-## 架构设计
+### 整体架构
+```
++------------------+
+|     展示层       |  GUI界面、用户交互
++------------------+
+         ↓
++------------------+
+|     应用层       |  业务逻辑、状态管理
++------------------+
+         ↓
++------------------+
+|     领域层       |  核心业务规则、接口定义
++------------------+
+         ↓
++------------------+
+|   基础设施层     |  技术实现、外部接口
++------------------+
+```
 
-### 分层架构
+### 层级职责
+
+#### 展示层 (Presentation Layer)
+- 位置：`internal/ui/`
+- 组件：
+  ```
+  ui/
+  ├── client/
+  │   ├── views/        # 视图实现
+  │   ├── viewmodels/   # 视图模型
+  │   └── windows/      # 窗口管理
+  └── server/
+      ├── views/        # 视图实现
+      ├── viewmodels/   # 视图模型
+      └── windows/      # 窗口管理
+  ```
+- 职责：
+  - 用户界面渲染
+  - 用户输入处理
+  - 界面状态管理
+  - 视图模型绑定
+
+#### 应用层 (Application Layer)
+- 位置：`internal/container/`, `pkg/service/`
+- 组件：
+  ```
+  ├── container/        # 依赖注入容器
+  └── service/
+      ├── base/        # 基础服务实现
+      ├── client/      # 客户端服务
+      └── server/      # 服务器服务
+  ```
+- 职责：
+  - 业务流程编排
+  - 事务管理
+  - 服务组装
+  - 依赖注入
+
+#### 领域层 (Domain Layer)
+- 位置：`internal/interfaces/`
+- 组件：
+  ```
+  interfaces/
+  ├── interfaces.go    # 核心接口定义
+  └── types.go        # 领域类型定义
+  ```
+- 职责：
+  - 业务规则定义
+  - 接口契约
+  - 领域模型
+  - 业务约束
+
+#### 基础设施层 (Infrastructure Layer)
+- 位置：`pkg/`
+- 组件：
+  ```
+  pkg/
+  ├── config/         # 配置管理
+  ├── errors/         # 错误处理
+  ├── logger/         # 日志记录
+  ├── network/        # 网络通信
+  │   ├── client/
+  │   ├── server/
+  │   └── message/
+  └── storage/        # 存储实现
+  ```
+- 职责：
+  - 技术实现
+  - 外部服务集成
+  - 基础设施服务
+  - 通用工具支持
+
+### 依赖关系
+```
++------------------+
+|     展示层       |
++------------------+
+         ↓
++------------------+
+|     应用层       |
++------------------+
+         ↓
++------------------+
+|     领域层       |
++------------------+
+         ↑
++------------------+
+|   基础设施层     |
++------------------+
+
+说明：
+→ 表示依赖方向
+- 上层依赖下层
+- 基础设施层依赖领域层接口
+- 所有层都遵循依赖倒置原则
+```
+
+### 设计原则
+1. **依赖倒置原则**
+   - 高层模块不应依赖低层模块，两者都应依赖抽象
+   - 抽象不应依赖细节，细节应依赖抽象
+
+2. **关注点分离**
+   - 每一层都有其特定的职责
+   - 层与层之间通过接口通信
+   - 避免跨层调用
+
+3. **接口隔离**
+   - 接口精简，职责单一
+   - 客户端不应依赖它不使用的接口
+   - 接口应该是细粒度的，服务于特定客户
+
+4. **封装变化**
+   - 将容易变化的部分封装在接口后面
+   - 稳定的抽象位于领域层
+   - 技术实现细节位于基础设施层
+
+## 架构流程图
 ```mermaid
 graph TB
     subgraph 展示层[展示层 - Presentation Layer]
@@ -219,20 +350,18 @@ graph TB
 
     subgraph 基础设施层[基础设施层 - Infrastructure Layer]
         subgraph Common[通用组件]
-            Logger[default.go]
-            LogAdapter[adapter.go]
+            Logger[logger.go]
             ErrorHandler[errors.go]
-            ErrorCodes[codes.go]
         end
         
         subgraph Storage[存储组件]
             FileStorage[storage.go]
-            Archive[zip.go]
             ConfigManager[manager.go]
         end
         
         subgraph Network[网络组件]
             NetworkServer[network.go]
+            MessageHandler[message.go]
         end
     end
 
@@ -259,10 +388,10 @@ graph TB
 
     %% 基础设施层依赖
     Logger --> CoreInterfaces
-    LogAdapter --> Logger
     FileStorage --> CoreInterfaces
     NetworkServer --> CoreInterfaces
     ConfigManager --> CoreInterfaces
+    MessageHandler --> CoreInterfaces
 
     %% 入口层依赖
     ClientMain --> DIContainer
@@ -285,121 +414,63 @@ graph TB
     style Network fill:#DDA0DD
 ```
 
-### 设计原则
+## 数据流
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Server as 服务器
+    participant Storage as 存储层
 
-1. **依赖倒置**
-   - 所有组件依赖于接口而非实现
-   - 通过接口层实现解耦
-   - 便于测试和替换实现
+    Client->>Server: 连接请求
+    Server-->>Client: 连接确认
+    
+    Client->>Server: 同步请求
+    Server->>Storage: 读取文件信息
+    Storage-->>Server: 返回文件列表
+    Server-->>Client: 文件差异信息
+    
+    loop 文件传输
+        Client->>Server: 请求文件
+        Server->>Storage: 读取文件
+        Storage-->>Server: 文件数据
+        Server-->>Client: 文件数据
+        Client->>Client: 保存文件
+    end
+    
+    Client->>Server: 同步完成
+    Server-->>Client: 确认完成
+```
 
-2. **关注点分离**
-   - UI层：负责用户界面和交互
-   - 服务层：处理业务逻辑
-   - 存储层：处理数据持久化
-   - 网络层：处理通信
+## 组件交互
+```mermaid
+flowchart TB
+    subgraph UI[用户界面]
+        direction TB
+        View[视图]
+        ViewModel[视图模型]
+    end
+    
+    subgraph Service[服务层]
+        direction TB
+        SyncService[同步服务]
+        ConfigService[配置服务]
+    end
+    
+    subgraph Network[网络层]
+        direction TB
+        Client[客户端]
+        Server[服务器]
+    end
+    
+    subgraph Storage[存储层]
+        direction TB
+        FileSystem[文件系统]
+        Config[配置存储]
+    end
 
-3. **MVVM模式**
-   - Model: 数据模型和业务逻辑
-   - ViewModel: 视图模型，处理UI逻辑
-   - View: 用户界面实现
-
-4. **错误处理**
-   - 统一的错误类型体系
-   - 结构化的错误信息
-   - 错误追踪和日志记录
-
-5. **配置管理**
-   - 集中的配置管理
-   - 配置验证和迁移
-   - 实时配置更新
-
-6. **日志系统**
-   - 分级日志记录
-   - 结构化日志
-   - 可配置的日志输出
-
-### 主要功能
-
-1. **文件同步**
-   - 多种同步模式：镜像、推送、打包
-   - 增量同步
-   - 文件完整性验证
-
-2. **网络通信**
-   - TCP长连接
-   - JSON消息协议
-   - 断线重连
-
-3. **用户界面**
-   - 配置管理
-   - 同步状态监控
-   - 进度显示
-
-4. **存储管理**
-   - 文件存储
-   - 配置持久化
-   - 缓存管理
-
-## 开发指南
-
-### 添加新功能
-1. 在接口层定义接口
-2. 在基础设施层实现接口
-3. 在容器中注册服务
-4. 更新UI（如需要）
-
-### 错误处理
-1. 使用特定的错误类型
-2. 记录详细的错误信息
-3. 提供用户友好的错误提示
-
-### 测试策略
-1. 单元测试：测试独立组件
-2. 集成测试：测试组件交互
-3. UI测试：测试用户界面
-4. 性能测试：测试同步性能
-
-### 日志规范
-1. 使用适当的日志级别
-2. 包含上下文信息
-3. 避免敏感信息
-
-## 技术栈
-
-### 核心技术
-- 语言：Go
-- GUI框架：walk
-- 网络：标准库net包
-- 存储：文件系统操作
-- 日志：结构化日志
-- 配置：JSON配置文件
-
-### 开发工具
-- IDE：支持Go的任意IDE
-- 构建工具：Go build
-- 依赖管理：Go modules
-- 版本控制：Git
-
-## 部署说明
-
-### 环境要求
-- Go 1.16+
-- Windows 7/10/11
-- 足够的磁盘空间用于文件同步
-
-### 构建步骤
-1. 克隆代码库
-2. 安装依赖：`go mod download`
-3. 构建客户端：`go build cmd/client/main.go`
-4. 构建服务端：`go build cmd/server/main.go`
-
-### 配置说明
-1. 默认配置文件位于 `configs/default.json`
-2. 可通过命令行参数指定配置文件
-3. 支持运行时修改配置
-
-### 运行说明
-1. 启动服务端：`server.exe`
-2. 启动客户端：`client.exe`
-3. 配置同步参数
-4. 开始同步操作
+    View <--> ViewModel
+    ViewModel <--> SyncService
+    ViewModel <--> ConfigService
+    SyncService <--> Network
+    ConfigService <--> Storage
+    Network <--> Storage

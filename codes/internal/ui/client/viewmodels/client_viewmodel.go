@@ -16,6 +16,7 @@ package viewmodels
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/lxn/walk"
 
@@ -215,7 +216,32 @@ func (vm *MainViewModel) updateUIState() {
 
 // Connect 连接到服务器
 func (vm *MainViewModel) Connect() error {
-	vm.syncService.Connect(vm.serverAddr, vm.serverPort)
+	// 检查服务器地址
+	if vm.serverAddr == "" {
+		return fmt.Errorf("服务器地址不能为空")
+	}
+
+	// 检查端口号
+	port := vm.parsePort()
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("无效的端口号: %s", vm.serverPort)
+	}
+
+	// 检查同步路径
+	if vm.syncPath == "" {
+		return fmt.Errorf("同步路径不能为空")
+	}
+
+	// 检查同步路径是否存在
+	if _, err := os.Stat(vm.syncPath); os.IsNotExist(err) {
+		return fmt.Errorf("同步路径不存在: %s", vm.syncPath)
+	}
+
+	// 尝试连接服务器
+	if err := vm.syncService.Connect(vm.serverAddr, vm.serverPort); err != nil {
+		return fmt.Errorf("连接服务器失败: %v", err)
+	}
+
 	vm.updateUIState()
 	return nil
 }
