@@ -40,6 +40,8 @@ type Logger interface {
 	WithFields(fields Fields) Logger
 	SetLevel(level LogLevel)
 	GetLevel() LogLevel
+	SetDebugMode(enabled bool)
+	GetDebugMode() bool
 }
 
 // NetworkServer 定义网络服务器的核心接口

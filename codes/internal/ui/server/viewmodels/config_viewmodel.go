@@ -47,23 +47,6 @@ type TableViewIface interface {
 	SetEnabled(enabled bool)
 }
 
-// ViewModelLogger 日志接口
-type ViewModelLogger interface {
-	Debug(msg string, fields interfaces.Fields)
-	Info(msg string, fields interfaces.Fields)
-	Warn(msg string, fields interfaces.Fields)
-	Error(msg string, fields interfaces.Fields)
-	Fatal(msg string, fields interfaces.Fields)
-	WithFields(fields interfaces.Fields) interfaces.Logger
-	SetLevel(level interfaces.LogLevel)
-
-	// UI特定的日志方法
-	Log(format string, v ...interface{})
-	DebugLog(format string, v ...interface{})
-	SetDebugMode(enabled bool)
-	GetDebugMode() bool
-}
-
 // EnabledSetter 定义可设置启用状态的接口
 type EnabledSetter interface {
 	SetEnabled(enabled bool)
@@ -72,7 +55,7 @@ type EnabledSetter interface {
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
 	syncService interfaces.ServerSyncService
-	logger      ViewModelLogger
+	logger      interfaces.Logger
 
 	// UI 状态
 	isEditing     bool
@@ -107,7 +90,7 @@ type ConfigViewModel struct {
 }
 
 // NewConfigViewModel 创建新的配置视图模型
-func NewConfigViewModel(syncService interfaces.ServerSyncService, logger ViewModelLogger) *ConfigViewModel {
+func NewConfigViewModel(syncService interfaces.ServerSyncService, logger interfaces.Logger) *ConfigViewModel {
 	vm := &ConfigViewModel{
 		syncService: syncService,
 		logger:      logger,
@@ -581,7 +564,7 @@ func (vm *ConfigViewModel) BrowseSyncDir() error {
 type ConfigListModel struct {
 	walk.TableModelBase
 	syncService   interfaces.SyncService
-	logger        ViewModelLogger
+	logger        interfaces.Logger
 	sortColumn    int
 	sortOrder     walk.SortOrder
 	filter        string
@@ -589,7 +572,7 @@ type ConfigListModel struct {
 }
 
 // NewConfigListModel 创建新的配置列表模型
-func NewConfigListModel(syncService interfaces.SyncService, logger ViewModelLogger) *ConfigListModel {
+func NewConfigListModel(syncService interfaces.SyncService, logger interfaces.Logger) *ConfigListModel {
 	model := &ConfigListModel{
 		syncService: syncService,
 		logger:      logger,
@@ -629,11 +612,6 @@ func (m *ConfigListModel) refreshCache() {
 			// 	"sync_dir": config.SyncDir,
 			// })
 		} else {
-			// m.logger.Debug("跳过非服务器配置", interfaces.Fields{
-			// 	"uuid": config.UUID,
-			// 	"name": config.Name,
-			// 	"type": config.Type,
-			// })
 		}
 	}
 	m.cachedConfigs = serverConfigs
@@ -759,12 +737,12 @@ func (m *ConfigListModel) PublishRowsReset() {
 type RedirectListModel struct {
 	walk.TableModelBase
 	syncService   interfaces.SyncService
-	logger        ViewModelLogger
+	logger        interfaces.Logger
 	currentConfig *interfaces.Config
 }
 
 // NewRedirectListModel 创建新的重定向列表模型
-func NewRedirectListModel(syncService interfaces.SyncService, logger ViewModelLogger) *RedirectListModel {
+func NewRedirectListModel(syncService interfaces.SyncService, logger interfaces.Logger) *RedirectListModel {
 	return &RedirectListModel{
 		syncService: syncService,
 		logger:      logger,
@@ -816,12 +794,12 @@ func (m *RedirectListModel) PublishRowsReset() {
 type SyncFolderListModel struct {
 	walk.TableModelBase
 	syncService   interfaces.SyncService
-	logger        ViewModelLogger
+	logger        interfaces.Logger
 	currentConfig *interfaces.Config
 }
 
 // NewSyncFolderListModel 创建新的同步文件夹列表模型
-func NewSyncFolderListModel(syncService interfaces.SyncService, logger ViewModelLogger) *SyncFolderListModel {
+func NewSyncFolderListModel(syncService interfaces.SyncService, logger interfaces.Logger) *SyncFolderListModel {
 	return &SyncFolderListModel{
 		syncService: syncService,
 		logger:      logger,

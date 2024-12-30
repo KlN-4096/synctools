@@ -6,13 +6,12 @@ import (
 	"github.com/lxn/walk"
 
 	"synctools/codes/internal/interfaces"
-	"synctools/codes/pkg/logger"
 )
 
 // MainViewModel 主窗口视图模型
 type MainViewModel struct {
-	syncService     interfaces.ServerSyncService // 修改为服务器服务接口
-	logger          *logger.LoggerAdapter
+	syncService     interfaces.ServerSyncService
+	logger          interfaces.Logger
 	window          *walk.MainWindow
 	status          string
 	ConfigViewModel *ConfigViewModel
@@ -28,7 +27,7 @@ func NewMainViewModel(syncService interfaces.SyncService, log interfaces.Logger)
 
 	vm := &MainViewModel{
 		syncService: serverService,
-		logger:      logger.NewLoggerAdapter(log),
+		logger:      log,
 		status:      "就绪",
 	}
 
@@ -113,6 +112,6 @@ func (vm *MainViewModel) showError(title, message string) {
 }
 
 // GetLogger 获取日志记录器
-func (vm *MainViewModel) GetLogger() ViewModelLogger {
+func (vm *MainViewModel) GetLogger() interfaces.Logger {
 	return vm.logger
 }
