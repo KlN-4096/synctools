@@ -264,11 +264,6 @@ func (t *ConfigTab) Setup() error {
 	return nil
 }
 
-// Activating 实现 walk.Form 接口
-func (t *ConfigTab) Activating() bool {
-	return true
-}
-
 // onConfigActivated 配置项被激活
 func (t *ConfigTab) onConfigActivated() {
 	index := t.configTable.CurrentIndex()

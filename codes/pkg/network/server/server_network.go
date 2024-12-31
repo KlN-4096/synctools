@@ -285,14 +285,62 @@ func (s *Server) HandleClient(conn net.Conn) {
 				})
 
 				// 检查目录是否存在
-				if _, err := os.Stat(syncDir); os.IsNotExist(err) {
-					s.logger.Debug("目录不存在", interfaces.Fields{
-						"path": syncDir,
+				if fileInfo, err := os.Stat(syncDir); err != nil {
+					if os.IsNotExist(err) {
+						s.logger.Debug("目录不存在", interfaces.Fields{
+							"path": syncDir,
+						})
+						// 返回空的MD5列表
+						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+							"success": true,
+							"md5_map": make(map[string]string),
+						})
+						return
+					}
+				} else if !fileInfo.IsDir() {
+					// 如果是单个文件，直接计算其MD5
+					file, err := os.Open(syncDir)
+					if err != nil {
+						s.logger.Error("打开文件失败", interfaces.Fields{
+							"path":  syncDir,
+							"error": err,
+						})
+						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+							"success": false,
+							"message": fmt.Sprintf("打开文件失败: %v", err),
+						})
+						return
+					}
+					defer file.Close()
+
+					hash := md5.New()
+					if _, err := io.Copy(hash, file); err != nil {
+						s.logger.Error("计算文件MD5失败", interfaces.Fields{
+							"path":  syncDir,
+							"error": err,
+						})
+						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+							"success": false,
+							"message": fmt.Sprintf("计算文件MD5失败: %v", err),
+						})
+						return
+					}
+					md5sum := hex.EncodeToString(hash.Sum(nil))
+
+					// 使用文件名作为键
+					fileName := filepath.Base(syncRequest.Path)
+					md5Map := map[string]string{
+						fileName: md5sum,
+					}
+
+					s.logger.Info("返回文件MD5", interfaces.Fields{
+						"file": fileName,
+						"md5":  md5sum,
 					})
-					// 返回空的MD5列表
+
 					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
 						"success": true,
-						"md5_map": make(map[string]string),
+						"md5_map": md5Map,
 					})
 					return
 				}

@@ -1,15 +1,16 @@
 /*
 文件作用:
-- 实现客户端主视图模型
-- 管理客户端状态
-- 处理客户端业务逻辑
-- 提供UI数据绑定
+- 实现客户端视图模型层的核心业务逻辑
+- 管理客户端的状态和数据
+- 处理UI事件和业务操作
+- 与服务层交互
 
-主要方法:
-- NewMainViewModel: 创建主视图模型
-- Initialize: 初始化视图模型
-- Shutdown: 关闭视图模型
-- Connect/Disconnect: 连接/断开服务器
+主要功能:
+1. 初始化和配置管理
+2. 服务器连接管理
+3. 文件同步操作
+4. UI状态更新
+5. 错误处理
 */
 
 package viewmodels
@@ -22,6 +23,10 @@ import (
 
 	"synctools/codes/internal/interfaces"
 )
+
+//
+// -------------------- 类型定义 --------------------
+//
 
 // MainViewModel 客户端主视图模型
 type MainViewModel struct {
@@ -44,6 +49,10 @@ type MainViewModel struct {
 	// UI 更新回调
 	onUIUpdate func()
 }
+
+//
+// -------------------- 生命周期管理方法 --------------------
+//
 
 // NewMainViewModel 创建新的主视图模型
 func NewMainViewModel(syncService interfaces.ClientSyncService, logger interfaces.Logger) *MainViewModel {
@@ -116,33 +125,9 @@ func (vm *MainViewModel) Shutdown() error {
 	return nil
 }
 
-// SetServerAddr 设置服务器地址
-func (vm *MainViewModel) SetServerAddr(addr string) {
-	vm.logger.Debug("设置服务器地址", interfaces.Fields{
-		"oldAddr": vm.serverAddr,
-		"newAddr": addr,
-	})
-	vm.serverAddr = addr
-}
-
-// SetServerPort 设置服务器端口
-func (vm *MainViewModel) SetServerPort(port string) {
-	vm.logger.Debug("设置服务器端口", interfaces.Fields{
-		"oldPort": vm.serverPort,
-		"newPort": port,
-	})
-	vm.serverPort = port
-}
-
-// GetServerAddr 获取服务器地址
-func (vm *MainViewModel) GetServerAddr() string {
-	return vm.serverAddr
-}
-
-// GetServerPort 获取服务器端口
-func (vm *MainViewModel) GetServerPort() string {
-	return vm.serverPort
-}
+//
+// -------------------- UI组件管理方法 --------------------
+//
 
 // SetUIControls 设置UI控件引用
 func (vm *MainViewModel) SetUIControls(connectBtn *walk.PushButton, addrEdit, portEdit *walk.LineEdit, progress *walk.ProgressBar, saveBtn *walk.PushButton, syncPathEdit *walk.LineEdit) {
@@ -215,6 +200,90 @@ func (vm *MainViewModel) updateUIState() {
 	})
 }
 
+//
+// -------------------- 配置管理方法 --------------------
+//
+
+// SaveConfig 保存配置
+func (vm *MainViewModel) SaveConfig() error {
+	if vm.syncService == nil {
+		return fmt.Errorf("同步服务未初始化")
+	}
+
+	port := vm.parsePort()
+	if port <= 0 {
+		return fmt.Errorf("无效的端口号")
+	}
+	config := vm.GetCurrentConfig()
+
+	config.Host = vm.serverAddr
+	config.Port = port
+	config.SyncDir = vm.syncPath
+
+	if err := vm.syncService.ValidateConfig(config); err != nil {
+		return fmt.Errorf("配置验证失败: %v", err)
+	}
+
+	if err := vm.syncService.SaveConfig(config); err != nil {
+		return fmt.Errorf("保存配置失败: %v", err)
+	}
+
+	return nil
+}
+
+// GetCurrentConfig 获取当前配置
+func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
+	if vm.syncService == nil {
+		return nil
+	}
+	return vm.syncService.GetCurrentConfig()
+}
+
+// SetServerAddr 设置服务器地址
+func (vm *MainViewModel) SetServerAddr(addr string) {
+	vm.logger.Debug("设置服务器地址", interfaces.Fields{
+		"oldAddr": vm.serverAddr,
+		"newAddr": addr,
+	})
+	vm.serverAddr = addr
+}
+
+// GetServerAddr 获取服务器地址
+func (vm *MainViewModel) GetServerAddr() string {
+	return vm.serverAddr
+}
+
+// SetServerPort 设置服务器端口
+func (vm *MainViewModel) SetServerPort(port string) {
+	vm.logger.Debug("设置服务器端口", interfaces.Fields{
+		"oldPort": vm.serverPort,
+		"newPort": port,
+	})
+	vm.serverPort = port
+}
+
+// GetServerPort 获取服务器端口
+func (vm *MainViewModel) GetServerPort() string {
+	return vm.serverPort
+}
+
+// SetSyncPath 设置同步路径
+func (vm *MainViewModel) SetSyncPath(path string) {
+	vm.logger.Debug("设置同步路径", interfaces.Fields{
+		"path": path,
+	})
+	vm.syncPath = path
+}
+
+// GetSyncPath 获取同步路径
+func (vm *MainViewModel) GetSyncPath() string {
+	return vm.syncPath
+}
+
+//
+// -------------------- 连接管理方法 --------------------
+//
+
 // Connect 连接到服务器
 func (vm *MainViewModel) Connect() error {
 	// 检查服务器地址
@@ -265,32 +334,23 @@ func (vm *MainViewModel) handleConnectionLost() {
 	vm.updateUIState()
 }
 
-// SaveConfig 保存配置
-func (vm *MainViewModel) SaveConfig() error {
+//
+// -------------------- 同步管理方法 --------------------
+//
+
+// SyncFiles 同步文件
+func (vm *MainViewModel) SyncFiles(path string) error {
+
 	if vm.syncService == nil {
 		return fmt.Errorf("同步服务未初始化")
 	}
-
-	port := vm.parsePort()
-	if port <= 0 {
-		return fmt.Errorf("无效的端口号")
-	}
-	config := vm.GetCurrentConfig()
-
-	config.Host = vm.serverAddr
-	config.Port = port
-	config.SyncDir = vm.syncPath
-
-	if err := vm.syncService.ValidateConfig(config); err != nil {
-		return fmt.Errorf("配置验证失败: %v", err)
-	}
-
-	if err := vm.syncService.SaveConfig(config); err != nil {
-		return fmt.Errorf("保存配置失败: %v", err)
-	}
-
-	return nil
+	fmt.Println(vm.IsConnected())
+	return vm.syncService.SyncFiles(path)
 }
+
+//
+// -------------------- 内部辅助方法 --------------------
+//
 
 // parsePort 解析端口号
 func (vm *MainViewModel) parsePort() int {
@@ -304,35 +364,4 @@ func (vm *MainViewModel) parsePort() int {
 		return 0
 	}
 	return port
-}
-
-// SetSyncPath 设置同步路径
-func (vm *MainViewModel) SetSyncPath(path string) {
-	vm.logger.Debug("设置同步路径", interfaces.Fields{
-		"path": path,
-	})
-	vm.syncPath = path
-}
-
-// GetSyncPath 获取同步路径
-func (vm *MainViewModel) GetSyncPath() string {
-	return vm.syncPath
-}
-
-// SyncFiles 同步文件
-func (vm *MainViewModel) SyncFiles(path string) error {
-
-	if vm.syncService == nil {
-		return fmt.Errorf("同步服务未初始化")
-	}
-	fmt.Println(vm.IsConnected())
-	return vm.syncService.SyncFiles(path)
-}
-
-// GetCurrentConfig 获取当前配置
-func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
-	if vm.syncService == nil {
-		return nil
-	}
-	return vm.syncService.GetCurrentConfig()
 }

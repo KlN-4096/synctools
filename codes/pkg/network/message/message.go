@@ -179,13 +179,12 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 	}
 
 	// 3. 写入文件
-	filePath := filepath.Join(destDir, fileInfo.Path)
 	// 确保目标目录存在
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %v", err)
 	}
 
-	if err := os.WriteFile(filePath, chunk.Data, 0644); err != nil {
+	if err := os.WriteFile(destDir, chunk.Data, 0644); err != nil {
 		return fmt.Errorf("写入文件失败: %v", err)
 	}
 
@@ -214,7 +213,7 @@ func (s *MessageSender) FormatPayload(payload []byte) string {
 	if len(payload) == 0 {
 		return ""
 	}
-	previewLen := 40
+	previewLen := 500
 	if len(payload) < previewLen {
 		previewLen = len(payload)
 	}

@@ -1,3 +1,17 @@
+/*
+文件作用:
+- 实现服务端同步服务的核心功能
+- 管理服务器的启动和停止
+- 处理客户端的同步请求
+- 维护服务器状态
+
+主要功能:
+1. 服务器生命周期管理
+2. 同步请求处理
+3. 文件系统操作
+4. 配置管理
+*/
+
 package server
 
 import (
@@ -13,11 +27,19 @@ import (
 	"synctools/codes/pkg/service/base"
 )
 
+//
+// -------------------- 类型定义 --------------------
+//
+
 // ServerSyncService 服务端同步服务实现
 type ServerSyncService struct {
 	*base.BaseSyncService
 	server interfaces.NetworkServer
 }
+
+//
+// -------------------- 生命周期管理方法 --------------------
+//
 
 // NewServerSyncService 创建服务端同步服务
 func NewServerSyncService(config *interfaces.Config, Logger interfaces.Logger, storage interfaces.Storage) *ServerSyncService {
@@ -25,6 +47,10 @@ func NewServerSyncService(config *interfaces.Config, Logger interfaces.Logger, s
 		BaseSyncService: base.NewBaseSyncService(config, Logger, storage),
 	}
 }
+
+//
+// -------------------- 配置管理方法 --------------------
+//
 
 // validateConfig 验证服务器配置是否有效
 func (s *ServerSyncService) validateConfig() error {
@@ -48,6 +74,10 @@ func (s *ServerSyncService) validateConfig() error {
 
 	return nil
 }
+
+//
+// -------------------- 服务器控制方法 --------------------
+//
 
 // StartServer 启动服务器
 func (s *ServerSyncService) StartServer() error {
@@ -110,6 +140,10 @@ func (s *ServerSyncService) GetNetworkServer() interfaces.NetworkServer {
 	return s.server
 }
 
+//
+// -------------------- 同步请求处理方法 --------------------
+//
+
 // HandleSyncRequest 处理同步请求
 func (s *ServerSyncService) HandleSyncRequest(request interface{}) error {
 	req, ok := request.(*interfaces.SyncRequest)
@@ -137,29 +171,35 @@ func (s *ServerSyncService) HandleSyncRequest(request interface{}) error {
 
 // handleMirrorSync 处理镜像同步
 func (s *ServerSyncService) handleMirrorSync(req *interfaces.SyncRequest) error {
-	// 获取源文件列表
-	files, err := s.getFileList(req.Path)
+	// 检查是否是单个文件
+	sourcePath := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
+	fileInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %v", err)
+	}
+
+	// 如果是单个文件，直接复制
+	if !fileInfo.IsDir() {
+		targetPath := req.Path // 不需要额外的Join操作
+		return s.copyFile(sourcePath, targetPath)
+	}
+
+	// 如果是目录，按原有逻辑处理
+	files, err := s.getFileList(sourcePath)
 	if err != nil {
 		return err
 	}
 
 	// 遍历处理每个文件
 	for _, file := range files {
-		sourcePath := filepath.Join(s.GetCurrentConfig().SyncDir, file)
-		targetPath := filepath.Join(req.Path, file)
-
-		// 检查是否需要忽略
-		if s.IsIgnored(file) {
-			s.Logger.Info("忽略文件", interfaces.Fields{
-				"file": file,
-			})
-			continue
-		}
+		sourceFilePath := filepath.Join(sourcePath, file)
+		// 使用filepath.Clean来规范化路径，并使用filepath.ToSlash来统一分隔符
+		targetPath := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Base(req.Path), file)))
 
 		// 复制文件
-		if err := s.copyFile(sourcePath, targetPath); err != nil {
+		if err := s.copyFile(sourceFilePath, targetPath); err != nil {
 			s.Logger.Error("复制文件失败", interfaces.Fields{
-				"source": sourcePath,
+				"source": sourceFilePath,
 				"target": targetPath,
 				"error":  err,
 			})
@@ -186,13 +226,6 @@ func (s *ServerSyncService) handlePushSync(req *interfaces.SyncRequest) error {
 
 	// 处理文件列表
 	for _, file := range req.Files {
-		// 检查是否需要忽略
-		if s.IsIgnored(file) {
-			s.Logger.Info("忽略文件", interfaces.Fields{
-				"file": file,
-			})
-			continue
-		}
 
 		sourcePath := filepath.Join(req.Path, file)
 		targetPath := filepath.Join(targetDir, file)
@@ -244,14 +277,6 @@ func (s *ServerSyncService) handlePackSync(req *interfaces.SyncRequest) error {
 		"path": req.Path,
 	})
 
-	// 检查是否需要忽略
-	if s.IsIgnored(req.Path) {
-		s.Logger.Info("忽略打包文件", interfaces.Fields{
-			"file": req.Path,
-		})
-		return nil
-	}
-
 	// 检查压缩包是否存在
 	packPath := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
 	if _, err := os.Stat(packPath); err != nil {
@@ -279,7 +304,9 @@ func (s *ServerSyncService) handlePackSync(req *interfaces.SyncRequest) error {
 	return nil
 }
 
-// 辅助方法
+//
+// -------------------- 文件系统操作方法 --------------------
+//
 
 // getFileList 获取目录下的所有文件
 func (s *ServerSyncService) getFileList(dir string) ([]string, error) {

@@ -103,9 +103,6 @@ type FileTransfer interface {
 	// ListFiles lists files in directory
 	ListFiles(path string) ([]FileInfo, error)
 
-	// CompressFiles 压缩文件到ZIP
-	CompressFiles(srcPath, zipPath string, opts *CompressOptions) (*CompressProgress, error)
-
 	// DecompressFiles 从ZIP解压文件
 	DecompressFiles(zipPath, destPath string, progress chan<- Progress) error
 }
@@ -127,9 +124,6 @@ type Storage interface {
 
 	// Delete 删除数据
 	Delete(key string) error
-
-	// Exists 检查数据是否存在
-	Exists(key string) bool
 
 	// List 列出所有键
 	List() ([]string, error)
@@ -185,19 +179,4 @@ type ClientSyncService interface {
 
 	// 同步操作
 	SyncFiles(path string) error
-}
-
-// CompressOptions 压缩选项接口
-type CompressOptions interface {
-	// GetIgnoreList 获取忽略文件列表
-	GetIgnoreList() []string
-
-	// SetIgnoreList 设置忽略文件列表
-	SetIgnoreList(ignoreList []string)
-
-	// AddIgnorePattern 添加忽略模式
-	AddIgnorePattern(pattern string)
-
-	// RemoveIgnorePattern 移除忽略模式
-	RemoveIgnorePattern(pattern string)
 }

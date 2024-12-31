@@ -1,3 +1,18 @@
+/*
+文件作用:
+- 实现客户端同步服务的核心功能
+- 管理文件同步和传输
+- 处理网络通信
+- 维护同步状态
+
+主要功能:
+1. 服务初始化和连接管理
+2. 文件同步和传输
+3. 文件系统操作
+4. MD5校验
+5. 网络通信
+*/
+
 package client
 
 import (
@@ -15,12 +30,20 @@ import (
 	"synctools/codes/pkg/service/base"
 )
 
+//
+// -------------------- 类型定义 --------------------
+//
+
 // ClientSyncService 客户端同步服务实现
 type ClientSyncService struct {
 	*base.BaseSyncService
 	networkClient *client.NetworkClient
 	onConnLost    func() // 添加回调字段
 }
+
+//
+// -------------------- 生命周期管理方法 --------------------
+//
 
 // NewClientSyncService 创建客户端同步服务
 func NewClientSyncService(config *interfaces.Config, logger interfaces.Logger, storage interfaces.Storage) *ClientSyncService {
@@ -31,6 +54,10 @@ func NewClientSyncService(config *interfaces.Config, logger interfaces.Logger, s
 	srv.networkClient = client.NewNetworkClient(logger, srv)
 	return srv
 }
+
+//
+// -------------------- 连接管理方法 --------------------
+//
 
 // Connect 连接服务器(指向client_network.go)
 func (s *ClientSyncService) Connect(addr, port string) error {
@@ -63,6 +90,21 @@ func (s *ClientSyncService) IsConnected() bool {
 	return s.networkClient != nil && s.networkClient.IsConnected()
 }
 
+// SetConnectionLostCallback 设置连接丢失回调
+func (s *ClientSyncService) SetConnectionLostCallback(callback func()) {
+	s.onConnLost = callback
+	// 将回调传递给 networkClient
+	s.networkClient.SetConnectionLostCallback(func() {
+		if s.onConnLost != nil {
+			s.onConnLost()
+		}
+	})
+}
+
+//
+// -------------------- 同步管理方法 --------------------
+//
+
 // SyncFiles 同步文件
 func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	// 设置同步状态为开始
@@ -88,8 +130,23 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	allLocalFiles := make(map[string]map[string]string)
 
 	for _, folder := range syncFolders {
-		// 获取本地文件列表和MD5
+		// 检查是否需要重定向
 		localFolderPath := filepath.Join(sourcePath, folder)
+		config := s.GetCurrentConfig()
+		if config != nil && len(config.FolderRedirects) > 0 {
+			for _, redirect := range config.FolderRedirects {
+				if strings.HasPrefix(folder, redirect.ServerPath) {
+					// 替换路径前缀
+					relativePath := strings.TrimPrefix(folder, redirect.ServerPath)
+					// 确保relativePath不以分隔符开头
+					relativePath = strings.TrimPrefix(relativePath, "/")
+					localFolderPath = filepath.Join(sourcePath, redirect.ClientPath, relativePath)
+					break
+				}
+			}
+		}
+
+		// 获取本地文件列表和MD5
 		localFiles, err := s.getLocalFilesWithMD5(localFolderPath)
 		if err != nil {
 			s.Logger.Error("获取本地文件列表失败", interfaces.Fields{
@@ -113,11 +170,21 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	// 计算需要同步的文件数量
-	var totalFiles, needSyncFiles int
+	var totalFiles, needSyncFiles, ignoredFiles int
 	var filesToSync []string
 	for folder, serverFiles := range allServerFiles {
 		localFiles := allLocalFiles[folder]
 		for serverPath, serverMD5 := range serverFiles {
+			// 检查文件是否需要忽略
+			if s.IsIgnored(serverPath) {
+				s.Logger.Debug("忽略文件", interfaces.Fields{
+					"folder": folder,
+					"file":   serverPath,
+				})
+				ignoredFiles++
+				continue
+			}
+
 			totalFiles++
 			localMD5, exists := localFiles[serverPath]
 			if !exists || localMD5 != serverMD5 {
@@ -128,9 +195,10 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	s.Logger.Info("文件对比完成", interfaces.Fields{
-		"total_files": totalFiles,
-		"need_sync":   needSyncFiles,
-		"files":       filesToSync,
+		"total_files":   totalFiles,
+		"need_sync":     needSyncFiles,
+		"ignored_files": ignoredFiles,
+		"files":         filesToSync,
 	})
 
 	// 如果没有需要同步的文件,直接返回
@@ -171,7 +239,13 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 						"file":   localPath,
 						"md5":    localFiles[localPath],
 					})
-					fullPath := filepath.Join(localFolderPath, localPath)
+					// 如果本地路径是"."，则使用文件夹路径本身
+					var fullPath string
+					if localPath == "." {
+						fullPath = localFolderPath
+					} else {
+						fullPath = filepath.Join(localFolderPath, localPath)
+					}
 					s.Logger.Debug("删除本地多余文件", interfaces.Fields{
 						"file": localPath,
 					})
@@ -319,15 +393,6 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 
 			if needDownload {
 				fullPath := filepath.Join(localFolderPath, serverPath)
-				// 确保目标目录存在
-				if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-					s.Logger.Error("创建目录失败", interfaces.Fields{
-						"path":  filepath.Dir(fullPath),
-						"error": err,
-					})
-					totalFailedCount++
-					continue
-				}
 
 				// 发送下载请求
 				req := &interfaces.SyncRequest{
@@ -342,7 +407,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 					"mode":   mode,
 				})
 
-				if err := s.downloadFile(req, fullPath, mode); err != nil {
+				if err := s.downloadFile(req, fullPath, sourcePath, mode); err != nil {
 					s.Logger.Error("下载文件失败", interfaces.Fields{
 						"folder": folder,
 						"file":   serverPath,
@@ -402,7 +467,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 }
 
 // downloadFile 从服务器下载文件
-func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath string, mode interfaces.SyncMode) error {
+func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath string, sourcePath string, mode interfaces.SyncMode) error {
 	// 发送下载请求
 	if err := s.networkClient.SendData("file_request", req); err != nil {
 		return fmt.Errorf("发送下载请求失败: %v", err)
@@ -421,7 +486,7 @@ func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath s
 	// 如果是打包同步模式，需要特殊处理
 	if mode == interfaces.PackSync {
 		s.Logger.Info("打包同步模式", interfaces.Fields{
-			"path": destPath,
+			"path": sourcePath,
 		})
 
 		// 创建临时目录
@@ -455,12 +520,14 @@ func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath s
 	}
 
 	// 获取重定向后的路径
-	redirectedPath := s.getRedirectedPath(req.Path, filepath.Dir(destPath))
+	redirectedPath := s.getRedirectedPath(req.Path, destPath)
 
-	// 确保目标目录存在
-	targetDir := filepath.Dir(redirectedPath)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %v", err)
+	// 如果路径是"."，则使用目标目录本身
+	var targetDir string
+	if filepath.Base(req.Path) == "." {
+		targetDir = filepath.Dir(redirectedPath)
+	} else {
+		targetDir = filepath.Dir(redirectedPath + "/")
 	}
 
 	// 接收文件
@@ -539,12 +606,25 @@ func (s *ClientSyncService) unpackFile(packFile, destPath string) error {
 	return nil
 }
 
+//
+// -------------------- 文件系统操作方法 --------------------
+//
+
 // getRedirectedPath 获取重定向后的路径
 func (s *ClientSyncService) getRedirectedPath(originalPath, destPath string) string {
+	// 统一路径分隔符
+	originalPath = filepath.ToSlash(originalPath)
+	destPath = filepath.ToSlash(destPath)
+
+	// 判断是否为单个文件（不包含路径分隔符）
+	if !strings.Contains(originalPath, "/") {
+		return destPath
+	}
+
 	// 获取当前配置
 	config := s.GetCurrentConfig()
 	if config == nil || len(config.FolderRedirects) == 0 {
-		return filepath.Join(destPath, originalPath)
+		return filepath.Dir(destPath)
 	}
 
 	// 检查是否需要重定向
@@ -552,15 +632,15 @@ func (s *ClientSyncService) getRedirectedPath(originalPath, destPath string) str
 		if strings.HasPrefix(originalPath, redirect.ServerPath) {
 			// 替换路径前缀
 			relativePath := strings.TrimPrefix(originalPath, redirect.ServerPath)
-			targetDir := filepath.Join(destPath, redirect.ClientPath)
-			return filepath.Join(targetDir, relativePath)
+			// 确保relativePath不以分隔符开头
+			relativePath = strings.TrimPrefix(relativePath, "/")
+			targetDir := filepath.Join(filepath.Dir(filepath.Dir(destPath)), redirect.ClientPath)
+			return filepath.ToSlash(filepath.Join(targetDir, relativePath))
 		}
 	}
 
-	return filepath.Join(destPath, originalPath)
+	return filepath.Dir(destPath)
 }
-
-// 辅助方法
 
 // getLocalFiles 获取本地文件列表
 func (s *ClientSyncService) getLocalFiles(dir string) ([]string, error) {
@@ -633,16 +713,9 @@ func (s *ClientSyncService) deleteRemoteFile(file string) error {
 	return nil
 }
 
-// 添加设置回调的方法
-func (s *ClientSyncService) SetConnectionLostCallback(callback func()) {
-	s.onConnLost = callback
-	// 将回调传递给 networkClient
-	s.networkClient.SetConnectionLostCallback(func() {
-		if s.onConnLost != nil {
-			s.onConnLost()
-		}
-	})
-}
+//
+// -------------------- MD5校验方法 --------------------
+//
 
 // getLocalFilesWithMD5 获取本地文件列表和MD5
 func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string, error) {
@@ -654,38 +727,72 @@ func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string,
 		}
 	}
 
-	// 确保目录存在
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("创建目录失败: %v", err)
+	// 检查路径是文件还是目录
+	fileInfo, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 如果路径不存在，返回空映射而不是错误
+			// 这样可以触发后续的同步操作
+			s.Logger.Debug("本地路径不存在，返回空映射", interfaces.Fields{
+				"path": dir,
+			})
+			return make(map[string]string), nil
+		}
+		// 其他错误则返回
+		return nil, fmt.Errorf("获取路径信息失败: %v", err)
 	}
 
-	files := make(map[string]string)
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	// 如果是单个文件
+	if !fileInfo.IsDir() {
+		md5hash, err := s.calculateFileMD5(dir)
 		if err != nil {
+			if os.IsNotExist(err) {
+				// 如果文件不存在，返回空映射
+				return make(map[string]string), nil
+			}
+			return nil, err
+		}
+		return map[string]string{
+			filepath.Base(dir): md5hash,
+		}, nil
+	}
+
+	// 如果是目录
+	files := make(map[string]string)
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				// 如果文件不存在，跳过该文件
+				return nil
+			}
 			return err
 		}
 		if !info.IsDir() {
-			// 如果dir是一个文件路径，我们需要特殊处理
-			var relPath string
-			if info.IsDir() || filepath.Dir(dir) == dir {
-				// 正常的目录遍历情况
-				relPath, err = filepath.Rel(dir, path)
-			} else {
-				// dir是一个文件路径的情况
-				relPath = filepath.Base(path)
-			}
+			// 获取相对路径
+			relPath, err := filepath.Rel(dir, path)
 			if err != nil {
 				return err
 			}
 
-			// 检查是否需要忽略
-			if s.IsIgnored(relPath) {
-				return nil
+			// 检查是否需要重定向
+			config := s.GetCurrentConfig()
+			if config != nil && len(config.FolderRedirects) > 0 {
+				for _, redirect := range config.FolderRedirects {
+					// 如果本地路径包含重定向的客户端路径
+					if strings.Contains(filepath.ToSlash(relPath), redirect.ClientPath) {
+						// 将客户端路径替换为服务器路径
+						relPath = strings.Replace(filepath.ToSlash(relPath), redirect.ClientPath, redirect.ServerPath, 1)
+						break
+					}
+				}
 			}
 
-			// 计算文件MD5
 			md5hash, err := s.calculateFileMD5(path)
 			if err != nil {
+				if os.IsNotExist(err) {
+					// 如果文件不存在，跳过该文件
+					return nil
+				}
 				return err
 			}
 
@@ -694,7 +801,15 @@ func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string,
 		return nil
 	})
 
-	return files, err
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 如果目录不存在，返回空映射
+			return make(map[string]string), nil
+		}
+		return nil, err
+	}
+
+	return files, nil
 }
 
 // calculateFileMD5 计算文件的MD5值
@@ -746,6 +861,10 @@ func (s *ClientSyncService) getServerFilesWithMD5WithFolder(folder string) (map[
 
 	return resp.MD5Map, nil
 }
+
+//
+// -------------------- 配置管理方法 --------------------
+//
 
 // GetSyncFolders 获取同步文件夹列表
 func (s *ClientSyncService) GetSyncFolders() []string {
