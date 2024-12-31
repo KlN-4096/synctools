@@ -181,11 +181,15 @@ func (t *ConfigTab) Setup() error {
 										AssignTo: &t.ignoreEdit,
 										MinSize:  Size{Height: 60},
 										VScroll:  true,
-										ToolTipText: "支持的通配符:\n" +
+										ToolTipText: "支持两种模式:\n" +
+											"1. 文件名模式 - 无论在哪个目录下都忽略匹配的文件\n" +
+											"   示例: *.txt, test.dat, temp.*\n" +
+											"2. 路径模式 - 忽略指定路径下的所有文件\n" +
+											"   示例: mods/custom/, config/test/\n" +
+											"通配符说明:\n" +
 											"* - 匹配任意字符序列\n" +
 											"? - 匹配任意单个字符\n" +
-											"[abc] - 匹配括号内任意字符\n" +
-											"示例: *.txt, test?.dat, temp[0-9].*",
+											"[abc] - 匹配括号内任意字符",
 									},
 									// 同步文件/文件夹表格
 									Label{Text: "同步项目:"},
@@ -439,7 +443,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 			LineEdit{
 				AssignTo: &pathEdit,
 				ToolTipText: "输入要同步的文件或文件夹路径\n" +
-					"例如: mods/example.jar 或 config",
+					"例如: clientmods",
 			},
 			Label{Text: "同步模式:"},
 			ComboBox{
@@ -451,7 +455,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 			LineEdit{
 				AssignTo: &redirectPathEdit,
 				ToolTipText: "输入重定向的目标路径\n" +
-					"例如: D:/minecraft/mods/example.jar 或 D:/minecraft/config",
+					"例如: mods",
 			},
 		},
 	}.Create(NewBuilder(dlg))); err != nil {
@@ -583,7 +587,7 @@ func (t *ConfigTab) onSyncFolderEdit() {
 	}
 	defer dlg.Dispose()
 
-	dlg.SetTitle("编辑同步文件夹")
+	dlg.SetTitle("编辑同步项目")
 	dlg.SetSize(walk.Size{Width: 400, Height: 200})
 	dlg.SetLayout(walk.NewVBoxLayout())
 
@@ -594,22 +598,26 @@ func (t *ConfigTab) onSyncFolderEdit() {
 	if err := (Composite{
 		Layout: Grid{Columns: 2, Spacing: 10},
 		Children: []Widget{
-			Label{Text: "文件夹路径:"},
+			Label{Text: "路径:"},
 			LineEdit{
 				AssignTo: &pathEdit,
 				Text:     config.SyncFolders[index].Path,
+				ToolTipText: "输入要同步的文件或文件夹路径\n" +
+					"例如: clientmods",
 			},
 			Label{Text: "同步模式:"},
 			ComboBox{
 				AssignTo: &modeComboBox,
 				Model:    []string{"mirror", "push", "pack"},
 				CurrentIndex: func() int {
-					if config.SyncFolders[index].SyncMode == "push" {
+					switch config.SyncFolders[index].SyncMode {
+					case interfaces.PushSync:
 						return 1
-					} else if config.SyncFolders[index].SyncMode == "pack" {
+					case interfaces.PackSync:
 						return 2
+					default:
+						return 0
 					}
-					return 0
 				}(),
 			},
 			Label{Text: "重定向路径:"},
@@ -623,6 +631,8 @@ func (t *ConfigTab) onSyncFolderEdit() {
 					}
 					return ""
 				}(),
+				ToolTipText: "输入重定向的目标路径\n" +
+					"例如: mods",
 			},
 		},
 	}.Create(NewBuilder(dlg))); err != nil {
@@ -630,7 +640,6 @@ func (t *ConfigTab) onSyncFolderEdit() {
 		return
 	}
 
-	// 按钮布局
 	if err := (Composite{
 		Layout: HBox{Spacing: 10},
 		Children: []Widget{
@@ -639,6 +648,12 @@ func (t *ConfigTab) onSyncFolderEdit() {
 				Text:    "确定",
 				MinSize: Size{Width: 70},
 				OnClicked: func() {
+					if interfaces.SyncMode(modeComboBox.Text()) == interfaces.PackSync &&
+						!strings.HasSuffix(strings.ToLower(redirectPathEdit.Text()), ".zip") {
+						walk.MsgBox(dlg, "格式错误", "打包同步模式下，目标文件必须是ZIP压缩包格式", walk.MsgBoxIconWarning)
+						return
+					}
+
 					if err := t.viewModel.UpdateSyncFolder(index, pathEdit.Text(), interfaces.SyncMode(modeComboBox.Text()), redirectPathEdit.Text()); err != nil {
 						walk.MsgBox(dlg, "错误", err.Error(), walk.MsgBoxIconError)
 						return

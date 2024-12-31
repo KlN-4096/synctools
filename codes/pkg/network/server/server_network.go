@@ -263,306 +263,314 @@ func (s *Server) HandleClient(conn net.Conn) {
 			})
 
 		case "md5_request":
-			var syncRequest interfaces.SyncRequest
-			if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
-				s.logger.Error("解析同步请求失败", interfaces.Fields{
-					"error": err,
-					"uuid":  msg.UUID,
-				})
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("解析同步请求失败: %v", err),
-				})
-				continue
-			}
+			go func() {
+				var syncRequest interfaces.SyncRequest
+				if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
+					s.logger.Error("解析同步请求失败", interfaces.Fields{
+						"error": err,
+						"uuid":  msg.UUID,
+					})
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": false,
+						"message": fmt.Sprintf("解析同步请求失败: %v", err),
+					})
+					return
+				}
 
-			// 获取同步目录
-			syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
-			s.logger.Debug("处理MD5请求", interfaces.Fields{
-				"folder":      syncRequest.Path,
-				"server_path": syncDir,
-			})
-
-			// 检查目录是否存在
-			if _, err := os.Stat(syncDir); os.IsNotExist(err) {
-				s.logger.Debug("目录不存在", interfaces.Fields{
-					"path": syncDir,
+				// 获取同步目录
+				syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
+				s.logger.Debug("处理MD5请求", interfaces.Fields{
+					"folder":      syncRequest.Path,
+					"server_path": syncDir,
 				})
-				// 返回空的MD5列表
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": true,
-					"md5_map": make(map[string]string),
-				})
-				continue
-			}
 
-			// 获取文件列表和MD5
-			md5Map := make(map[string]string)
-			err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					if os.IsNotExist(err) {
+				// 检查目录是否存在
+				if _, err := os.Stat(syncDir); os.IsNotExist(err) {
+					s.logger.Debug("目录不存在", interfaces.Fields{
+						"path": syncDir,
+					})
+					// 返回空的MD5列表
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": true,
+						"md5_map": make(map[string]string),
+					})
+					return
+				}
+
+				// 获取文件列表和MD5
+				md5Map := make(map[string]string)
+				err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						if os.IsNotExist(err) {
+							return nil
+						}
+						return err
+					}
+
+					// 获取相对路径
+					relPath, err := filepath.Rel(syncDir, path)
+					if err != nil {
+						return err
+					}
+
+					// 如果是目录，记录它但继续遍历
+					if info.IsDir() {
+						s.logger.Debug("发现目录", interfaces.Fields{
+							"folder": syncRequest.Path,
+							"dir":    relPath,
+						})
 						return nil
 					}
-					return err
-				}
 
-				// 获取相对路径
-				relPath, err := filepath.Rel(syncDir, path)
-				if err != nil {
-					return err
-				}
-
-				// 如果是目录，记录它但继续遍历
-				if info.IsDir() {
-					s.logger.Debug("发现目录", interfaces.Fields{
-						"folder": syncRequest.Path,
-						"dir":    relPath,
-					})
-					return nil
-				}
-
-				// 计算文件MD5
-				file, err := os.Open(path)
-				if err != nil {
-					return err
-				}
-				defer file.Close()
-
-				hash := md5.New()
-				if _, err := io.Copy(hash, file); err != nil {
-					return err
-				}
-				md5sum := hex.EncodeToString(hash.Sum(nil))
-				md5Map[relPath] = md5sum
-
-				s.logger.Debug("计算文件MD5", interfaces.Fields{
-					"folder": syncRequest.Path,
-					"file":   relPath,
-					"md5":    md5sum,
-				})
-				return nil
-			})
-
-			if err != nil {
-				s.logger.Error("获取文件MD5失败", interfaces.Fields{
-					"folder": syncRequest.Path,
-					"error":  err,
-				})
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("获取文件MD5失败: %v", err),
-				})
-				continue
-			}
-
-			s.logger.Info("返回文件MD5列表", interfaces.Fields{
-				"folder": syncRequest.Path,
-				"count":  len(md5Map),
-				"files":  md5Map,
-			})
-
-			client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-				"success": true,
-				"md5_map": md5Map,
-			})
-
-		case "file_request":
-			var syncRequest interfaces.SyncRequest
-			if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
-				s.logger.Error("解析同步请求失败", interfaces.Fields{
-					"error": err,
-					"uuid":  msg.UUID,
-				})
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("解析同步请求失败: %v", err),
-				})
-				continue
-			}
-
-			// 处理文件下载请求
-			filePath := filepath.Join(s.config.SyncDir, syncRequest.Path)
-			s.logger.Debug("处理文件下载请求", interfaces.Fields{
-				"file": filePath,
-			})
-
-			// 检查文件是否存在
-			fileInfo, err := os.Stat(filePath)
-			if err != nil {
-				s.logger.Error("文件不存在", interfaces.Fields{
-					"file":  filePath,
-					"error": err,
-				})
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("文件不存在: %v", err),
-				})
-				continue
-			}
-
-			// 读取文件内容并计算MD5
-			fileContent, err := os.ReadFile(filePath)
-			if err != nil {
-				s.logger.Error("读取文件失败", interfaces.Fields{
-					"file":  filePath,
-					"error": err,
-				})
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("读取文件失败: %v", err),
-				})
-				continue
-			}
-
-			hash := md5.New()
-			hash.Write(fileContent)
-			md5sum := hex.EncodeToString(hash.Sum(nil))
-
-			// 发送文件信息
-			client.msgSender.SendMessage(conn, "file", msg.UUID, map[string]interface{}{
-				"name": filepath.Base(syncRequest.Path),
-				"size": fileInfo.Size(),
-				"md5":  md5sum,
-				"path": syncRequest.Path,
-			})
-
-			// 发送文件内容
-			chunk := struct {
-				Data []byte `json:"data"`
-			}{
-				Data: fileContent,
-			}
-			if err := client.msgSender.SendMessage(conn, "file_data", msg.UUID, chunk); err != nil {
-				s.logger.Error("发送文件数据失败", interfaces.Fields{
-					"file":  filePath,
-					"error": err,
-				})
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("发送文件数据失败: %v", err),
-				})
-				continue
-			}
-
-			s.logger.Debug("文件发送成功", interfaces.Fields{
-				"file": filePath,
-				"md5":  md5sum,
-				"size": client.msgSender.FormatFileSize(fileInfo.Size()),
-			})
-
-		case "list_request":
-			var syncRequest interfaces.SyncRequest
-			if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
-				s.logger.Error("解析同步请求失败", interfaces.Fields{
-					"error": err,
-					"uuid":  msg.UUID,
-				})
-				continue
-			}
-
-			// 获取同步目录
-			syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
-			var files []string
-			var dirs []string
-
-			err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					if os.IsNotExist(err) {
-						return nil
+					// 计算文件MD5
+					file, err := os.Open(path)
+					if err != nil {
+						return err
 					}
-					return err
-				}
+					defer file.Close()
 
-				// 获取相对路径
-				relPath, err := filepath.Rel(syncDir, path)
-				if err != nil {
-					return err
-				}
+					hash := md5.New()
+					if _, err := io.Copy(hash, file); err != nil {
+						return err
+					}
+					md5sum := hex.EncodeToString(hash.Sum(nil))
+					md5Map[relPath] = md5sum
 
-				// 如果是根目录，跳过
-				if relPath == "." {
-					return nil
-				}
-
-				if info.IsDir() {
-					dirs = append(dirs, relPath)
-					s.logger.Debug("发现目录", interfaces.Fields{
-						"folder": syncRequest.Path,
-						"dir":    relPath,
-					})
-				} else {
-					files = append(files, relPath)
-					s.logger.Debug("发现文件", interfaces.Fields{
+					s.logger.Debug("计算文件MD5", interfaces.Fields{
 						"folder": syncRequest.Path,
 						"file":   relPath,
+						"md5":    md5sum,
 					})
+					return nil
+				})
+
+				if err != nil {
+					s.logger.Error("获取文件MD5失败", interfaces.Fields{
+						"folder": syncRequest.Path,
+						"error":  err,
+					})
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": false,
+						"message": fmt.Sprintf("获取文件MD5失败: %v", err),
+					})
+					return
 				}
-				return nil
-			})
 
-			if err != nil {
-				s.logger.Error("获取文件列表失败", interfaces.Fields{
-					"error": err,
+				s.logger.Info("返回文件MD5列表", interfaces.Fields{
+					"folder": syncRequest.Path,
+					"count":  len(md5Map),
+					"files":  md5Map,
 				})
+
 				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": false,
-					"message": fmt.Sprintf("获取文件列表失败: %v", err),
+					"success": true,
+					"md5_map": md5Map,
 				})
-				continue
-			}
+			}()
 
-			s.logger.Info("返回文件列表", interfaces.Fields{
-				"folder":     syncRequest.Path,
-				"file_count": len(files),
-				"dir_count":  len(dirs),
-				"files":      files,
-				"dirs":       dirs,
-			})
+		case "file_request":
+			go func() {
+				var syncRequest interfaces.SyncRequest
+				if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
+					s.logger.Error("解析同步请求失败", interfaces.Fields{
+						"error": err,
+						"uuid":  msg.UUID,
+					})
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": false,
+						"message": fmt.Sprintf("解析同步请求失败: %v", err),
+					})
+					return
+				}
 
-			client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-				"success": true,
-				"files":   files,
-				"dirs":    dirs,
-			})
-
-		case "delete_request":
-			var syncRequest interfaces.SyncRequest
-			if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
-				s.logger.Error("解析同步请求失败", interfaces.Fields{
-					"error": err,
-					"uuid":  msg.UUID,
+				// 处理文件下载请求
+				filePath := filepath.Join(s.config.SyncDir, syncRequest.Path)
+				s.logger.Debug("处理文件下载请求", interfaces.Fields{
+					"file": filePath,
 				})
-				continue
-			}
 
-			// 处理文件删除请求
-			filePath := filepath.Join(s.config.SyncDir, syncRequest.Path)
-			s.logger.Debug("处理文件删除请求", interfaces.Fields{
-				"file": filePath,
-			})
-
-			if err := os.Remove(filePath); err != nil {
-				if !os.IsNotExist(err) {
-					s.logger.Error("删除文件失败", interfaces.Fields{
+				// 检查文件是否存在
+				fileInfo, err := os.Stat(filePath)
+				if err != nil {
+					s.logger.Error("文件不存在", interfaces.Fields{
 						"file":  filePath,
 						"error": err,
 					})
 					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
 						"success": false,
-						"message": fmt.Sprintf("删除文件失败: %v", err),
+						"message": fmt.Sprintf("文件不存在: %v", err),
 					})
-					continue
+					return
 				}
-			}
 
-			s.logger.Info("文件删除成功", interfaces.Fields{
-				"file": filePath,
-			})
+				// 读取文件内容并计算MD5
+				fileContent, err := os.ReadFile(filePath)
+				if err != nil {
+					s.logger.Error("读取文件失败", interfaces.Fields{
+						"file":  filePath,
+						"error": err,
+					})
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": false,
+						"message": fmt.Sprintf("读取文件失败: %v", err),
+					})
+					return
+				}
 
-			client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-				"success": true,
-				"message": "文件删除成功",
-			})
+				hash := md5.New()
+				hash.Write(fileContent)
+				md5sum := hex.EncodeToString(hash.Sum(nil))
+
+				// 发送文件信息
+				client.msgSender.SendMessage(conn, "file", msg.UUID, map[string]interface{}{
+					"name": filepath.Base(syncRequest.Path),
+					"size": fileInfo.Size(),
+					"md5":  md5sum,
+					"path": syncRequest.Path,
+				})
+
+				// 发送文件内容
+				chunk := struct {
+					Data []byte `json:"data"`
+				}{
+					Data: fileContent,
+				}
+				if err := client.msgSender.SendMessage(conn, "file_data", msg.UUID, chunk); err != nil {
+					s.logger.Error("发送文件数据失败", interfaces.Fields{
+						"file":  filePath,
+						"error": err,
+					})
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": false,
+						"message": fmt.Sprintf("发送文件数据失败: %v", err),
+					})
+					return
+				}
+
+				s.logger.Debug("文件发送成功", interfaces.Fields{
+					"file": filePath,
+					"md5":  md5sum,
+					"size": client.msgSender.FormatFileSize(fileInfo.Size()),
+				})
+			}()
+
+		case "list_request":
+			go func() {
+				var syncRequest interfaces.SyncRequest
+				if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
+					s.logger.Error("解析同步请求失败", interfaces.Fields{
+						"error": err,
+						"uuid":  msg.UUID,
+					})
+					return
+				}
+
+				// 获取同步目录
+				syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
+				var files []string
+				var dirs []string
+
+				err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						if os.IsNotExist(err) {
+							return nil
+						}
+						return err
+					}
+
+					// 获取相对路径
+					relPath, err := filepath.Rel(syncDir, path)
+					if err != nil {
+						return err
+					}
+
+					// 如果是根目录，跳过
+					if relPath == "." {
+						return nil
+					}
+
+					if info.IsDir() {
+						dirs = append(dirs, relPath)
+						s.logger.Debug("发现目录", interfaces.Fields{
+							"folder": syncRequest.Path,
+							"dir":    relPath,
+						})
+					} else {
+						files = append(files, relPath)
+						s.logger.Debug("发现文件", interfaces.Fields{
+							"folder": syncRequest.Path,
+							"file":   relPath,
+						})
+					}
+					return nil
+				})
+
+				if err != nil {
+					s.logger.Error("获取文件列表失败", interfaces.Fields{
+						"error": err,
+					})
+					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+						"success": false,
+						"message": fmt.Sprintf("获取文件列表失败: %v", err),
+					})
+					return
+				}
+
+				s.logger.Info("返回文件列表", interfaces.Fields{
+					"folder":     syncRequest.Path,
+					"file_count": len(files),
+					"dir_count":  len(dirs),
+					"files":      files,
+					"dirs":       dirs,
+				})
+
+				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+					"success": true,
+					"files":   files,
+					"dirs":    dirs,
+				})
+			}()
+
+		case "delete_request":
+			go func() {
+				var syncRequest interfaces.SyncRequest
+				if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
+					s.logger.Error("解析同步请求失败", interfaces.Fields{
+						"error": err,
+						"uuid":  msg.UUID,
+					})
+					return
+				}
+
+				// 处理文件删除请求
+				filePath := filepath.Join(s.config.SyncDir, syncRequest.Path)
+				s.logger.Debug("处理文件删除请求", interfaces.Fields{
+					"file": filePath,
+				})
+
+				if err := os.Remove(filePath); err != nil {
+					if !os.IsNotExist(err) {
+						s.logger.Error("删除文件失败", interfaces.Fields{
+							"file":  filePath,
+							"error": err,
+						})
+						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+							"success": false,
+							"message": fmt.Sprintf("删除文件失败: %v", err),
+						})
+						return
+					}
+				}
+
+				s.logger.Info("文件删除成功", interfaces.Fields{
+					"file": filePath,
+				})
+
+				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
+					"success": true,
+					"message": "文件删除成功",
+				})
+			}()
 
 		default:
 			s.logger.Error("未知的消息类型", interfaces.Fields{

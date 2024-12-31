@@ -198,23 +198,259 @@ func (t *ClientTab) onConnectOrDisconnect() {
 	}
 }
 
-// onSync 处理同步按钮点击
+// onSync 处理同步按钮点击事件
 func (t *ClientTab) onSync() {
+	// 检查连接状态
 	if !t.viewModel.IsConnected() {
 		walk.MsgBox(t.Form(), "错误", "请先连接到服务器", walk.MsgBoxIconError)
 		return
 	}
 
+	// 检查同步路径
 	if t.syncPathEdit.Text() == "" {
 		walk.MsgBox(t.Form(), "错误", "请选择同步目录", walk.MsgBoxIconError)
 		return
 	}
 
-	if err := t.viewModel.SyncFiles(t.syncPathEdit.Text()); err != nil {
-		walk.MsgBox(t.Form(), "错误", "同步失败: "+err.Error(), walk.MsgBoxIconError)
+	// 创建确认对话框
+	dlg, err := walk.NewDialog(t.Form())
+	if err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 		return
 	}
-	t.UpdateUI()
+	defer dlg.Dispose()
+
+	dlg.SetTitle("同步确认")
+	dlg.SetSizePixels(walk.Size{Width: 600, Height: 500})
+	dlg.SetLayout(walk.NewVBoxLayout())
+
+	// 显示同步信息
+	config := t.viewModel.GetCurrentConfig()
+	if config == nil {
+		walk.MsgBox(t.Form(), "错误", "获取配置失败", walk.MsgBoxIconError)
+		return
+	}
+
+	if err := (ScrollView{
+		Layout: VBox{Spacing: 10, Margins: Margins{20, 20, 20, 20}},
+		Children: []Widget{
+			// 标题
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{
+						Text: "同步信息",
+						Font: Font{PointSize: 14, Bold: true},
+					},
+					HSpacer{},
+				},
+			},
+			VSpacer{Size: 20},
+
+			// 基本信息
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{
+						Text: "【基本信息】",
+						Font: Font{PointSize: 11, Bold: true},
+					},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: "----------------------------------------"},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: fmt.Sprintf("服务器地址：%s:%s", t.viewModel.GetServerAddr(), t.viewModel.GetServerPort())},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: fmt.Sprintf("本地目录：%s", t.syncPathEdit.Text())},
+					HSpacer{},
+				},
+			},
+			VSpacer{Size: 20},
+
+			// 服务器同步配置
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{
+						Text: "【服务器同步配置】",
+						Font: Font{PointSize: 11, Bold: true},
+					},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: "----------------------------------------"},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: VBox{Spacing: 10},
+				Children: func() []Widget {
+					var widgets []Widget
+					if len(config.SyncFolders) == 0 {
+						widgets = append(widgets,
+							Composite{
+								Layout: HBox{},
+								Children: []Widget{
+									HSpacer{},
+									Label{Text: "暂无同步文件夹配置"},
+									HSpacer{},
+								},
+							},
+						)
+					} else {
+						for i, folder := range config.SyncFolders {
+							widgets = append(widgets,
+								Composite{
+									Layout: HBox{},
+									Children: []Widget{
+										HSpacer{},
+										Label{Text: fmt.Sprintf("%d. %s", i+1, folder.Path)},
+										HSpacer{},
+									},
+								},
+								Composite{
+									Layout: HBox{},
+									Children: []Widget{
+										HSpacer{},
+										Label{Text: fmt.Sprintf("同步模式：%s", folder.SyncMode)},
+										HSpacer{},
+									},
+								},
+							)
+							// 查找重定向配置
+							for _, redirect := range config.FolderRedirects {
+								if redirect.ServerPath == folder.Path {
+									widgets = append(widgets,
+										Composite{
+											Layout: HBox{},
+											Children: []Widget{
+												HSpacer{},
+												Label{Text: fmt.Sprintf("重定向到：%s", redirect.ClientPath)},
+												HSpacer{},
+											},
+										},
+									)
+									break
+								}
+							}
+							if i < len(config.SyncFolders)-1 {
+								widgets = append(widgets, VSpacer{Size: 10})
+							}
+						}
+					}
+					return widgets
+				}(),
+			},
+			VSpacer{Size: 20},
+
+			// 注意事项
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{
+						Text: "【注意事项】",
+						Font: Font{PointSize: 11, Bold: true},
+					},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: "----------------------------------------"},
+					HSpacer{},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: "1. 同步开始前会先获取服务器文件的MD5信息进行对比"},
+					HSpacer{},
+				},
+			},
+			VSpacer{Size: 10},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: "2. 只有文件内容发生变化的文件才会被同步"},
+					HSpacer{},
+				},
+			},
+			VSpacer{Size: 10},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					Label{Text: "3. 同步过程中请勿关闭程序"},
+					HSpacer{},
+				},
+			},
+		},
+	}.Create(NewBuilder(dlg))); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+
+	// 按钮布局
+	if err := (Composite{
+		Layout: HBox{Spacing: 10, Margins: Margins{10, 10, 10, 10}},
+		Children: []Widget{
+			HSpacer{},
+			PushButton{
+				Text:    "开始同步",
+				MinSize: Size{Width: 90, Height: 30},
+				Font:    Font{PointSize: 10},
+				OnClicked: func() {
+					dlg.Accept()
+					// 开始同步
+					if err := t.viewModel.SyncFiles(t.syncPathEdit.Text()); err != nil {
+						walk.MsgBox(t.Form(), "错误", "同步失败: "+err.Error(), walk.MsgBoxIconError)
+						return
+					}
+					t.UpdateUI()
+				},
+			},
+			PushButton{
+				Text:      "取消",
+				MinSize:   Size{Width: 90, Height: 30},
+				Font:      Font{PointSize: 10},
+				OnClicked: dlg.Cancel,
+			},
+		},
+	}.Create(NewBuilder(dlg))); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+
+	dlg.Run()
 }
 
 // UpdateUI 更新界面状态

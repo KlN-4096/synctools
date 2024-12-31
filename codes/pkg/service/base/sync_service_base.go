@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"synctools/codes/internal/interfaces"
@@ -237,17 +238,46 @@ func (s *BaseSyncService) IsIgnored(file string) bool {
 		return false
 	}
 
+	// 标准化文件路径(使用正斜杠)
+	normalizedPath := filepath.ToSlash(file)
+	fileName := filepath.Base(file)
+
 	for _, pattern := range s.Config.IgnoreList {
-		matched, err := filepath.Match(pattern, filepath.Base(file))
+		// 标准化忽略模式
+		normalizedPattern := filepath.ToSlash(pattern)
+
+		// 检查是否是路径模式(包含路径分隔符)
+		if strings.Contains(normalizedPattern, "/") {
+			// 如果模式不以/结尾,添加/以匹配整个目录
+			if !strings.HasSuffix(normalizedPattern, "/") {
+				normalizedPattern += "/"
+			}
+			// 检查文件是否在忽略的目录下
+			if strings.HasPrefix(normalizedPath, normalizedPattern) {
+				s.Logger.Debug("文件在忽略目录下", interfaces.Fields{
+					"pattern": pattern,
+					"file":    file,
+				})
+				return true
+			}
+			continue
+		}
+
+		// 尝试匹配文件名
+		matched, err := filepath.Match(pattern, fileName)
 		if err != nil {
 			s.Logger.Error("匹配忽略模式失败", interfaces.Fields{
 				"pattern": pattern,
-				"file":    file,
+				"file":    fileName,
 				"error":   err,
 			})
 			continue
 		}
 		if matched {
+			s.Logger.Debug("文件名匹配忽略模式", interfaces.Fields{
+				"pattern": pattern,
+				"file":    fileName,
+			})
 			return true
 		}
 	}

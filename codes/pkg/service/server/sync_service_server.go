@@ -150,6 +150,9 @@ func (s *ServerSyncService) handleMirrorSync(req *interfaces.SyncRequest) error 
 
 		// 检查是否需要忽略
 		if s.IsIgnored(file) {
+			s.Logger.Info("忽略文件", interfaces.Fields{
+				"file": file,
+			})
 			continue
 		}
 
@@ -183,6 +186,14 @@ func (s *ServerSyncService) handlePushSync(req *interfaces.SyncRequest) error {
 
 	// 处理文件列表
 	for _, file := range req.Files {
+		// 检查是否需要忽略
+		if s.IsIgnored(file) {
+			s.Logger.Info("忽略文件", interfaces.Fields{
+				"file": file,
+			})
+			continue
+		}
+
 		sourcePath := filepath.Join(req.Path, file)
 		targetPath := filepath.Join(targetDir, file)
 
@@ -232,6 +243,14 @@ func (s *ServerSyncService) handlePackSync(req *interfaces.SyncRequest) error {
 	s.Logger.Info("处理打包同步请求", interfaces.Fields{
 		"path": req.Path,
 	})
+
+	// 检查是否需要忽略
+	if s.IsIgnored(req.Path) {
+		s.Logger.Info("忽略打包文件", interfaces.Fields{
+			"file": req.Path,
+		})
+		return nil
+	}
 
 	// 检查压缩包是否存在
 	packPath := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
