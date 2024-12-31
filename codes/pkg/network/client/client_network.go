@@ -20,6 +20,8 @@ type NetworkClient struct {
 	onConnLost  func()
 	syncService interfaces.SyncService
 	msgSender   *message.MessageSender
+	lastActive  time.Time // 添加最后活动时间
+	isSyncing   bool      // 添加同步状态标志
 }
 
 // NewNetworkClient 创建新的网络客户端
@@ -29,6 +31,8 @@ func NewNetworkClient(logger interfaces.Logger, syncService interfaces.SyncServi
 		connected:   false,
 		syncService: syncService,
 		msgSender:   message.NewMessageSender(logger),
+		lastActive:  time.Now(),
+		isSyncing:   false,
 	}
 }
 
@@ -46,7 +50,7 @@ func (c *NetworkClient) Connect(addr, port string) error {
 	c.serverAddr = addr
 	c.serverPort = port
 
-	// 建立连接
+	// 建立连接，保留5秒的初始连接超时
 	serverAddr := fmt.Sprintf("%s:%s", addr, port)
 	conn, err := net.DialTimeout("tcp", serverAddr, 5*time.Second)
 	if err != nil {
@@ -56,6 +60,7 @@ func (c *NetworkClient) Connect(addr, port string) error {
 
 	c.conn = conn
 	c.connected = true
+	c.lastActive = time.Now()
 
 	// 发送初始化消息
 	config := c.syncService.GetCurrentConfig()
@@ -103,7 +108,8 @@ func (c *NetworkClient) Connect(addr, port string) error {
 		"config": response.Config,
 	})
 
-	go c.monitorConnection()
+	// 启动无操作检测
+	go c.monitorInactivity()
 	return nil
 }
 
@@ -136,6 +142,7 @@ func (c *NetworkClient) SendData(msgType string, data interface{}) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("未连接到服务器")
 	}
+	c.UpdateActivity()
 	config := c.syncService.GetCurrentConfig()
 	return c.msgSender.SendMessage(c.conn, msgType, config.UUID, data)
 }
@@ -145,6 +152,7 @@ func (c *NetworkClient) ReceiveData(v interface{}) error {
 	if !c.IsConnected() {
 		return fmt.Errorf("未连接到服务器")
 	}
+	c.UpdateActivity()
 	msg, err := c.msgSender.ReceiveMessage(c.conn)
 	if err != nil {
 		return err
@@ -157,6 +165,7 @@ func (c *NetworkClient) SendFile(path string, progress chan<- interfaces.Progres
 	if !c.IsConnected() {
 		return fmt.Errorf("未连接到服务器")
 	}
+	c.UpdateActivity()
 	config := c.syncService.GetCurrentConfig()
 	return c.msgSender.SendFile(c.conn, config.UUID, path, progress)
 }
@@ -166,6 +175,7 @@ func (c *NetworkClient) ReceiveFile(destDir string, progress chan<- interfaces.P
 	if !c.IsConnected() {
 		return fmt.Errorf("未连接到服务器")
 	}
+	c.UpdateActivity()
 	return c.msgSender.ReceiveFile(c.conn, destDir, progress)
 }
 
@@ -174,9 +184,22 @@ func (c *NetworkClient) SetConnectionLostCallback(callback func()) {
 	c.onConnLost = callback
 }
 
-// monitorConnection 监控连接状态
-func (c *NetworkClient) monitorConnection() {
-	ticker := time.NewTicker(30 * time.Second)
+// UpdateActivity 更新最后活动时间
+func (c *NetworkClient) UpdateActivity() {
+	c.lastActive = time.Now()
+}
+
+// SetSyncing 设置同步状态
+func (c *NetworkClient) SetSyncing(syncing bool) {
+	c.isSyncing = syncing
+	if syncing {
+		c.UpdateActivity()
+	}
+}
+
+// monitorInactivity 监控无操作状态
+func (c *NetworkClient) monitorInactivity() {
+	ticker := time.NewTicker(30 * time.Second) // 每30秒检查一次
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -184,9 +207,14 @@ func (c *NetworkClient) monitorConnection() {
 			return
 		}
 
-		// 发送心跳
-		if err := c.msgSender.SendMessage(c.conn, "heartbeat", "", nil); err != nil {
-			c.logger.Error("发送心跳失败", interfaces.Fields{"error": err})
+		// 如果正在同步，跳过检查
+		if c.isSyncing {
+			continue
+		}
+
+		// 如果超过3分钟没有活动，自动断开连接
+		if time.Since(c.lastActive) > 3*time.Minute {
+			c.logger.Info("检测到3分钟无操作，自动断开连接", interfaces.Fields{})
 			if c.onConnLost != nil {
 				c.onConnLost()
 			}

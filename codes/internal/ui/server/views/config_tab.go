@@ -379,6 +379,8 @@ func (t *ConfigTab) onBrowseDir() {
 		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 		return
 	}
+	// 先保存配置然后再更新UI
+	t.onSave()
 	t.viewModel.UpdateUI()
 }
 

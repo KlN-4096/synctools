@@ -65,6 +65,10 @@ func (s *ClientSyncService) IsConnected() bool {
 
 // SyncFiles 同步文件
 func (s *ClientSyncService) SyncFiles(sourcePath string) error {
+	// 设置同步状态为开始
+	s.networkClient.SetSyncing(true)
+	defer s.networkClient.SetSyncing(false) // 确保同步结束时重置状态
+
 	s.SetStatus("同步中")
 	s.Logger.Info("开始同步", interfaces.Fields{
 		"source_path": sourcePath,

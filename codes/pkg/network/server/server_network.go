@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/errors"
@@ -143,10 +142,6 @@ func (s *Server) acceptClients() {
 
 // HandleClient 处理客户端连接
 func (s *Server) HandleClient(conn net.Conn) {
-	// 设置连接超时
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
-
 	// 创建客户端实例
 	client := &Client{
 		ID:        fmt.Sprintf("client-%s", conn.RemoteAddr()),

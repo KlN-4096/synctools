@@ -69,7 +69,7 @@ func (s *MessageSender) ReceiveMessage(conn net.Conn) (*interfaces.Message, erro
 	s.logger.Debug("接收消息", interfaces.Fields{
 		"type":    msg.Type,
 		"uuid":    msg.UUID,
-		"payload": string(msg.Payload),
+		"payload": string(msg.Payload[:50]), //限制输出长度为50
 	})
 
 	return &msg, nil
