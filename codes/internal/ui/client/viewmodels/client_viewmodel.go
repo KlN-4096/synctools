@@ -173,9 +173,10 @@ func (vm *MainViewModel) updateUIState() {
 
 	// 在UI线程中执行
 	vm.window.Synchronize(func() {
+		isConnected := vm.IsConnected()
 		// 更新连接按钮状态
 		if vm.connectButton != nil {
-			if vm.IsConnected() {
+			if isConnected {
 				vm.connectButton.SetText("断开连接")
 				vm.connectButton.SetEnabled(true)
 			} else {
@@ -186,23 +187,23 @@ func (vm *MainViewModel) updateUIState() {
 
 		// 更新输入框状态
 		if vm.addressEdit != nil {
-			vm.addressEdit.SetEnabled(!vm.IsConnected())
+			vm.addressEdit.SetEnabled(!isConnected)
 		}
 		if vm.portEdit != nil {
-			vm.portEdit.SetEnabled(!vm.IsConnected())
+			vm.portEdit.SetEnabled(!isConnected)
 		}
 		if vm.syncPathEdit != nil {
-			vm.syncPathEdit.SetEnabled(!vm.IsConnected())
+			vm.syncPathEdit.SetEnabled(!isConnected)
 		}
 
 		// 更新保存按钮状态
 		if vm.saveButton != nil {
-			vm.saveButton.SetEnabled(!vm.IsConnected())
+			vm.saveButton.SetEnabled(!isConnected)
 		}
 
 		// 更新进度条状态
 		if vm.progressBar != nil {
-			if !vm.IsConnected() {
+			if !isConnected {
 				vm.progressBar.SetValue(0)
 			}
 		}
