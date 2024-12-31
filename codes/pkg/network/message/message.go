@@ -47,7 +47,7 @@ func (s *MessageSender) SendMessage(conn net.Conn, msgType string, uuid string, 
 	s.logger.Debug("发送消息", interfaces.Fields{
 		"type":    msgType,
 		"uuid":    uuid,
-		"payload": payload,
+		"payload": s.FormatPayload(msg.Payload),
 	})
 
 	encoder := json.NewEncoder(conn)
@@ -69,7 +69,7 @@ func (s *MessageSender) ReceiveMessage(conn net.Conn) (*interfaces.Message, erro
 	s.logger.Debug("接收消息", interfaces.Fields{
 		"type":    msg.Type,
 		"uuid":    msg.UUID,
-		"payload": string(msg.Payload[:50]), //限制输出长度为50
+		"payload": s.FormatPayload(msg.Payload),
 	})
 
 	return &msg, nil
@@ -95,10 +95,22 @@ func (s *MessageSender) SendFile(conn net.Conn, uuid string, path string, progre
 	}{
 		Data: fileContent,
 	}
+
+	// 发送前更新进度为0%
+	if progress != nil {
+		progress <- interfaces.Progress{
+			Total:     fileInfo.Size(),
+			Current:   0,
+			Speed:     0,
+			Remaining: fileInfo.Size(),
+		}
+	}
+
 	if err := s.SendMessage(conn, "file_data", uuid, chunk); err != nil {
 		return fmt.Errorf("发送文件数据失败: %v", err)
 	}
 
+	// 发送完成后更新进度为100%
 	if progress != nil {
 		progress <- interfaces.Progress{
 			Total:     fileInfo.Size(),
@@ -127,6 +139,7 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 		Name string `json:"name"`
 		Size int64  `json:"size"`
 		MD5  string `json:"md5"`
+		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(msg.Payload, &fileInfo); err != nil {
 		return fmt.Errorf("解析文件信息失败: %v", err)
@@ -134,8 +147,19 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 
 	s.logger.Debug("接收文件信息", interfaces.Fields{
 		"name": fileInfo.Name,
-		"size": fileInfo.Size,
+		"path": fileInfo.Path,
+		"size": s.FormatFileSize(fileInfo.Size),
 	})
+
+	// 开始接收前更新进度为0%
+	if progress != nil {
+		progress <- interfaces.Progress{
+			Total:     fileInfo.Size,
+			Current:   0,
+			Speed:     0,
+			Remaining: fileInfo.Size,
+		}
+	}
 
 	// 2. 接收文件内容
 	msg, err = s.ReceiveMessage(conn)
@@ -155,11 +179,17 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 	}
 
 	// 3. 写入文件
-	filePath := filepath.Join(destDir, fileInfo.Name)
+	filePath := filepath.Join(destDir, fileInfo.Path)
+	// 确保目标目录存在
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %v", err)
+	}
+
 	if err := os.WriteFile(filePath, chunk.Data, 0644); err != nil {
 		return fmt.Errorf("写入文件失败: %v", err)
 	}
 
+	// 接收完成后更新进度为100%
 	if progress != nil {
 		progress <- interfaces.Progress{
 			Total:     fileInfo.Size,
@@ -171,9 +201,43 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 
 	s.logger.Debug("文件接收完成", interfaces.Fields{
 		"name":     fileInfo.Name,
-		"size":     fileInfo.Size,
-		"received": len(chunk.Data),
+		"path":     fileInfo.Path,
+		"size":     s.FormatFileSize(fileInfo.Size),
+		"received": s.FormatFileSize(int64(len(chunk.Data))),
 	})
 
 	return nil
+}
+
+// FormatPayload 格式化消息内容预览
+func (s *MessageSender) FormatPayload(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	previewLen := 40
+	if len(payload) < previewLen {
+		previewLen = len(payload)
+	}
+	return string(payload[:previewLen])
+}
+
+// formatFileSize 将字节大小转换为易读格式
+func (s *MessageSender) FormatFileSize(size int64) string {
+	const (
+		B  = 1
+		KB = 1024 * B
+		MB = 1024 * KB
+		GB = 1024 * MB
+	)
+
+	switch {
+	case size >= GB:
+		return fmt.Sprintf("%.2fGB", float64(size)/float64(GB))
+	case size >= MB:
+		return fmt.Sprintf("%.2fMB", float64(size)/float64(MB))
+	case size >= KB:
+		return fmt.Sprintf("%.2fKB", float64(size)/float64(KB))
+	default:
+		return fmt.Sprintf("%dB", size)
+	}
 }

@@ -181,15 +181,20 @@ func (t *ConfigTab) Setup() error {
 										AssignTo: &t.ignoreEdit,
 										MinSize:  Size{Height: 60},
 										VScroll:  true,
+										ToolTipText: "支持的通配符:\n" +
+											"* - 匹配任意字符序列\n" +
+											"? - 匹配任意单个字符\n" +
+											"[abc] - 匹配括号内任意字符\n" +
+											"示例: *.txt, test?.dat, temp[0-9].*",
 									},
-									// 同步文件夹表格
-									Label{Text: "同步文件夹:"},
+									// 同步文件/文件夹表格
+									Label{Text: "同步项目:"},
 									TableView{
 										AssignTo:         &t.syncFolderTable,
 										ColumnsOrderable: true,
 										MinSize:          Size{Height: 150},
 										Columns: []TableViewColumn{
-											{Title: "文件夹名称", Width: 150},
+											{Title: "路径", Width: 150},
 											{Title: "同步模式", Width: 100},
 											{Title: "重定向路径", Width: 150},
 											{Title: "是否有效", Width: 80},
@@ -390,6 +395,7 @@ func (t *ConfigTab) onSave() {
 		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
 		return
 	}
+	walk.MsgBox(t.Form(), "提示", "配置已保存", walk.MsgBoxIconInformation)
 	t.viewModel.UpdateUI()
 }
 
@@ -418,7 +424,7 @@ func (t *ConfigTab) onAddSyncFolder() {
 	}
 	defer dlg.Dispose()
 
-	dlg.SetTitle("添加同步文件夹")
+	dlg.SetTitle("添加同步项目")
 	dlg.SetSize(walk.Size{Width: 400, Height: 200})
 	dlg.SetLayout(walk.NewVBoxLayout())
 
@@ -429,9 +435,11 @@ func (t *ConfigTab) onAddSyncFolder() {
 	if err := (Composite{
 		Layout: Grid{Columns: 2, Spacing: 10},
 		Children: []Widget{
-			Label{Text: "文件夹路径:"},
+			Label{Text: "路径:"},
 			LineEdit{
 				AssignTo: &pathEdit,
+				ToolTipText: "输入要同步的文件或文件夹路径\n" +
+					"例如: mods/example.jar 或 config",
 			},
 			Label{Text: "同步模式:"},
 			ComboBox{
@@ -442,6 +450,8 @@ func (t *ConfigTab) onAddSyncFolder() {
 			Label{Text: "重定向路径:"},
 			LineEdit{
 				AssignTo: &redirectPathEdit,
+				ToolTipText: "输入重定向的目标路径\n" +
+					"例如: D:/minecraft/mods/example.jar 或 D:/minecraft/config",
 			},
 		},
 	}.Create(NewBuilder(dlg))); err != nil {

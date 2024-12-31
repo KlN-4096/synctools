@@ -183,6 +183,14 @@ func (s *Server) HandleClient(conn net.Conn) {
 			return
 		}
 
+		// 记录接收到的消息，使用格式化的payload
+		s.logger.Debug("接收到客户端消息", interfaces.Fields{
+			"client":  client.ID,
+			"type":    msg.Type,
+			"uuid":    msg.UUID,
+			"payload": client.msgSender.FormatPayload(msg.Payload),
+		})
+
 		switch msg.Type {
 		case "init":
 			client.UUID = msg.UUID
@@ -415,6 +423,7 @@ func (s *Server) HandleClient(conn net.Conn) {
 				"name": filepath.Base(syncRequest.Path),
 				"size": fileInfo.Size(),
 				"md5":  md5sum,
+				"path": syncRequest.Path,
 			})
 
 			// 发送文件内容
@@ -438,7 +447,7 @@ func (s *Server) HandleClient(conn net.Conn) {
 			s.logger.Debug("文件发送成功", interfaces.Fields{
 				"file": filePath,
 				"md5":  md5sum,
-				"size": fileInfo.Size(),
+				"size": client.msgSender.FormatFileSize(fileInfo.Size()),
 			})
 
 		case "list_request":

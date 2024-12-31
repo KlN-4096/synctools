@@ -432,8 +432,17 @@ func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath s
 		return nil
 	}
 
-	// 其他同步模式正常接收文件
-	if err := s.networkClient.ReceiveFile(filepath.Dir(destPath), progress); err != nil {
+	// 获取重定向后的路径
+	redirectedPath := s.getRedirectedPath(req.Path, filepath.Dir(destPath))
+
+	// 确保目标目录存在
+	targetDir := filepath.Dir(redirectedPath)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("创建目标目录失败: %v", err)
+	}
+
+	// 接收文件
+	if err := s.networkClient.ReceiveFile(targetDir, progress); err != nil {
 		return fmt.Errorf("接收文件失败: %v", err)
 	}
 
@@ -521,7 +530,8 @@ func (s *ClientSyncService) getRedirectedPath(originalPath, destPath string) str
 		if strings.HasPrefix(originalPath, redirect.ServerPath) {
 			// 替换路径前缀
 			relativePath := strings.TrimPrefix(originalPath, redirect.ServerPath)
-			return filepath.Join(destPath, redirect.ClientPath, relativePath)
+			targetDir := filepath.Join(destPath, redirect.ClientPath)
+			return filepath.Join(targetDir, relativePath)
 		}
 	}
 
@@ -633,7 +643,15 @@ func (s *ClientSyncService) getLocalFilesWithMD5(dir string) (map[string]string,
 			return err
 		}
 		if !info.IsDir() {
-			relPath, err := filepath.Rel(dir, path)
+			// 如果dir是一个文件路径，我们需要特殊处理
+			var relPath string
+			if info.IsDir() || filepath.Dir(dir) == dir {
+				// 正常的目录遍历情况
+				relPath, err = filepath.Rel(dir, path)
+			} else {
+				// dir是一个文件路径的情况
+				relPath = filepath.Base(path)
+			}
 			if err != nil {
 				return err
 			}

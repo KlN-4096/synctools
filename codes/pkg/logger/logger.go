@@ -80,12 +80,18 @@ func (l *DefaultLogger) log(level interfaces.LogLevel, msg string, fields interf
 	}
 
 	// 记录日志
-	l.logger.Printf("%s [%s] %s%s",
+	logMsg := fmt.Sprintf("%s [%s] %s%s\n",
 		time.Now().Format("2006-01-02 15:04:05"),
 		levelStr,
 		msg,
 		fieldStr,
 	)
+
+	// 直接写入并刷新
+	fmt.Print(logMsg)
+	if w, ok := l.logger.Writer().(*os.File); ok {
+		w.Sync()
+	}
 
 	// 如果是致命错误，则退出程序
 	if level == interfaces.FATAL {
