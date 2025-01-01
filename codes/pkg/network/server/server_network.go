@@ -434,7 +434,9 @@ func (s *Server) HandleClient(conn net.Conn) {
 				// 处理文件下载请求
 				filePath := filepath.Join(s.config.SyncDir, syncRequest.Path)
 				s.logger.Debug("处理文件下载请求", interfaces.Fields{
-					"file": filePath,
+					"file":         filePath,
+					"request_path": syncRequest.Path,
+					"server_path":  filePath,
 				})
 
 				// 检查文件是否存在
@@ -469,12 +471,15 @@ func (s *Server) HandleClient(conn net.Conn) {
 				hash.Write(fileContent)
 				md5sum := hex.EncodeToString(hash.Sum(nil))
 
+				// 统一使用斜杠作为路径分隔符
+				normalizedPath := filepath.ToSlash(syncRequest.Path)
+
 				// 发送文件信息
 				client.msgSender.SendMessage(conn, "file", msg.UUID, map[string]interface{}{
-					"name": filepath.Base(syncRequest.Path),
+					"name": filepath.Base(normalizedPath),
 					"size": fileInfo.Size(),
 					"md5":  md5sum,
-					"path": syncRequest.Path,
+					"path": normalizedPath,
 				})
 
 				// 发送文件内容

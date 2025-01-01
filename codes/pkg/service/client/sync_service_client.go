@@ -233,49 +233,71 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 		"files_to_del":  filesToDelete,
 	})
 
-	// 如果没有需要同步的文件,直接返回
-	if needSyncFiles == 0 {
+	// 如果没有需要同步的文件且没有需要删除的文件,直接返回
+	if needSyncFiles == 0 && extraFiles == 0 {
 		s.SetStatus("无需同步")
-		// 同步完成后断开连接
 		s.Disconnect()
 		return nil
 	}
 
 	var totalDownloadCount, totalDeleteCount, totalFailedCount int
 
-	// 遍历需要同步的文件
+	// 先处理需要删除的文件
+	for folder, files := range filesToDelete {
+		// 获取文件夹的同步模式
+		var mode interfaces.SyncMode
+		// 统一使用斜杠作为分隔符进行比较
+		folderSlash := filepath.ToSlash(folder)
+		for _, folderConfig := range s.Config.SyncFolders {
+			if folderConfig.Path == folderSlash {
+				mode = folderConfig.SyncMode
+				break
+			}
+		}
+
+		// 只在mirror模式下执行删除
+		if mode == interfaces.MirrorSync && len(files) > 0 {
+			s.Logger.Info("开始删除多余文件", interfaces.Fields{
+				"folder": folder,
+				"count":  len(files),
+			})
+
+			for file := range files {
+				fullPath := filepath.Join(sourcePath, folder, file)
+				if err := os.Remove(fullPath); err != nil {
+					if !os.IsNotExist(err) {
+						// 只记录非文件不存在的错误
+						s.Logger.Error("删除文件失败", interfaces.Fields{
+							"folder": folder,
+							"file":   file,
+							"error":  err,
+						})
+						totalFailedCount++
+					}
+				} else {
+					totalDeleteCount++
+					s.Logger.Info("成功删除文件", interfaces.Fields{
+						"folder": folder,
+						"file":   file,
+					})
+				}
+			}
+		}
+	}
+
+	// 处理需要同步的文件
 	for _, syncPath := range filesToSync {
 		folder := filepath.Dir(syncPath)
 		serverPath := filepath.Base(syncPath)
 
 		// 获取当前文件夹的同步模式
 		var mode interfaces.SyncMode
+		// 统一使用斜杠作为分隔符进行比较
+		folderSlash := filepath.ToSlash(folder)
 		for _, folderConfig := range s.Config.SyncFolders {
-			if folderConfig.Path == folder {
+			if folderConfig.Path == folderSlash {
 				mode = folderConfig.SyncMode
 				break
-			}
-		}
-		// 如果是mirror模式,删除多余的文件
-		if mode == interfaces.MirrorSync {
-			// 检查当前文件夹是否有需要删除的文件
-			if files, ok := filesToDelete[folder]; ok && len(files) > 0 {
-				for file := range files {
-					fullPath := filepath.Join(sourcePath, folder, file)
-					s.Logger.Info("删除多余文件", interfaces.Fields{
-						"folder": folder,
-						"file":   file,
-					})
-					if err := os.Remove(fullPath); err != nil {
-						s.Logger.Error("删除文件失败", interfaces.Fields{
-							"folder": folder,
-							"file":   file,
-							"error":  err,
-						})
-					} else {
-						totalDeleteCount++
-					}
-				}
 			}
 		}
 
@@ -287,7 +309,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 		var fullPath string
 		if s.isSingleFile(folder) {
 			// 如果是单文件
-			reqPath = serverPath
+			reqPath = folder
 			fullPath = localFolderPath
 		} else {
 			// 如果是文件夹中的文件
@@ -325,11 +347,10 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	s.Logger.Info("同步完成", interfaces.Fields{
-		"downloaded":  totalDownloadCount,
-		"deleted":     totalDeleteCount,
-		"skipped":     ignoredFiles,
-		"failed":      totalFailedCount,
-		"source_path": sourcePath,
+		"downloaded": totalDownloadCount,
+		"deleted":    totalDeleteCount,
+		"skipped":    ignoredFiles,
+		"failed":     totalFailedCount,
 	})
 
 	// 同步完成后断开连接
@@ -372,24 +393,39 @@ func (s *ClientSyncService) downloadFile(req *interfaces.SyncRequest, destPath s
 		}
 		defer os.RemoveAll(tempDir)
 
+		// 构建临时文件路径
+		fileName := filepath.Base(req.Path)
+		tempFile := filepath.Join(tempDir, fileName)
+
+		s.Logger.Debug("准备下载文件", interfaces.Fields{
+			"temp_dir":  tempDir,
+			"temp_file": tempFile,
+			"req_path":  req.Path,
+		})
+
 		// 先将压缩包下载到临时目录
-		if err := s.networkClient.ReceiveFile(tempDir, progress); err != nil {
+		if err := s.networkClient.ReceiveFile(tempFile, progress); err != nil {
 			return fmt.Errorf("接收压缩包失败: %v", err)
 		}
-
-		// 获取下载的压缩包路径
-		packFile := filepath.Join(tempDir, filepath.Base(req.Path))
 
 		// 获取目标目录（移除.zip后缀）
 		targetDir := filepath.Dir(destPath)
 
+		s.Logger.Debug("解压文件信息", interfaces.Fields{
+			"temp_dir":   tempDir,
+			"temp_file":  tempFile,
+			"target_dir": targetDir,
+			"req_path":   req.Path,
+			"dest_path":  destPath,
+		})
+
 		// 解压文件
-		if err := s.unpackFile(packFile, targetDir); err != nil {
+		if err := s.unpackFile(tempFile, targetDir); err != nil {
 			return fmt.Errorf("解压文件失败: %v", err)
 		}
 
 		s.Logger.Info("解压完成", interfaces.Fields{
-			"pack": packFile,
+			"pack": tempFile,
 			"dest": targetDir,
 		})
 		return nil
@@ -435,8 +471,8 @@ func (s *ClientSyncService) unpackFile(packFile, destPath string) error {
 
 	// 遍历压缩包中的文件
 	for _, file := range reader.File {
-		// 获取文件的重定向路径
-		targetPath := s.getRedirectedPath(file.Name, destPath)
+		// 构建目标文件路径
+		targetPath := filepath.Join(destPath, file.Name)
 
 		if file.FileInfo().IsDir() {
 			// 创建目录

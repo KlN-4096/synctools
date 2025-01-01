@@ -467,7 +467,8 @@ func (t *ConfigTab) onAddSyncFolder() {
 				MinSize: Size{Width: 70},
 				OnClicked: func() {
 					if interfaces.SyncMode(modeComboBox.Text()) == interfaces.PackSync &&
-						!strings.HasSuffix(strings.ToLower(redirectPathEdit.Text()), ".zip") {
+						!strings.HasSuffix(strings.ToLower(pathEdit.Text()), ".zip") {
+						print(pathEdit.Text() + "AAAAAA")
 						walk.MsgBox(dlg, "格式错误", "打包同步模式下，目标文件必须是ZIP压缩包格式", walk.MsgBoxIconWarning)
 						return
 					}

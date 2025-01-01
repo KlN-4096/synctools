@@ -180,9 +180,17 @@ func (s *MessageSender) ReceiveFile(conn net.Conn, destDir string, progress chan
 
 	// 3. 写入文件
 	// 确保目标目录存在
-	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+	targetDir := filepath.Dir(destDir)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %v", err)
 	}
+
+	s.logger.Debug("写入文件", interfaces.Fields{
+		"dest_dir":   destDir,
+		"target_dir": targetDir,
+		"file_name":  fileInfo.Name,
+		"file_path":  fileInfo.Path,
+	})
 
 	if err := os.WriteFile(destDir, chunk.Data, 0644); err != nil {
 		return fmt.Errorf("写入文件失败: %v", err)
