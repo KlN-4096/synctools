@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"synctools/codes/internal/interfaces"
 )
@@ -28,11 +29,21 @@ func (s *MessageSender) SendMessage(conn net.Conn, msgType string, uuid string, 
 		return fmt.Errorf("连接为空")
 	}
 
+	// 设置写入超时
+	if err := conn.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		return fmt.Errorf("设置写入超时失败: %v", err)
+	}
+	defer conn.SetWriteDeadline(time.Time{}) // 清除超时设置
+
 	// 将payload转换为json.RawMessage
 	var payloadJSON json.RawMessage
 	if payload != nil {
 		data, err := json.Marshal(payload)
 		if err != nil {
+			s.logger.Error("序列化payload失败", interfaces.Fields{
+				"error":   err,
+				"payload": payload,
+			})
 			return fmt.Errorf("序列化payload失败: %v", err)
 		}
 		payloadJSON = json.RawMessage(data)
@@ -44,14 +55,33 @@ func (s *MessageSender) SendMessage(conn net.Conn, msgType string, uuid string, 
 		Payload: payloadJSON,
 	}
 
+	// 先序列化整个消息，确保格式正确
+	data, err := json.Marshal(msg)
+	if err != nil {
+		s.logger.Error("序列化消息失败", interfaces.Fields{
+			"error": err,
+			"msg":   msg,
+		})
+		return fmt.Errorf("序列化消息失败: %v", err)
+	}
+
 	s.logger.Debug("发送消息", interfaces.Fields{
 		"type":    msgType,
 		"uuid":    uuid,
-		"payload": s.FormatPayload(msg.Payload),
+		"payload": s.FormatPayload(payloadJSON),
+		"data":    string(data),
 	})
 
-	encoder := json.NewEncoder(conn)
-	return encoder.Encode(msg)
+	// 写入数据
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		s.logger.Error("写入数据失败", interfaces.Fields{
+			"error": err,
+			"data":  string(data),
+		})
+		return fmt.Errorf("发送消息失败: %v", err)
+	}
+
+	return nil
 }
 
 // ReceiveMessage 从连接接收消息
@@ -60,10 +90,35 @@ func (s *MessageSender) ReceiveMessage(conn net.Conn) (*interfaces.Message, erro
 		return nil, fmt.Errorf("连接为空")
 	}
 
-	var msg interfaces.Message
+	// 设置读取超时
+	if err := conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		return nil, fmt.Errorf("设置读取超时失败: %v", err)
+	}
+	defer conn.SetReadDeadline(time.Time{}) // 清除超时设置
+
+	// 读取原始数据
 	decoder := json.NewDecoder(conn)
-	if err := decoder.Decode(&msg); err != nil {
+	var rawData json.RawMessage
+	if err := decoder.Decode(&rawData); err != nil {
+		s.logger.Error("读取原始数据失败", interfaces.Fields{
+			"error": err,
+			"data":  string(rawData),
+		})
 		return nil, fmt.Errorf("接收消息失败: %v", err)
+	}
+
+	s.logger.Debug("接收原始数据", interfaces.Fields{
+		"data": s.FormatPayload(rawData),
+	})
+
+	// 尝试解析消息
+	var msg interfaces.Message
+	if err := json.Unmarshal(rawData, &msg); err != nil {
+		s.logger.Error("解析消息失败", interfaces.Fields{
+			"error": err,
+			"data":  string(rawData),
+		})
+		return nil, fmt.Errorf("解析消息失败: %v", err)
 	}
 
 	s.logger.Debug("接收消息", interfaces.Fields{
