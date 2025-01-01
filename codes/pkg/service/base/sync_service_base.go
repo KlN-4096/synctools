@@ -232,55 +232,24 @@ func (s *BaseSyncService) CalculateFileHash(data []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// IsIgnored 检查文件是否被忽略
-func (s *BaseSyncService) IsIgnored(file string) bool {
-	if s.Config == nil || s.Config.IgnoreList == nil {
+// IsIgnored 检查文件是否需要忽略
+func (s *BaseSyncService) IsIgnored(path string) bool {
+	config := s.GetCurrentConfig()
+	if config == nil || len(config.IgnoreList) == 0 {
 		return false
 	}
 
-	// 标准化文件路径(使用正斜杠)
-	normalizedPath := filepath.ToSlash(file)
-	fileName := filepath.Base(file)
+	// 统一路径分隔符并去除回车符
+	path = strings.TrimSpace(filepath.ToSlash(path))
 
-	for _, pattern := range s.Config.IgnoreList {
-		// 标准化忽略模式
-		normalizedPattern := filepath.ToSlash(pattern)
-
-		// 检查是否是路径模式(包含路径分隔符)
-		if strings.Contains(normalizedPattern, "/") {
-			// 如果模式不以/结尾,添加/以匹配整个目录
-			if !strings.HasSuffix(normalizedPattern, "/") {
-				normalizedPattern += "/"
-			}
-			// 检查文件是否在忽略的目录下
-			if strings.HasPrefix(normalizedPath, normalizedPattern) {
-				s.Logger.Debug("文件在忽略目录下", interfaces.Fields{
-					"pattern": pattern,
-					"file":    file,
-				})
-				return true
-			}
-			continue
-		}
-
-		// 尝试匹配文件名
-		matched, err := filepath.Match(pattern, fileName)
-		if err != nil {
-			s.Logger.Error("匹配忽略模式失败", interfaces.Fields{
-				"pattern": pattern,
-				"file":    fileName,
-				"error":   err,
-			})
-			continue
-		}
-		if matched {
-			s.Logger.Debug("文件名匹配忽略模式", interfaces.Fields{
-				"pattern": pattern,
-				"file":    fileName,
-			})
+	for _, pattern := range config.IgnoreList {
+		// 去除回车符
+		pattern = strings.TrimSpace(pattern)
+		if matched, _ := filepath.Match(pattern, path); matched {
 			return true
 		}
 	}
+
 	return false
 }
 

@@ -170,23 +170,52 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	// 计算需要同步的文件数量
-	var totalFiles, needSyncFiles, ignoredFiles int
+	var totalFiles, needSyncFiles, ignoredFiles, extraFiles int
 	var filesToSync []string
+	filesToDelete := make(map[string]map[string]struct{}) // 改为嵌套Map: folder -> set of files
+	var ignoredMD5s []string                              // 记录被忽略文件的MD5
 	for folder, serverFiles := range allServerFiles {
 		localFiles := allLocalFiles[folder]
+
+		// 检查本地多余的文件
+		for localPath := range localFiles {
+			// 获取重定向后的路径
+			redirectedPath := s.getRedirectedPathByConfig(localPath, false)
+			if _, exists := serverFiles[redirectedPath]; !exists && !s.isIgnoredFile(redirectedPath) {
+				s.Logger.Debug("发现本地多余文件", interfaces.Fields{
+					"folder":         folder,
+					"file":           localPath,
+					"redirectedPath": redirectedPath,
+				})
+				extraFiles++
+				// 初始化文件夹的文件集合
+				if _, ok := filesToDelete[folder]; !ok {
+					filesToDelete[folder] = make(map[string]struct{})
+				}
+				filesToDelete[folder][localPath] = struct{}{} // 使用空结构体作为Set
+			}
+		}
+
+		// 检查需要同步的文件
 		for serverPath, serverMD5 := range serverFiles {
+			// 获取重定向后的路径
+			redirectedPath := s.getRedirectedPathByConfig(serverPath, true)
+
 			// 检查文件是否需要忽略
-			if s.IsIgnored(serverPath) {
+			if s.isIgnoredFile(redirectedPath) {
 				s.Logger.Debug("忽略文件", interfaces.Fields{
-					"folder": folder,
-					"file":   serverPath,
+					"folder":         folder,
+					"file":           serverPath,
+					"redirectedPath": redirectedPath,
+					"md5":            serverMD5,
 				})
 				ignoredFiles++
+				ignoredMD5s = append(ignoredMD5s, serverMD5)
 				continue
 			}
 
 			totalFiles++
-			localMD5, exists := localFiles[serverPath]
+			localMD5, exists := localFiles[redirectedPath]
 			if !exists || localMD5 != serverMD5 {
 				needSyncFiles++
 				filesToSync = append(filesToSync, filepath.Join(folder, serverPath))
@@ -198,19 +227,27 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 		"total_files":   totalFiles,
 		"need_sync":     needSyncFiles,
 		"ignored_files": ignoredFiles,
-		"files":         filesToSync,
+		"extra_files":   extraFiles,
+		"ignored_md5s":  ignoredMD5s,
+		"files_to_sync": filesToSync,
+		"files_to_del":  filesToDelete,
 	})
 
 	// 如果没有需要同步的文件,直接返回
 	if needSyncFiles == 0 {
 		s.SetStatus("无需同步")
+		// 同步完成后断开连接
+		s.Disconnect()
 		return nil
 	}
 
-	var totalDownloadCount, totalDeleteCount, totalSkipCount, totalFailedCount int
+	var totalDownloadCount, totalDeleteCount, totalFailedCount int
 
-	// 遍历每个同步文件夹
-	for _, folder := range syncFolders {
+	// 遍历需要同步的文件
+	for _, syncPath := range filesToSync {
+		folder := filepath.Dir(syncPath)
+		serverPath := filepath.Base(syncPath)
+
 		// 获取当前文件夹的同步模式
 		var mode interfaces.SyncMode
 		for _, folderConfig := range s.Config.SyncFolders {
@@ -219,242 +256,81 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 				break
 			}
 		}
-
-		s.Logger.Info("开始同步文件夹", interfaces.Fields{
-			"folder": folder,
-			"mode":   mode,
-		})
-
-		// 构建本地和服务器的文件夹路径
-		localFolderPath := filepath.Join(sourcePath, folder)
-		localFiles := allLocalFiles[folder]
-		serverFiles := allServerFiles[folder]
-
-		// 处理本地多余的文件
+		// 如果是mirror模式,删除多余的文件
 		if mode == interfaces.MirrorSync {
-			for localPath := range localFiles {
-				if _, exists := serverFiles[localPath]; !exists {
-					s.Logger.Info("发现本地多余文件", interfaces.Fields{
+			// 检查当前文件夹是否有需要删除的文件
+			if files, ok := filesToDelete[folder]; ok && len(files) > 0 {
+				for file := range files {
+					fullPath := filepath.Join(sourcePath, folder, file)
+					s.Logger.Info("删除多余文件", interfaces.Fields{
 						"folder": folder,
-						"file":   localPath,
-						"md5":    localFiles[localPath],
-					})
-					// 如果本地路径是"."，则使用文件夹路径本身
-					var fullPath string
-					if localPath == "." {
-						fullPath = localFolderPath
-					} else {
-						fullPath = filepath.Join(localFolderPath, localPath)
-					}
-					s.Logger.Debug("删除本地多余文件", interfaces.Fields{
-						"file": localPath,
+						"file":   file,
 					})
 					if err := os.Remove(fullPath); err != nil {
-						s.Logger.Error("删除本地文件失败", interfaces.Fields{
-							"file":  localPath,
-							"error": err,
-						})
-						totalFailedCount++
-						continue
-					}
-					totalDeleteCount++
-				}
-			}
-		}
-
-		// 在mirror模式下处理本地多余的目录
-		if mode == interfaces.MirrorSync {
-			// 获取服务器目录列表
-			req := &interfaces.SyncRequest{
-				Mode:      interfaces.MirrorSync,
-				Direction: interfaces.DirectionPull,
-				Path:      folder,
-			}
-
-			if err := s.networkClient.SendData("list_request", req); err != nil {
-				s.Logger.Error("获取服务器目录列表失败", interfaces.Fields{
-					"folder": folder,
-					"error":  err,
-				})
-			} else {
-				var resp struct {
-					Success bool     `json:"success"`
-					Files   []string `json:"files"`
-					Dirs    []string `json:"dirs"`
-				}
-
-				if err := s.networkClient.ReceiveData(&resp); err != nil {
-					s.Logger.Error("接收服务器目录列表失败", interfaces.Fields{
-						"folder": folder,
-						"error":  err,
-					})
-				} else if resp.Success {
-					// 将服务器目录转换为map便于查找
-					serverDirs := make(map[string]bool)
-					for _, dir := range resp.Dirs {
-						serverDirs[dir] = true
-					}
-
-					// 获取本地目录列表
-					var localDirs []string
-					err := filepath.Walk(localFolderPath, func(path string, info os.FileInfo, err error) error {
-						if err != nil {
-							return err
-						}
-						if info.IsDir() {
-							relPath, err := filepath.Rel(localFolderPath, path)
-							if err != nil {
-								return err
-							}
-							if relPath != "." {
-								localDirs = append(localDirs, relPath)
-							}
-						}
-						return nil
-					})
-
-					if err != nil {
-						s.Logger.Error("获取本地目录列表失败", interfaces.Fields{
+						s.Logger.Error("删除文件失败", interfaces.Fields{
 							"folder": folder,
+							"file":   file,
 							"error":  err,
 						})
 					} else {
-						// 从最深层的目录开始删除
-						for i := len(localDirs) - 1; i >= 0; i-- {
-							localDir := localDirs[i]
-							if !serverDirs[localDir] {
-								fullPath := filepath.Join(localFolderPath, localDir)
-								s.Logger.Info("发现本地多余目录", interfaces.Fields{
-									"folder": folder,
-									"dir":    localDir,
-								})
-
-								// 尝试删除目录（如果不为空会失败）
-								if err := os.Remove(fullPath); err != nil {
-									if !os.IsNotExist(err) {
-										s.Logger.Error("删除目录失败", interfaces.Fields{
-											"folder": folder,
-											"dir":    localDir,
-											"error":  err,
-										})
-										totalFailedCount++
-									}
-								} else {
-									s.Logger.Debug("删除目录成功", interfaces.Fields{
-										"folder": folder,
-										"dir":    localDir,
-									})
-									totalDeleteCount++
-								}
-							}
-						}
+						totalDeleteCount++
 					}
 				}
 			}
 		}
 
-		// 从服务器下载MD5信息
-		for serverPath, serverMD5 := range serverFiles {
-			localMD5, exists := localFiles[serverPath]
-			needDownload := true
+		// 构建本地路径
+		localFolderPath := filepath.Join(sourcePath, folder)
 
-			if exists {
-				s.Logger.Info("对比文件MD5", interfaces.Fields{
-					"folder":     folder,
-					"file":       serverPath,
-					"local_md5":  localMD5,
-					"server_md5": serverMD5,
-					"match":      localMD5 == serverMD5,
-				})
-
-				if localMD5 == serverMD5 {
-					needDownload = false
-					totalSkipCount++
-					s.Logger.Debug("文件无需更新", interfaces.Fields{
-						"folder": folder,
-						"file":   serverPath,
-						"md5":    serverMD5,
-					})
-				} else {
-					s.Logger.Info("文件需要更新", interfaces.Fields{
-						"folder":     folder,
-						"file":       serverPath,
-						"local_md5":  localMD5,
-						"server_md5": serverMD5,
-					})
-				}
-			} else {
-				s.Logger.Info("发现新文件", interfaces.Fields{
-					"folder": folder,
-					"file":   serverPath,
-					"md5":    serverMD5,
-				})
-			}
-
-			if needDownload {
-				fullPath := filepath.Join(localFolderPath, serverPath)
-
-				// 发送下载请求
-				req := &interfaces.SyncRequest{
-					Mode:      mode,
-					Direction: interfaces.DirectionPull,
-					Path:      filepath.Join(folder, serverPath),
-				}
-
-				s.Logger.Info("开始下载文件", interfaces.Fields{
-					"folder": folder,
-					"file":   serverPath,
-					"mode":   mode,
-				})
-
-				if err := s.downloadFile(req, fullPath, sourcePath, mode); err != nil {
-					s.Logger.Error("下载文件失败", interfaces.Fields{
-						"folder": folder,
-						"file":   serverPath,
-						"error":  err,
-					})
-					totalFailedCount++
-					continue
-				}
-
-				// 验证下载后的文件MD5
-				downloadedMD5, err := s.calculateFileMD5(fullPath)
-				if err != nil {
-					s.Logger.Error("计算下载文件MD5失败", interfaces.Fields{
-						"folder": folder,
-						"file":   serverPath,
-						"error":  err,
-					})
-				} else {
-					s.Logger.Info("验证下载文件MD5", interfaces.Fields{
-						"folder":         folder,
-						"file":           serverPath,
-						"server_md5":     serverMD5,
-						"downloaded_md5": downloadedMD5,
-						"match":          downloadedMD5 == serverMD5,
-					})
-				}
-
-				totalDownloadCount++
-				s.Logger.Debug("文件下载成功", interfaces.Fields{
-					"folder": folder,
-					"file":   serverPath,
-					"md5":    serverMD5,
-				})
-			}
+		// 发送下载请求
+		var reqPath string
+		var fullPath string
+		if s.isSingleFile(folder) {
+			// 如果是单文件
+			reqPath = serverPath
+			fullPath = localFolderPath
+		} else {
+			// 如果是文件夹中的文件
+			reqPath = filepath.Join(folder, serverPath)
+			fullPath = filepath.Join(localFolderPath, serverPath)
 		}
 
-		s.Logger.Info("同步完成", interfaces.Fields{
-			"downloaded":  totalDownloadCount,
-			"deleted":     totalDeleteCount,
-			"skipped":     totalSkipCount,
-			"failed":      totalFailedCount,
-			"source_path": sourcePath,
-			"sync_mode":   mode,
+		req := &interfaces.SyncRequest{
+			Mode:      mode,
+			Direction: interfaces.DirectionPull,
+			Path:      reqPath,
+		}
+
+		s.Logger.Info("开始下载文件", interfaces.Fields{
+			"folder": folder,
+			"file":   serverPath,
+			"mode":   mode,
+		})
+
+		if err := s.downloadFile(req, fullPath, sourcePath, mode); err != nil {
+			s.Logger.Error("下载文件失败", interfaces.Fields{
+				"folder": folder,
+				"file":   serverPath,
+				"error":  err,
+			})
+			totalFailedCount++
+			continue
+		}
+
+		totalDownloadCount++
+		s.Logger.Debug("文件下载成功", interfaces.Fields{
+			"folder": folder,
+			"file":   serverPath,
 		})
 	}
 
-	s.SetStatus("同步完成")
+	s.Logger.Info("同步完成", interfaces.Fields{
+		"downloaded":  totalDownloadCount,
+		"deleted":     totalDeleteCount,
+		"skipped":     ignoredFiles,
+		"failed":      totalFailedCount,
+		"source_path": sourcePath,
+	})
 
 	// 同步完成后断开连接
 	if err := s.Disconnect(); err != nil {
@@ -624,7 +500,7 @@ func (s *ClientSyncService) getRedirectedPath(originalPath, destPath string) str
 	// 获取当前配置
 	config := s.GetCurrentConfig()
 	if config == nil || len(config.FolderRedirects) == 0 {
-		return filepath.Dir(destPath)
+		return destPath
 	}
 
 	// 检查是否需要重定向
@@ -639,7 +515,7 @@ func (s *ClientSyncService) getRedirectedPath(originalPath, destPath string) str
 		}
 	}
 
-	return filepath.Dir(destPath)
+	return destPath
 }
 
 // getLocalFiles 获取本地文件列表
@@ -878,4 +754,75 @@ func (s *ClientSyncService) GetSyncFolders() []string {
 		folders[i] = folder.Path
 	}
 	return folders
+}
+
+// filterIgnoreList 过滤掉忽略列表中的空值和特殊字符
+func (s *ClientSyncService) filterIgnoreList(ignoreList []string) []string {
+	var validIgnoreList []string
+	for _, pattern := range ignoreList {
+		// 去除空白字符和\r
+		pattern = strings.TrimSpace(pattern)
+		pattern = strings.TrimSuffix(pattern, "\r")
+		if pattern != "" {
+			validIgnoreList = append(validIgnoreList, pattern)
+		}
+	}
+	return validIgnoreList
+}
+
+//
+// -------------------- 辅助方法 --------------------
+//
+
+// isSingleFile 检查是否为单个文件
+func (s *ClientSyncService) isSingleFile(path string) bool {
+	// 获取当前配置
+	config := s.GetCurrentConfig()
+	if config == nil || len(config.SyncFolders) == 0 {
+		return false
+	}
+
+	// 如果路径包含后缀名,则认为是单文件
+	return filepath.Ext(path) != ""
+}
+
+// isIgnoredFile 检查文件是否被忽略
+func (s *ClientSyncService) isIgnoredFile(path string) bool {
+	serverConfig := s.BaseSyncService.GetCurrentConfig()
+	if serverConfig == nil || len(serverConfig.IgnoreList) == 0 {
+		return false
+	}
+
+	serverConfig.IgnoreList = s.filterIgnoreList(serverConfig.IgnoreList)
+	for _, pattern := range serverConfig.IgnoreList {
+		if matched, _ := filepath.Match(pattern, path); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// getRedirectedPathByConfig 根据配置获取重定向路径
+func (s *ClientSyncService) getRedirectedPathByConfig(path string, isServer bool) string {
+	// 统一路径分隔符
+	path = filepath.ToSlash(path)
+	config := s.GetCurrentConfig()
+	if config == nil || len(config.FolderRedirects) == 0 {
+		return path
+	}
+
+	for _, redirect := range config.FolderRedirects {
+		if isServer {
+			// 服务器路径转客户端路径
+			if strings.HasPrefix(path, redirect.ServerPath) {
+				return strings.Replace(path, redirect.ServerPath, redirect.ClientPath, 1)
+			}
+		} else {
+			// 客户端路径转服务器路径
+			if strings.HasPrefix(path, redirect.ClientPath) {
+				return strings.Replace(path, redirect.ClientPath, redirect.ServerPath, 1)
+			}
+		}
+	}
+	return path
 }

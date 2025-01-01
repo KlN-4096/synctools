@@ -214,15 +214,6 @@ func (s *ServerSyncService) handleMirrorSync(req *interfaces.SyncRequest) error 
 func (s *ServerSyncService) handlePushSync(req *interfaces.SyncRequest) error {
 	// 检查目标路径是否存在
 	targetDir := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
-	if _, err := os.Stat(targetDir); err != nil {
-		if os.IsNotExist(err) {
-			if err := os.MkdirAll(targetDir, 0755); err != nil {
-				return fmt.Errorf("创建目标目录失败: %v", err)
-			}
-		} else {
-			return fmt.Errorf("检查目标目录失败: %v", err)
-		}
-	}
 
 	// 处理文件列表
 	for _, file := range req.Files {
