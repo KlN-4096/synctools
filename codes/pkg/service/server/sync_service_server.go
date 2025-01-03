@@ -1,25 +1,19 @@
 /*
 文件作用:
-- 实现服务端同步服务的核心功能
+- 实现服务端同步服务的入口
 - 管理服务器的启动和停止
-- 处理客户端的同步请求
 - 维护服务器状态
 
 主要功能:
 1. 服务器生命周期管理
-2. 同步请求处理
-3. 文件系统操作
-4. 配置管理
+2. 网络服务管理
+3. 配置管理
 */
 
 package server
 
 import (
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"time"
 
 	"synctools/codes/internal/interfaces"
 	"synctools/codes/pkg/errors"
@@ -27,57 +21,22 @@ import (
 	"synctools/codes/pkg/service/base"
 )
 
-//
-// -------------------- 类型定义 --------------------
-//
-
 // ServerSyncService 服务端同步服务实现
 type ServerSyncService struct {
 	*base.BaseSyncService
-	server interfaces.NetworkServer
+	server   interfaces.NetworkServer
+	syncBase *base.ServerSyncBase
 }
-
-//
-// -------------------- 生命周期管理方法 --------------------
-//
 
 // NewServerSyncService 创建服务端同步服务
-func NewServerSyncService(config *interfaces.Config, Logger interfaces.Logger, storage interfaces.Storage) *ServerSyncService {
-	return &ServerSyncService{
-		BaseSyncService: base.NewBaseSyncService(config, Logger, storage),
+func NewServerSyncService(config *interfaces.Config, logger interfaces.Logger, storage interfaces.Storage) *ServerSyncService {
+	baseService := base.NewBaseSyncService(config, logger, storage)
+	srv := &ServerSyncService{
+		BaseSyncService: baseService,
 	}
+	srv.syncBase = base.NewServerSyncBase(baseService)
+	return srv
 }
-
-//
-// -------------------- 配置管理方法 --------------------
-//
-
-// validateConfig 验证服务器配置是否有效
-func (s *ServerSyncService) validateConfig() error {
-	config := s.GetCurrentConfig()
-	if config == nil {
-		return fmt.Errorf("请先配置服务器参数")
-	}
-
-	// 检查必要的配置项
-	if config.Port <= 0 {
-		return fmt.Errorf("端口号无效")
-	}
-
-	if config.Host == "" {
-		return fmt.Errorf("主机地址未设置")
-	}
-
-	if config.SyncDir == "" {
-		return fmt.Errorf("同步目录未设置")
-	}
-
-	return nil
-}
-
-//
-// -------------------- 服务器控制方法 --------------------
-//
 
 // StartServer 启动服务器
 func (s *ServerSyncService) StartServer() error {
@@ -86,7 +45,7 @@ func (s *ServerSyncService) StartServer() error {
 	}
 
 	// 验证配置
-	if err := s.validateConfig(); err != nil {
+	if err := s.syncBase.ValidateConfig(); err != nil {
 		s.SetStatus(fmt.Sprintf("启动失败: %s", err.Error()))
 		return err
 	}
@@ -140,237 +99,11 @@ func (s *ServerSyncService) GetNetworkServer() interfaces.NetworkServer {
 	return s.server
 }
 
-//
-// -------------------- 同步请求处理方法 --------------------
-//
-
 // HandleSyncRequest 处理同步请求
 func (s *ServerSyncService) HandleSyncRequest(request interface{}) error {
 	req, ok := request.(*interfaces.SyncRequest)
 	if !ok {
 		return fmt.Errorf("无效的请求类型")
 	}
-
-	s.Logger.Info("处理同步请求", interfaces.Fields{
-		"mode":      req.Mode,
-		"direction": req.Direction,
-		"path":      req.Path,
-	})
-
-	switch req.Mode {
-	case interfaces.MirrorSync:
-		return s.handleMirrorSync(req)
-	case interfaces.PushSync:
-		return s.handlePushSync(req)
-	case interfaces.PackSync:
-		return s.handlePackSync(req)
-	default:
-		return fmt.Errorf("不支持的同步模式: %s", req.Mode)
-	}
-}
-
-// handleMirrorSync 处理镜像同步
-func (s *ServerSyncService) handleMirrorSync(req *interfaces.SyncRequest) error {
-	// 检查是否是单个文件
-	sourcePath := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
-	fileInfo, err := os.Stat(sourcePath)
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %v", err)
-	}
-
-	// 如果是单个文件，直接复制
-	if !fileInfo.IsDir() {
-		targetPath := req.Path // 不需要额外的Join操作
-		return s.copyFile(sourcePath, targetPath)
-	}
-
-	// 如果是目录，按原有逻辑处理
-	files, err := s.getFileList(sourcePath)
-	if err != nil {
-		return err
-	}
-
-	// 遍历处理每个文件
-	for _, file := range files {
-		sourceFilePath := filepath.Join(sourcePath, file)
-		// 使用filepath.Clean来规范化路径，并使用filepath.ToSlash来统一分隔符
-		targetPath := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Base(req.Path), file)))
-
-		// 复制文件
-		if err := s.copyFile(sourceFilePath, targetPath); err != nil {
-			s.Logger.Error("复制文件失败", interfaces.Fields{
-				"source": sourceFilePath,
-				"target": targetPath,
-				"error":  err,
-			})
-			continue
-		}
-	}
-
-	return nil
-}
-
-// handlePushSync 处理推送同步
-func (s *ServerSyncService) handlePushSync(req *interfaces.SyncRequest) error {
-	// 检查目标路径是否存在
-	targetDir := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
-
-	// 处理文件列表
-	for _, file := range req.Files {
-
-		sourcePath := filepath.Join(req.Path, file)
-		targetPath := filepath.Join(targetDir, file)
-
-		// 检查目标文件是否存在
-		if _, err := os.Stat(targetPath); err == nil {
-			// 如果文件存在，检查是否需要更新
-			sourceInfo, err := os.Stat(sourcePath)
-			if err != nil {
-				s.Logger.Error("获取源文件信息失败", interfaces.Fields{
-					"file":  sourcePath,
-					"error": err,
-				})
-				continue
-			}
-
-			targetInfo, err := os.Stat(targetPath)
-			if err != nil {
-				s.Logger.Error("获取目标文件信息失败", interfaces.Fields{
-					"file":  targetPath,
-					"error": err,
-				})
-				continue
-			}
-
-			if sourceInfo.ModTime().Equal(targetInfo.ModTime()) {
-				// 文件未修改，跳过
-				continue
-			}
-		}
-
-		// 复制文件
-		if err := s.copyFile(sourcePath, targetPath); err != nil {
-			s.Logger.Error("复制文件失败", interfaces.Fields{
-				"source": sourcePath,
-				"target": targetPath,
-				"error":  err,
-			})
-			continue
-		}
-	}
-
-	return nil
-}
-
-// handlePackSync 处理打包同步
-func (s *ServerSyncService) handlePackSync(req *interfaces.SyncRequest) error {
-	s.Logger.Info("处理打包同步请求", interfaces.Fields{
-		"path": req.Path,
-	})
-
-	// 检查压缩包是否存在
-	packPath := filepath.Join(s.GetCurrentConfig().SyncDir, req.Path)
-	if _, err := os.Stat(packPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("压缩包不存在: %s", packPath)
-		}
-		return fmt.Errorf("检查压缩包失败: %v", err)
-	}
-
-	// 复制压缩包到目标路径
-	targetPath := filepath.Join(req.Path, filepath.Base(packPath))
-	if err := s.copyFile(packPath, targetPath); err != nil {
-		s.Logger.Error("复制压缩包失败", interfaces.Fields{
-			"source": packPath,
-			"target": targetPath,
-			"error":  err,
-		})
-		return fmt.Errorf("复制压缩包失败: %v", err)
-	}
-
-	s.Logger.Info("打包同步完成", interfaces.Fields{
-		"source": packPath,
-		"target": targetPath,
-	})
-	return nil
-}
-
-//
-// -------------------- 文件系统操作方法 --------------------
-//
-
-// getFileList 获取目录下的所有文件
-func (s *ServerSyncService) getFileList(dir string) ([]string, error) {
-	var files []string
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			relPath, err := filepath.Rel(dir, path)
-			if err != nil {
-				return err
-			}
-			files = append(files, relPath)
-		}
-		return nil
-	})
-	return files, err
-}
-
-// copyFile 复制文件
-func (s *ServerSyncService) copyFile(src, dst string) error {
-	// 创建目标目录
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return fmt.Errorf("创建目标目录失败: %v", err)
-	}
-
-	// 打开源文件
-	source, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("打开源文件失败: %v", err)
-	}
-	defer source.Close()
-
-	// 创建目标文件
-	destination, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("创建目标文件失败: %v", err)
-	}
-	defer destination.Close()
-
-	// 复制文件内容
-	if _, err = io.Copy(destination, source); err != nil {
-		return fmt.Errorf("复制文件内容失败: %v", err)
-	}
-
-	// 获取源文件信息
-	sourceInfo, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("获取源文件信息失败: %v", err)
-	}
-
-	// 保持文件权限和时间戳
-	if err := os.Chmod(dst, sourceInfo.Mode()); err != nil {
-		return fmt.Errorf("设置文件权限失败: %v", err)
-	}
-	if err := os.Chtimes(dst, time.Now(), sourceInfo.ModTime()); err != nil {
-		return fmt.Errorf("设置文件时间戳失败: %v", err)
-	}
-
-	return nil
-}
-
-// createPack 创建压缩包
-func (s *ServerSyncService) createPack(srcPath string, packFile string) error {
-	// 创建压缩包文件
-	file, err := os.Create(packFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// TODO: 实现压缩逻辑
-	// 可以使用 archive/zip 包来实现
-	return nil
+	return s.syncBase.HandleSyncRequest(req)
 }
