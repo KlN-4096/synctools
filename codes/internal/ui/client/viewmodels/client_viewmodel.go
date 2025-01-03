@@ -109,25 +109,6 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 		},
 	})
 
-	// 从配置中读取服务器地址和端口
-	if syncService != nil {
-		config := syncService.GetCurrentConfig()
-		vm.logger.Debug("测试", interfaces.Fields{
-			"config": config,
-		})
-		if config := syncService.GetCurrentConfig(); config != nil {
-			vm.addressEdit.SetText(config.Host)
-			vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
-			vm.syncPathEdit.SetText(config.SyncDir)
-		}
-	}
-
-	vm.logger.Debug("创建主视图模型", interfaces.Fields{
-		"defaultAddr": vm.addressEdit.Text(),
-		"defaultPort": vm.portEdit.Text(),
-		"syncPath":    vm.syncPathEdit.Text(),
-	})
-
 	// 设置连接丢失回调
 	vm.syncService.SetConnectionLostCallback(vm.handleConnectionLost)
 
@@ -137,23 +118,7 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 // Initialize 初始化视图模型
 func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
 	vm.window = window
-
-	// 从配置中读取服务器地址和端口
-	if vm.syncService != nil {
-		if config := vm.syncService.GetCurrentConfig(); config != nil {
-			vm.addressEdit.SetText(config.Host)
-			vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
-			vm.syncPathEdit.SetText(config.SyncDir)
-			vm.logger.Debug("从配置加载服务器信息", interfaces.Fields{
-				"host":     config.Host,
-				"port":     config.Port,
-				"syncPath": config.SyncDir,
-			})
-		}
-	}
-
 	vm.logger.Debug("视图模型初始化完成", interfaces.Fields{})
-	vm.UpdateUIState()
 	return nil
 }
 
@@ -177,10 +142,10 @@ func (vm *MainViewModel) Shutdown() error {
 // SetUIControls 设置UI控件引用
 func (vm *MainViewModel) SetUIControls(
 	connectBtn *walk.PushButton,
-	addrEdit, portEdit *walk.LineEdit,
+	addrEdit, portEdit interfaces.LineEditIface,
 	progress *walk.ProgressBar,
 	saveBtn *walk.PushButton,
-	syncPathEdit *walk.LineEdit,
+	syncPathEdit interfaces.LineEditIface,
 	browseBtn *walk.PushButton,
 	syncBtn *walk.PushButton,
 	syncTable interfaces.TableViewIface,
@@ -200,6 +165,20 @@ func (vm *MainViewModel) SetUIControls(
 	// 设置表格模型
 	if vm.syncTable != nil {
 		vm.syncTable.SetModel(vm.syncList)
+	}
+
+	// 从配置中读取服务器地址和端口
+	if vm.syncService != nil {
+		if config := vm.syncService.GetCurrentConfig(); config != nil {
+			vm.addressEdit.SetText(config.Host)
+			vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
+			vm.syncPathEdit.SetText(config.SyncDir)
+			vm.logger.Debug("从配置加载服务器信息", interfaces.Fields{
+				"host":     config.Host,
+				"port":     config.Port,
+				"syncPath": config.SyncDir,
+			})
+		}
 	}
 
 	vm.UpdateUIState()

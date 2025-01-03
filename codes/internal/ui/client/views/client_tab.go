@@ -211,15 +211,11 @@ func (t *ClientTab) onSave() {
 
 // onBrowse 处理浏览按钮点击
 func (t *ClientTab) onBrowse() {
-	dlg := new(walk.FileDialog)
-	dlg.Title = "选择同步目录"
-	dlg.FilePath = t.syncPathEdit.Text()
-
-	if ok, err := dlg.ShowBrowseFolder(t.Form()); err != nil {
-		walk.MsgBox(t.Form(), "错误", "选择目录失败: "+err.Error(), walk.MsgBoxIconError)
-	} else if ok {
-		t.syncPathEdit.SetText(dlg.FilePath)
+	if err := t.viewModel.BrowseSyncDir(); err != nil {
+		walk.MsgBox(t.Form(), "错误", err.Error(), walk.MsgBoxIconError)
+		return
 	}
+	// 先保存配置然后再更新UI
 	t.onSave()
 	t.viewModel.UpdateUIState()
 }
