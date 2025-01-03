@@ -22,6 +22,7 @@ import (
 	"github.com/lxn/walk"
 
 	"synctools/codes/internal/interfaces"
+	"synctools/codes/internal/ui/shared"
 )
 
 //
@@ -30,30 +31,31 @@ import (
 
 // MainViewModel 客户端主视图模型
 type MainViewModel struct {
+	// 服务
 	syncService interfaces.ClientSyncService
 	logger      interfaces.Logger
 	window      *walk.MainWindow
-	serverAddr  string
-	serverPort  string
-	syncPath    string
 
-	// UI 组件
-	connectButton    *walk.PushButton
-	disconnectButton *walk.PushButton
-	addressEdit      *walk.LineEdit
-	portEdit         *walk.LineEdit
-	progressBar      *walk.ProgressBar
-	saveButton       *walk.PushButton
-	browseButton     *walk.PushButton
-	syncButton       *walk.PushButton
-	syncPathEdit     *walk.LineEdit
+	// 输入框
+	addressEdit  interfaces.LineEditIface // 服务器地址
+	portEdit     interfaces.LineEditIface // 服务器端口
+	syncPathEdit interfaces.LineEditIface // 同步路径
+
+	// 按钮
+	connectButton    *walk.PushButton // 连接按钮
+	disconnectButton *walk.PushButton // 断开按钮
+	saveButton       *walk.PushButton // 保存按钮
+	browseButton     *walk.PushButton // 浏览按钮
+	syncButton       *walk.PushButton // 同步按钮
+
+	// 状态显示
+	progressBar *walk.ProgressBar   // 进度条
+	serverInfo  *walk.TextLabel     // 服务器信息
+	StatusBar   *walk.StatusBarItem // 状态栏
 
 	// 表格组件
 	syncTable interfaces.TableViewIface
-	syncList  *SyncListModel
-
-	serverInfo *walk.TextLabel
-	StatusBar  *walk.StatusBarItem
+	syncList  *shared.TableModel
 
 	// UI 更新回调
 	onUIUpdate func()
@@ -68,13 +70,44 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 	vm := &MainViewModel{
 		syncService: syncService,
 		logger:      logger,
-		serverAddr:  "localhost",
-		serverPort:  "9527",
-		syncPath:    "",
 	}
 
 	// 创建表格模型
-	vm.syncList = NewSyncListModel(syncService, logger)
+	vm.syncList = shared.NewTableModel([]shared.TableColumn{
+		{
+			Title: "路径",
+			Width: 200,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					return folder.Path
+				}
+				return nil
+			},
+		},
+		{
+			Title: "同步模式",
+			Width: 100,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					return string(folder.SyncMode)
+				}
+				return nil
+			},
+		},
+		{
+			Title: "状态",
+			Width: 100,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					if folder.IsEnabled {
+						return "启用"
+					}
+					return "禁用"
+				}
+				return nil
+			},
+		},
+	})
 
 	// 从配置中读取服务器地址和端口
 	if syncService != nil {
@@ -83,16 +116,16 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 			"config": config,
 		})
 		if config := syncService.GetCurrentConfig(); config != nil {
-			vm.serverAddr = config.Host
-			vm.serverPort = fmt.Sprintf("%d", config.Port)
-			vm.syncPath = config.SyncDir
+			vm.addressEdit.SetText(config.Host)
+			vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
+			vm.syncPathEdit.SetText(config.SyncDir)
 		}
 	}
 
 	vm.logger.Debug("创建主视图模型", interfaces.Fields{
-		"defaultAddr": vm.serverAddr,
-		"defaultPort": vm.serverPort,
-		"syncPath":    vm.syncPath,
+		"defaultAddr": vm.addressEdit.Text(),
+		"defaultPort": vm.portEdit.Text(),
+		"syncPath":    vm.syncPathEdit.Text(),
 	})
 
 	// 设置连接丢失回调
@@ -108,9 +141,9 @@ func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
 	// 从配置中读取服务器地址和端口
 	if vm.syncService != nil {
 		if config := vm.syncService.GetCurrentConfig(); config != nil {
-			vm.serverAddr = config.Host
-			vm.serverPort = fmt.Sprintf("%d", config.Port)
-			vm.syncPath = config.SyncDir
+			vm.addressEdit.SetText(config.Host)
+			vm.portEdit.SetText(fmt.Sprintf("%d", config.Port))
+			vm.syncPathEdit.SetText(config.SyncDir)
 			vm.logger.Debug("从配置加载服务器信息", interfaces.Fields{
 				"host":     config.Host,
 				"port":     config.Port,
@@ -148,7 +181,10 @@ func (vm *MainViewModel) SetUIControls(
 	progress *walk.ProgressBar,
 	saveBtn *walk.PushButton,
 	syncPathEdit *walk.LineEdit,
+	browseBtn *walk.PushButton,
+	syncBtn *walk.PushButton,
 	syncTable interfaces.TableViewIface,
+	statusBar *walk.StatusBarItem,
 ) {
 	vm.connectButton = connectBtn
 	vm.addressEdit = addrEdit
@@ -156,7 +192,10 @@ func (vm *MainViewModel) SetUIControls(
 	vm.progressBar = progress
 	vm.saveButton = saveBtn
 	vm.syncPathEdit = syncPathEdit
+	vm.browseButton = browseBtn
+	vm.syncButton = syncBtn
 	vm.syncTable = syncTable
+	vm.StatusBar = statusBar
 
 	// 设置表格模型
 	if vm.syncTable != nil {
@@ -164,11 +203,6 @@ func (vm *MainViewModel) SetUIControls(
 	}
 
 	vm.UpdateUIState()
-}
-
-// SetUIUpdateCallback 设置UI更新回调
-func (vm *MainViewModel) SetUIUpdateCallback(callback func()) {
-	vm.onUIUpdate = callback
 }
 
 // UpdateUIState 更新UI状态
@@ -188,16 +222,16 @@ func (vm *MainViewModel) UpdateUIState() {
 		// 更新连接按钮状态
 		if isConnected {
 			vm.connectButton.SetText("断开连接")
-			vm.StatusBar.SetText(fmt.Sprintf("已连接到 %s:%s", vm.serverAddr, vm.serverPort))
+			vm.StatusBar.SetText(fmt.Sprintf("已连接到 %s:%s", vm.addressEdit.Text(), vm.portEdit.Text()))
 		} else {
 			vm.connectButton.SetText("连接服务器")
 			vm.StatusBar.SetText("未连接")
 		}
 
 		// 更新输入框值
-		vm.addressEdit.SetText(vm.serverAddr)
-		vm.portEdit.SetText(vm.serverPort)
-		vm.syncPathEdit.SetText(vm.syncPath)
+		vm.addressEdit.SetText(vm.addressEdit.Text())
+		vm.portEdit.SetText(vm.portEdit.Text())
+		vm.syncPathEdit.SetText(vm.syncPathEdit.Text())
 
 		// 更新输入框状态
 		vm.addressEdit.SetEnabled(!isConnected)
@@ -232,8 +266,17 @@ func (vm *MainViewModel) UpdateUIState() {
 		}
 
 		// 更新表格
-		if vm.syncTable != nil {
-			vm.syncList.PublishRowsReset()
+		if vm.syncTable != nil && vm.syncList != nil {
+			config := vm.GetCurrentConfig()
+			if config != nil {
+				rows := make([]interface{}, len(config.SyncFolders))
+				for i, folder := range config.SyncFolders {
+					rows[i] = &folder
+				}
+				vm.syncList.SetRows(rows)
+			} else {
+				vm.syncList.SetRows(nil)
+			}
 		}
 
 		// 调用自定义UI更新回调
@@ -259,9 +302,9 @@ func (vm *MainViewModel) SaveConfig() error {
 	}
 	config := vm.GetCurrentConfig()
 
-	config.Host = vm.serverAddr
+	config.Host = vm.addressEdit.Text()
 	config.Port = port
-	config.SyncDir = vm.syncPath
+	config.SyncDir = vm.syncPathEdit.Text()
 
 	if err := vm.syncService.ValidateConfig(config); err != nil {
 		return fmt.Errorf("配置验证失败: %v", err)
@@ -289,28 +332,28 @@ func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
 // Connect 连接到服务器
 func (vm *MainViewModel) Connect() error {
 	// 检查服务器地址
-	if vm.serverAddr == "" {
+	if vm.addressEdit.Text() == "" {
 		return fmt.Errorf("服务器地址不能为空")
 	}
 
 	// 检查端口号
 	port := vm.parsePort()
 	if port <= 0 || port > 65535 {
-		return fmt.Errorf("无效的端口号: %s", vm.serverPort)
+		return fmt.Errorf("无效的端口号: %s", vm.portEdit.Text())
 	}
 
 	// 检查同步路径
-	if vm.syncPath == "" {
+	if vm.syncPathEdit.Text() == "" {
 		return fmt.Errorf("同步路径不能为空")
 	}
 
 	// 检查同步路径是否存在
-	if _, err := os.Stat(vm.syncPath); os.IsNotExist(err) {
-		return fmt.Errorf("同步路径不存在: %s", vm.syncPath)
+	if _, err := os.Stat(vm.syncPathEdit.Text()); os.IsNotExist(err) {
+		return fmt.Errorf("同步路径不存在: %s", vm.syncPathEdit.Text())
 	}
 
 	// 尝试连接服务器
-	if err := vm.syncService.Connect(vm.serverAddr, vm.serverPort); err != nil {
+	if err := vm.syncService.Connect(vm.addressEdit.Text(), vm.portEdit.Text()); err != nil {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
@@ -357,10 +400,10 @@ func (vm *MainViewModel) SyncFiles(path string) error {
 // parsePort 解析端口号
 func (vm *MainViewModel) parsePort() int {
 	var port int
-	_, err := fmt.Sscanf(vm.serverPort, "%d", &port)
+	_, err := fmt.Sscanf(vm.portEdit.Text(), "%d", &port)
 	if err != nil {
 		vm.logger.Error("解析端口号失败", interfaces.Fields{
-			"port":  vm.serverPort,
+			"port":  vm.portEdit.Text(),
 			"error": err,
 		})
 		return 0
@@ -368,91 +411,19 @@ func (vm *MainViewModel) parsePort() int {
 	return port
 }
 
-//
-// -------------------- 表格模型实现 --------------------
-//
-
-// SyncListModel 同步列表模型
-type SyncListModel struct {
-	walk.TableModelBase
-	syncService interfaces.ClientSyncService
-	logger      interfaces.Logger
-	sortColumn  int
-	sortOrder   walk.SortOrder
-	filter      string
-}
-
-// NewSyncListModel 创建新的同步列表模型
-func NewSyncListModel(syncService interfaces.ClientSyncService, logger interfaces.Logger) *SyncListModel {
-	return &SyncListModel{
-		syncService: syncService,
-		logger:      logger,
+// BrowseSyncDir 浏览同步目录
+func (vm *MainViewModel) BrowseSyncDir() error {
+	dlg := walk.FileDialog{
+		Title:          "选择同步目录",
+		InitialDirPath: "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
 	}
-}
 
-// RowCount 返回行数
-func (m *SyncListModel) RowCount() int {
-	if m.syncService == nil {
-		return 0
-	}
-	config := m.syncService.GetCurrentConfig()
-	if config == nil {
-		return 0
-	}
-	return len(config.SyncFolders)
-}
-
-// ColumnCount 返回列数
-func (m *SyncListModel) ColumnCount() int {
-	return 3
-}
-
-// ColumnTitle 返回列标题
-func (m *SyncListModel) ColumnTitle(col int) string {
-	switch col {
-	case 0:
-		return "路径"
-	case 1:
-		return "同步模式"
-	case 2:
-		return "重定向路径"
-	default:
-		return ""
-	}
-}
-
-// Value 返回单元格值
-func (m *SyncListModel) Value(row, col int) interface{} {
-	if m.syncService == nil {
-		return nil
-	}
-	config := m.syncService.GetCurrentConfig()
-	if config == nil || row >= len(config.SyncFolders) {
+	if ok, err := dlg.ShowBrowseFolder(vm.window); err != nil {
+		return err
+	} else if !ok {
 		return nil
 	}
 
-	folder := config.SyncFolders[row]
-	switch col {
-	case 0:
-		return folder.Path
-	case 1:
-		return string(folder.SyncMode)
-	case 2:
-		return ""
-	default:
-		return nil
-	}
-}
-
-// Sort 排序
-func (m *SyncListModel) Sort(col int, order walk.SortOrder) error {
-	m.sortColumn = col
-	m.sortOrder = order
-	m.PublishRowsReset()
+	vm.syncPathEdit.SetText(dlg.FilePath)
 	return nil
-}
-
-// PublishRowsReset 通知行重置
-func (m *SyncListModel) PublishRowsReset() {
-	m.TableModelBase.PublishRowsReset()
 }

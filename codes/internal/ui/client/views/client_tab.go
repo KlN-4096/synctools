@@ -37,7 +37,6 @@ type ClientTab struct {
 	saveButton    *walk.PushButton
 	serverInfo    *walk.TextLabel
 	syncTable     *walk.TableView
-	syncModel     *walk.TableView
 
 	viewModel *viewmodels.MainViewModel
 }
@@ -90,12 +89,10 @@ func (t *ClientTab) Setup() error {
 														AssignTo: &t.syncPathEdit,
 													},
 													PushButton{
-														AssignTo: &t.browseButton,
-														Text:     "...",
-														MaxSize:  Size{Width: 60},
-														OnClicked: func() {
-															t.onBrowse()
-														},
+														AssignTo:  &t.browseButton,
+														Text:      "...",
+														MaxSize:   Size{Width: 60},
+														OnClicked: t.onBrowse,
 													},
 												},
 											},
@@ -169,7 +166,6 @@ func (t *ClientTab) Setup() error {
 									{Title: "同步模式", Width: 80},
 									{Title: "重定向到", Width: 100},
 								},
-								Model: t.syncModel,
 							},
 						},
 					},
@@ -181,10 +177,18 @@ func (t *ClientTab) Setup() error {
 	}
 
 	// 设置UI控件引用
-	t.viewModel.SetUIControls(t.connectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton, t.syncPathEdit, t.syncTable)
-
-	// 设置UI更新回调
-	t.viewModel.SetUIUpdateCallback(t.viewModel.UpdateUIState)
+	t.viewModel.SetUIControls(
+		t.connectButton,
+		t.addressEdit,
+		t.portEdit,
+		t.progressBar,
+		t.saveButton,
+		t.syncPathEdit,
+		t.browseButton,
+		t.syncButton,
+		t.syncTable,
+		t.StatusBar,
+	)
 
 	// 初始更新UI状态
 	t.viewModel.UpdateUIState()
@@ -216,6 +220,8 @@ func (t *ClientTab) onBrowse() {
 	} else if ok {
 		t.syncPathEdit.SetText(dlg.FilePath)
 	}
+	t.onSave()
+	t.viewModel.UpdateUIState()
 }
 
 //
