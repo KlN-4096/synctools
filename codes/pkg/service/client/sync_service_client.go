@@ -105,14 +105,9 @@ func (s *ClientSyncService) SetConnectionLostCallback(callback func()) {
 // -------------------- 同步管理方法 --------------------
 //
 
-// SyncFiles 同步文件
-func (s *ClientSyncService) SyncFiles(sourcePath string) error {
-	// 设置同步状态为开始
-	s.networkClient.SetSyncing(true)
-	defer s.networkClient.SetSyncing(false) // 确保同步结束时重置状态
-
-	s.SetStatus("同步中")
-	s.Logger.Info("开始同步", interfaces.Fields{
+// prepareSyncFiles 同步前的初始化准备
+func (s *ClientSyncService) prepareSyncFiles(sourcePath string) (map[string]map[string]string, map[string]map[string]string, []string, map[string]map[string]struct{}, int, error) {
+	s.Logger.Info("开始同步准备", interfaces.Fields{
 		"source_path": sourcePath,
 	})
 
@@ -122,10 +117,10 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 		s.Logger.Info("没有配置同步文件夹", interfaces.Fields{
 			"source_path": sourcePath,
 		})
-		return nil
+		return nil, nil, nil, nil, 0, nil
 	}
 
-	// 先获取所有文件夹的 MD5 信息
+	// 获取所有文件夹的 MD5 信息
 	allServerFiles := make(map[string]map[string]string)
 	allLocalFiles := make(map[string]map[string]string)
 
@@ -169,13 +164,15 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 		allServerFiles[folder] = serverFiles
 	}
 
-	// 计算需要同步的文件数量
+	// 计算需要同步的文件
 	var totalFiles, needSyncFiles, ignoredFiles, extraFiles int
 	var filesToSync []string
 	filesToDelete := make(map[string]map[string]struct{}) // 改为嵌套Map: folder -> set of files
 	var ignoredMD5s []string                              // 记录被忽略文件的MD5
+
 	for folder, serverFiles := range allServerFiles {
 		localFiles := allLocalFiles[folder]
+		filesToDelete[folder] = make(map[string]struct{})
 
 		// 检查本地多余的文件
 		for localPath := range localFiles {
@@ -188,15 +185,11 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 					"redirectedPath": redirectedPath,
 				})
 				extraFiles++
-				// 初始化文件夹的文件集合
-				if _, ok := filesToDelete[folder]; !ok {
-					filesToDelete[folder] = make(map[string]struct{})
-				}
-				filesToDelete[folder][localPath] = struct{}{} // 使用空结构体作为Set
+				filesToDelete[folder][localPath] = struct{}{}
 			}
 		}
 
-		// 检查需要同步的文件
+		// 检查需要同步的服务器文件
 		for serverPath, serverMD5 := range serverFiles {
 			// 获取重定向后的路径
 			redirectedPath := s.getRedirectedPathByConfig(serverPath, true)
@@ -233,57 +226,31 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 		"files_to_del":  filesToDelete,
 	})
 
+	return allServerFiles, allLocalFiles, filesToSync, filesToDelete, ignoredFiles, nil
+}
+
+// SyncFiles 同步文件
+func (s *ClientSyncService) SyncFiles(sourcePath string) error {
+	// 设置同步状态为开始
+	s.networkClient.SetSyncing(true)
+	defer s.networkClient.SetSyncing(false) // 确保同步结束时重置状态
+
+	s.SetStatus("同步中")
+
+	// 执行同步准备
+	_, _, filesToSync, filesToDelete, ignoredFiles, err := s.prepareSyncFiles(sourcePath)
+	if err != nil {
+		return fmt.Errorf("同步准备失败: %v", err)
+	}
+
 	// 如果没有需要同步的文件且没有需要删除的文件,直接返回
-	if needSyncFiles == 0 && extraFiles == 0 {
+	if len(filesToSync) == 0 && len(filesToDelete) == 0 {
 		s.SetStatus("无需同步")
 		s.Disconnect()
 		return nil
 	}
 
 	var totalDownloadCount, totalDeleteCount, totalFailedCount int
-
-	// 先处理需要删除的文件
-	for folder, files := range filesToDelete {
-		// 获取文件夹的同步模式
-		var mode interfaces.SyncMode
-		// 统一使用斜杠作为分隔符进行比较
-		folderSlash := filepath.ToSlash(folder)
-		for _, folderConfig := range s.Config.SyncFolders {
-			if folderConfig.Path == folderSlash {
-				mode = folderConfig.SyncMode
-				break
-			}
-		}
-
-		// 只在mirror模式下执行删除
-		if mode == interfaces.MirrorSync && len(files) > 0 {
-			s.Logger.Info("开始删除多余文件", interfaces.Fields{
-				"folder": folder,
-				"count":  len(files),
-			})
-
-			for file := range files {
-				fullPath := filepath.Join(sourcePath, folder, file)
-				if err := os.Remove(fullPath); err != nil {
-					if !os.IsNotExist(err) {
-						// 只记录非文件不存在的错误
-						s.Logger.Error("删除文件失败", interfaces.Fields{
-							"folder": folder,
-							"file":   file,
-							"error":  err,
-						})
-						totalFailedCount++
-					}
-				} else {
-					totalDeleteCount++
-					s.Logger.Info("成功删除文件", interfaces.Fields{
-						"folder": folder,
-						"file":   file,
-					})
-				}
-			}
-		}
-	}
 
 	// 处理需要同步的文件
 	for _, syncPath := range filesToSync {
@@ -344,6 +311,49 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 			"folder": folder,
 			"file":   serverPath,
 		})
+	}
+
+	// 同步完成后处理需要删除的文件
+	for folder, files := range filesToDelete {
+		// 获取文件夹的同步模式
+		var mode interfaces.SyncMode
+		// 统一使用斜杠作为分隔符进行比较
+		folderSlash := filepath.ToSlash(folder)
+		for _, folderConfig := range s.Config.SyncFolders {
+			if folderConfig.Path == folderSlash {
+				mode = folderConfig.SyncMode
+				break
+			}
+		}
+
+		// 只在mirror模式下执行删除
+		if mode == interfaces.MirrorSync && len(files) > 0 {
+			s.Logger.Info("开始删除多余文件", interfaces.Fields{
+				"folder": folder,
+				"count":  len(files),
+			})
+
+			for file := range files {
+				fullPath := filepath.Join(sourcePath, folder, file)
+				if err := os.Remove(fullPath); err != nil {
+					if !os.IsNotExist(err) {
+						// 只记录非文件不存在的错误
+						s.Logger.Error("删除文件失败", interfaces.Fields{
+							"folder": folder,
+							"file":   file,
+							"error":  err,
+						})
+						totalFailedCount++
+					}
+				} else {
+					totalDeleteCount++
+					s.Logger.Info("成功删除文件", interfaces.Fields{
+						"folder": folder,
+						"file":   file,
+					})
+				}
+			}
+		}
 	}
 
 	s.Logger.Info("同步完成", interfaces.Fields{
