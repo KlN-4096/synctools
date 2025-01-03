@@ -56,6 +56,7 @@ func NewClientTab(viewModel *viewmodels.MainViewModel) (*ClientTab, error) {
 
 // Setup 设置UI组件
 func (t *ClientTab) Setup() error {
+
 	if err := (Composite{
 		Layout: VBox{MarginsZero: true},
 		Children: []Widget{
@@ -180,7 +181,7 @@ func (t *ClientTab) Setup() error {
 	}
 
 	// 设置UI控件引用
-	t.viewModel.SetUIControls(t.connectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton, t.syncPathEdit)
+	t.viewModel.SetUIControls(t.connectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton, t.syncPathEdit, t.syncTable)
 
 	// 设置UI更新回调
 	t.viewModel.SetUIUpdateCallback(t.viewModel.UpdateUIState)
@@ -280,3 +281,7 @@ func (t *ClientTab) onSync() {
 		})
 	}()
 }
+
+//
+// -------------------- UI 更新方法 --------------------
+//

@@ -44,7 +44,6 @@ type ConfigViewModel struct {
 	configTable     interfaces.TableViewIface
 	configList      *ConfigListModel
 	redirectTable   interfaces.TableViewIface
-	redirectList    *RedirectListModel
 	syncFolderTable interfaces.TableViewIface
 	syncFolderList  *SyncFolderListModel
 	statusBar       *walk.StatusBarItem
@@ -76,7 +75,6 @@ func NewConfigViewModel(syncService interfaces.ServerSyncService, logger interfa
 
 	// 创建列表模型
 	vm.configList = NewConfigListModel(syncService, logger)
-	vm.redirectList = NewRedirectListModel(syncService, logger)
 	vm.syncFolderList = NewSyncFolderListModel(syncService, logger)
 
 	return vm
@@ -687,63 +685,6 @@ func (m *ConfigListModel) PublishRowsReset() {
 		"after_rows": len(m.cachedConfigs),
 		"configs":    m.cachedConfigs,
 	})
-}
-
-// RedirectListModel 重定向列表模型
-type RedirectListModel struct {
-	walk.TableModelBase
-	syncService   interfaces.SyncService
-	logger        interfaces.Logger
-	currentConfig *interfaces.Config
-}
-
-// NewRedirectListModel 创建新的重定向列表模型
-func NewRedirectListModel(syncService interfaces.SyncService, logger interfaces.Logger) *RedirectListModel {
-	return &RedirectListModel{
-		syncService: syncService,
-		logger:      logger,
-	}
-}
-
-// refreshCache 刷新缓存
-func (m *RedirectListModel) refreshCache() {
-	m.currentConfig = m.syncService.GetCurrentConfig()
-}
-
-// RowCount 返回行数
-func (m *RedirectListModel) RowCount() int {
-	if m.currentConfig == nil {
-		m.refreshCache()
-	}
-	if m.currentConfig == nil {
-		return 0
-	}
-	return len(m.currentConfig.FolderRedirects)
-}
-
-// Value 获取单元格值
-func (m *RedirectListModel) Value(row, col int) interface{} {
-	if m.currentConfig == nil {
-		m.refreshCache()
-	}
-	if m.currentConfig == nil || row < 0 || row >= len(m.currentConfig.FolderRedirects) {
-		return nil
-	}
-
-	redirect := m.currentConfig.FolderRedirects[row]
-	switch col {
-	case 0:
-		return redirect.ServerPath
-	case 1:
-		return redirect.ClientPath
-	}
-	return nil
-}
-
-// PublishRowsReset 重置行并刷新缓存
-func (m *RedirectListModel) PublishRowsReset() {
-	m.refreshCache()
-	m.TableModelBase.PublishRowsReset()
 }
 
 // SyncFolderListModel 同步文件夹列表模型

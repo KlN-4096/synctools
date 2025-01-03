@@ -48,6 +48,10 @@ type MainViewModel struct {
 	syncButton       *walk.PushButton
 	syncPathEdit     *walk.LineEdit
 
+	// 表格组件
+	syncTable interfaces.TableViewIface
+	syncList  *SyncListModel
+
 	serverInfo *walk.TextLabel
 	StatusBar  *walk.StatusBarItem
 
@@ -68,6 +72,9 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 		serverPort:  "9527",
 		syncPath:    "",
 	}
+
+	// 创建表格模型
+	vm.syncList = NewSyncListModel(syncService, logger)
 
 	// 从配置中读取服务器地址和端口
 	if syncService != nil {
@@ -135,13 +142,27 @@ func (vm *MainViewModel) Shutdown() error {
 //
 
 // SetUIControls 设置UI控件引用
-func (vm *MainViewModel) SetUIControls(connectBtn *walk.PushButton, addrEdit, portEdit *walk.LineEdit, progress *walk.ProgressBar, saveBtn *walk.PushButton, syncPathEdit *walk.LineEdit) {
+func (vm *MainViewModel) SetUIControls(
+	connectBtn *walk.PushButton,
+	addrEdit, portEdit *walk.LineEdit,
+	progress *walk.ProgressBar,
+	saveBtn *walk.PushButton,
+	syncPathEdit *walk.LineEdit,
+	syncTable interfaces.TableViewIface,
+) {
 	vm.connectButton = connectBtn
 	vm.addressEdit = addrEdit
 	vm.portEdit = portEdit
 	vm.progressBar = progress
 	vm.saveButton = saveBtn
 	vm.syncPathEdit = syncPathEdit
+	vm.syncTable = syncTable
+
+	// 设置表格模型
+	if vm.syncTable != nil {
+		vm.syncTable.SetModel(vm.syncList)
+	}
+
 	vm.UpdateUIState()
 }
 
@@ -208,6 +229,11 @@ func (vm *MainViewModel) UpdateUIState() {
 			if !isConnected {
 				vm.progressBar.SetValue(0)
 			}
+		}
+
+		// 更新表格
+		if vm.syncTable != nil {
+			vm.syncList.PublishRowsReset()
 		}
 
 		// 调用自定义UI更新回调
@@ -340,4 +366,93 @@ func (vm *MainViewModel) parsePort() int {
 		return 0
 	}
 	return port
+}
+
+//
+// -------------------- 表格模型实现 --------------------
+//
+
+// SyncListModel 同步列表模型
+type SyncListModel struct {
+	walk.TableModelBase
+	syncService interfaces.ClientSyncService
+	logger      interfaces.Logger
+	sortColumn  int
+	sortOrder   walk.SortOrder
+	filter      string
+}
+
+// NewSyncListModel 创建新的同步列表模型
+func NewSyncListModel(syncService interfaces.ClientSyncService, logger interfaces.Logger) *SyncListModel {
+	return &SyncListModel{
+		syncService: syncService,
+		logger:      logger,
+	}
+}
+
+// RowCount 返回行数
+func (m *SyncListModel) RowCount() int {
+	if m.syncService == nil {
+		return 0
+	}
+	config := m.syncService.GetCurrentConfig()
+	if config == nil {
+		return 0
+	}
+	return len(config.SyncFolders)
+}
+
+// ColumnCount 返回列数
+func (m *SyncListModel) ColumnCount() int {
+	return 3
+}
+
+// ColumnTitle 返回列标题
+func (m *SyncListModel) ColumnTitle(col int) string {
+	switch col {
+	case 0:
+		return "路径"
+	case 1:
+		return "同步模式"
+	case 2:
+		return "重定向路径"
+	default:
+		return ""
+	}
+}
+
+// Value 返回单元格值
+func (m *SyncListModel) Value(row, col int) interface{} {
+	if m.syncService == nil {
+		return nil
+	}
+	config := m.syncService.GetCurrentConfig()
+	if config == nil || row >= len(config.SyncFolders) {
+		return nil
+	}
+
+	folder := config.SyncFolders[row]
+	switch col {
+	case 0:
+		return folder.Path
+	case 1:
+		return string(folder.SyncMode)
+	case 2:
+		return ""
+	default:
+		return nil
+	}
+}
+
+// Sort 排序
+func (m *SyncListModel) Sort(col int, order walk.SortOrder) error {
+	m.sortColumn = col
+	m.sortOrder = order
+	m.PublishRowsReset()
+	return nil
+}
+
+// PublishRowsReset 通知行重置
+func (m *SyncListModel) PublishRowsReset() {
+	m.TableModelBase.PublishRowsReset()
 }
