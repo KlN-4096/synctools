@@ -37,54 +37,9 @@ type ClientTab struct {
 	saveButton    *walk.PushButton
 	serverInfo    *walk.TextLabel
 	syncTable     *walk.TableView
-	syncModel     *SyncFolderModel
+	syncModel     *walk.TableView
 
 	viewModel *viewmodels.MainViewModel
-}
-
-//
-// -------------------- 表格模型方法 --------------------
-//
-
-// SyncFolderModel 同步文件夹表格模型
-type SyncFolderModel struct {
-	walk.TableModelBase
-	items []SyncFolderItem
-}
-
-// SyncFolderItem 同步文件夹表格项
-type SyncFolderItem struct {
-	Path       string
-	Mode       string
-	RedirectTo string
-}
-
-// NewSyncFolderModel 创建新的表格模型
-func NewSyncFolderModel() *SyncFolderModel {
-	return &SyncFolderModel{}
-}
-
-// RowCount 获取行数
-func (m *SyncFolderModel) RowCount() int {
-	return len(m.items)
-}
-
-// Value 获取单元格值
-func (m *SyncFolderModel) Value(row, col int) interface{} {
-	if row < 0 || row >= len(m.items) {
-		return nil
-	}
-
-	item := m.items[row]
-	switch col {
-	case 0:
-		return item.Path
-	case 1:
-		return item.Mode
-	case 2:
-		return item.RedirectTo
-	}
-	return nil
 }
 
 //
@@ -95,18 +50,12 @@ func (m *SyncFolderModel) Value(row, col int) interface{} {
 func NewClientTab(viewModel *viewmodels.MainViewModel) (*ClientTab, error) {
 	tab := &ClientTab{
 		viewModel: viewModel,
-		syncModel: NewSyncFolderModel(),
 	}
 	return tab, nil
 }
 
 // Setup 设置UI组件
 func (t *ClientTab) Setup() error {
-	// 确保表格模型已初始化
-	if t.syncModel == nil {
-		t.syncModel = NewSyncFolderModel()
-	}
-
 	if err := (Composite{
 		Layout: VBox{MarginsZero: true},
 		Children: []Widget{
@@ -127,16 +76,10 @@ func (t *ClientTab) Setup() error {
 											Label{Text: "服务器地址:"},
 											LineEdit{
 												AssignTo: &t.addressEdit,
-												OnTextChanged: func() {
-													t.viewModel.SetServerAddr(t.addressEdit.Text())
-												},
 											},
 											Label{Text: "端口:"},
 											LineEdit{
 												AssignTo: &t.portEdit,
-												OnTextChanged: func() {
-													t.viewModel.SetServerPort(t.portEdit.Text())
-												},
 											},
 											Label{Text: "同步目录:"},
 											Composite{
@@ -144,9 +87,6 @@ func (t *ClientTab) Setup() error {
 												Children: []Widget{
 													LineEdit{
 														AssignTo: &t.syncPathEdit,
-														OnTextChanged: func() {
-															t.viewModel.SetSyncPath(t.syncPathEdit.Text())
-														},
 													},
 													PushButton{
 														AssignTo: &t.browseButton,
@@ -243,10 +183,10 @@ func (t *ClientTab) Setup() error {
 	t.viewModel.SetUIControls(t.connectButton, t.addressEdit, t.portEdit, t.progressBar, t.saveButton, t.syncPathEdit)
 
 	// 设置UI更新回调
-	t.viewModel.SetUIUpdateCallback(t.UpdateUI)
+	t.viewModel.SetUIUpdateCallback(t.viewModel.UpdateUIState)
 
 	// 初始更新UI状态
-	t.UpdateUI()
+	t.viewModel.UpdateUIState()
 
 	return nil
 }
@@ -336,108 +276,7 @@ func (t *ClientTab) onSync() {
 
 		// 更新UI
 		t.Form().Synchronize(func() {
-			t.UpdateUI()
+			t.viewModel.UpdateUIState()
 		})
 	}()
-}
-
-//
-// -------------------- UI 更新方法 --------------------
-//
-
-// UpdateUI 更新界面状态
-func (t *ClientTab) UpdateUI() {
-	// 更新地址和端口
-	if t.addressEdit != nil {
-		t.addressEdit.SetText(t.viewModel.GetServerAddr())
-	}
-	if t.portEdit != nil {
-		t.portEdit.SetText(t.viewModel.GetServerPort())
-	}
-	if t.syncPathEdit != nil {
-		t.syncPathEdit.SetText(t.viewModel.GetSyncPath())
-	}
-
-	// 更新按钮状态
-	isConnected := t.viewModel.IsConnected()
-	if t.connectButton != nil {
-		if isConnected {
-			t.connectButton.SetText("断开连接")
-		} else {
-			t.connectButton.SetText("连接服务器")
-		}
-	}
-	if t.saveButton != nil {
-		t.saveButton.SetEnabled(!isConnected)
-	}
-	if t.browseButton != nil {
-		t.browseButton.SetEnabled(!isConnected)
-	}
-	if t.syncButton != nil {
-		t.syncButton.SetEnabled(isConnected)
-	}
-
-	// 更新输入框状态
-	if t.addressEdit != nil {
-		t.addressEdit.SetEnabled(!isConnected)
-	}
-	if t.portEdit != nil {
-		t.portEdit.SetEnabled(!isConnected)
-	}
-	if t.syncPathEdit != nil {
-		t.syncPathEdit.SetEnabled(!isConnected)
-	}
-
-	// 更新服务器信息
-	if t.serverInfo != nil {
-		if isConnected {
-			config := t.viewModel.GetCurrentConfig()
-			if config != nil {
-				t.serverInfo.SetText(fmt.Sprintf("服务器信息: %s (v%s)", config.Name, config.Version))
-			} else {
-				t.serverInfo.SetText("已连接")
-			}
-		} else {
-			t.serverInfo.SetText("未连接到服务器")
-		}
-	}
-
-	// 更新状态栏
-	if t.StatusBar != nil {
-		if isConnected {
-			t.StatusBar.SetText(fmt.Sprintf("已连接到 %s:%s", t.viewModel.GetServerAddr(), t.viewModel.GetServerPort()))
-		} else {
-			t.StatusBar.SetText("未连接")
-		}
-	}
-
-	// 更新同步文件夹表格
-	if t.syncModel != nil && t.syncTable != nil {
-		if isConnected {
-			config := t.viewModel.GetCurrentConfig()
-			if config != nil {
-				items := make([]SyncFolderItem, 0)
-				for _, folder := range config.SyncFolders {
-					item := SyncFolderItem{
-						Path: folder.Path,
-						Mode: string(folder.SyncMode),
-					}
-					// 查找重定向配置
-					for _, redirect := range config.FolderRedirects {
-						if redirect.ServerPath == folder.Path {
-							item.RedirectTo = redirect.ClientPath
-							break
-						}
-					}
-					items = append(items, item)
-				}
-				t.syncModel.items = items
-				t.syncTable.SetModel(t.syncModel)
-				t.syncModel.PublishRowsReset()
-			}
-		} else {
-			t.syncModel.items = nil
-			t.syncModel.PublishRowsReset()
-		}
-	}
 }

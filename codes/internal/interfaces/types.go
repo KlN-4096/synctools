@@ -2,7 +2,6 @@ package interfaces
 
 import (
 	"encoding/json"
-	"net"
 	"time"
 )
 
@@ -211,45 +210,4 @@ type FileDataChunk struct {
 // CompressOptionsImpl represents compress options implementation
 type CompressOptionsImpl struct {
 	IgnoreList []string `json:"ignore_list"` // 忽略文件列表
-}
-
-// GetIgnoreList implements CompressOptions interface
-func (o *CompressOptionsImpl) GetIgnoreList() []string {
-	return o.IgnoreList
-}
-
-// SetIgnoreList implements CompressOptions interface
-func (o *CompressOptionsImpl) SetIgnoreList(ignoreList []string) {
-	o.IgnoreList = ignoreList
-}
-
-// AddIgnorePattern implements CompressOptions interface
-func (o *CompressOptionsImpl) AddIgnorePattern(pattern string) {
-	o.IgnoreList = append(o.IgnoreList, pattern)
-}
-
-// RemoveIgnorePattern implements CompressOptions interface
-func (o *CompressOptionsImpl) RemoveIgnorePattern(pattern string) {
-	var newList []string
-	for _, p := range o.IgnoreList {
-		if p != pattern {
-			newList = append(newList, p)
-		}
-	}
-	o.IgnoreList = newList
-}
-
-// MessageSender 消息发送器接口
-type MessageSender interface {
-	// SendMessage 发送消息到指定连接
-	SendMessage(conn net.Conn, msgType string, uuid string, payload interface{}) error
-
-	// ReceiveMessage 从连接接收消息
-	ReceiveMessage(conn net.Conn) (*Message, error)
-
-	// SendFile 发送文件
-	SendFile(conn net.Conn, uuid string, path string, progress chan<- Progress) error
-
-	// ReceiveFile 接收文件
-	ReceiveFile(conn net.Conn, destDir string, progress chan<- Progress) error
 }

@@ -4,6 +4,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	"github.com/lxn/walk"
 )
 
 // ConfigManager 定义配置管理的核心接口
@@ -179,4 +181,26 @@ type ClientSyncService interface {
 
 	// 同步操作
 	SyncFiles(path string) error
+}
+
+// TableViewIface 定义 TableView 接口
+type TableViewIface interface {
+	Model() interface{}
+	SetModel(model interface{}) error
+	CurrentIndex() int
+	Width() int
+	Columns() *walk.TableViewColumnList
+	SetEnabled(enabled bool)
+}
+
+// LineEditIface 定义 LineEdit 接口
+type LineEditIface interface {
+	Text() string
+	SetText(text string) error
+	SetEnabled(enabled bool)
+}
+
+// EnabledSetter 定义可设置启用状态的接口
+type EnabledSetter interface {
+	SetEnabled(enabled bool)
 }

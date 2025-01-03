@@ -44,7 +44,12 @@ type MainViewModel struct {
 	portEdit         *walk.LineEdit
 	progressBar      *walk.ProgressBar
 	saveButton       *walk.PushButton
+	browseButton     *walk.PushButton
+	syncButton       *walk.PushButton
 	syncPathEdit     *walk.LineEdit
+
+	serverInfo *walk.TextLabel
+	StatusBar  *walk.StatusBarItem
 
 	// UI 更新回调
 	onUIUpdate func()
@@ -108,7 +113,7 @@ func (vm *MainViewModel) Initialize(window *walk.MainWindow) error {
 	}
 
 	vm.logger.Debug("视图模型初始化完成", interfaces.Fields{})
-	vm.updateUIState()
+	vm.UpdateUIState()
 	return nil
 }
 
@@ -137,7 +142,7 @@ func (vm *MainViewModel) SetUIControls(connectBtn *walk.PushButton, addrEdit, po
 	vm.progressBar = progress
 	vm.saveButton = saveBtn
 	vm.syncPathEdit = syncPathEdit
-	vm.updateUIState()
+	vm.UpdateUIState()
 }
 
 // SetUIUpdateCallback 设置UI更新回调
@@ -145,8 +150,8 @@ func (vm *MainViewModel) SetUIUpdateCallback(callback func()) {
 	vm.onUIUpdate = callback
 }
 
-// updateUIState 更新UI状态
-func (vm *MainViewModel) updateUIState() {
+// UpdateUIState 更新UI状态
+func (vm *MainViewModel) UpdateUIState() {
 	if vm.window == nil {
 		vm.logger.Debug("窗口未初始化，跳过UI更新", interfaces.Fields{})
 		return
@@ -160,30 +165,42 @@ func (vm *MainViewModel) updateUIState() {
 	vm.window.Synchronize(func() {
 		isConnected := vm.IsConnected()
 		// 更新连接按钮状态
-		if vm.connectButton != nil {
-			if isConnected {
-				vm.connectButton.SetText("断开连接")
-				vm.connectButton.SetEnabled(true)
-			} else {
-				vm.connectButton.SetText("连接服务器")
-				vm.connectButton.SetEnabled(true)
-			}
+		if isConnected {
+			vm.connectButton.SetText("断开连接")
+			vm.StatusBar.SetText(fmt.Sprintf("已连接到 %s:%s", vm.serverAddr, vm.serverPort))
+		} else {
+			vm.connectButton.SetText("连接服务器")
+			vm.StatusBar.SetText("未连接")
 		}
+
+		// 更新输入框值
+		vm.addressEdit.SetText(vm.serverAddr)
+		vm.portEdit.SetText(vm.serverPort)
+		vm.syncPathEdit.SetText(vm.syncPath)
 
 		// 更新输入框状态
-		if vm.addressEdit != nil {
-			vm.addressEdit.SetEnabled(!isConnected)
-		}
-		if vm.portEdit != nil {
-			vm.portEdit.SetEnabled(!isConnected)
-		}
-		if vm.syncPathEdit != nil {
-			vm.syncPathEdit.SetEnabled(!isConnected)
-		}
+		vm.addressEdit.SetEnabled(!isConnected)
+		vm.portEdit.SetEnabled(!isConnected)
+		vm.syncPathEdit.SetEnabled(!isConnected)
 
 		// 更新保存按钮状态
-		if vm.saveButton != nil {
-			vm.saveButton.SetEnabled(!isConnected)
+		vm.connectButton.SetEnabled(!isConnected)
+		vm.saveButton.SetEnabled(!isConnected)
+		vm.browseButton.SetEnabled(!isConnected)
+		vm.syncButton.SetEnabled(isConnected)
+
+		// 更新服务器信息
+		if vm.serverInfo != nil {
+			if isConnected {
+				config := vm.GetCurrentConfig()
+				if config != nil {
+					vm.serverInfo.SetText(fmt.Sprintf("服务器信息: %s (v%s)", config.Name, config.Version))
+				} else {
+					vm.serverInfo.SetText("已连接")
+				}
+			} else {
+				vm.serverInfo.SetText("未连接到服务器")
+			}
 		}
 
 		// 更新进度条状态
@@ -239,47 +256,6 @@ func (vm *MainViewModel) GetCurrentConfig() *interfaces.Config {
 	return vm.syncService.GetCurrentConfig()
 }
 
-// SetServerAddr 设置服务器地址
-func (vm *MainViewModel) SetServerAddr(addr string) {
-	vm.logger.Debug("设置服务器地址", interfaces.Fields{
-		"oldAddr": vm.serverAddr,
-		"newAddr": addr,
-	})
-	vm.serverAddr = addr
-}
-
-// GetServerAddr 获取服务器地址
-func (vm *MainViewModel) GetServerAddr() string {
-	return vm.serverAddr
-}
-
-// SetServerPort 设置服务器端口
-func (vm *MainViewModel) SetServerPort(port string) {
-	vm.logger.Debug("设置服务器端口", interfaces.Fields{
-		"oldPort": vm.serverPort,
-		"newPort": port,
-	})
-	vm.serverPort = port
-}
-
-// GetServerPort 获取服务器端口
-func (vm *MainViewModel) GetServerPort() string {
-	return vm.serverPort
-}
-
-// SetSyncPath 设置同步路径
-func (vm *MainViewModel) SetSyncPath(path string) {
-	vm.logger.Debug("设置同步路径", interfaces.Fields{
-		"path": path,
-	})
-	vm.syncPath = path
-}
-
-// GetSyncPath 获取同步路径
-func (vm *MainViewModel) GetSyncPath() string {
-	return vm.syncPath
-}
-
 //
 // -------------------- 连接管理方法 --------------------
 //
@@ -312,14 +288,14 @@ func (vm *MainViewModel) Connect() error {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
 
-	vm.updateUIState()
+	vm.UpdateUIState()
 	return nil
 }
 
 // Disconnect 断开连接
 func (vm *MainViewModel) Disconnect() error {
 	vm.syncService.Disconnect()
-	vm.updateUIState()
+	vm.UpdateUIState()
 	return nil
 }
 
@@ -331,7 +307,7 @@ func (vm *MainViewModel) IsConnected() bool {
 // handleConnectionLost 处理连接丢失
 func (vm *MainViewModel) handleConnectionLost() {
 	vm.logger.Debug("处理连接丢失", interfaces.Fields{})
-	vm.updateUIState()
+	vm.UpdateUIState()
 }
 
 //

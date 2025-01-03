@@ -30,28 +30,6 @@ import (
 	"synctools/codes/internal/interfaces"
 )
 
-// LineEditIface 定义 LineEdit 接口
-type LineEditIface interface {
-	Text() string
-	SetText(text string) error
-	SetEnabled(enabled bool)
-}
-
-// TableViewIface 定义 TableView 接口
-type TableViewIface interface {
-	Model() interface{}
-	SetModel(model interface{}) error
-	CurrentIndex() int
-	Width() int
-	Columns() *walk.TableViewColumnList
-	SetEnabled(enabled bool)
-}
-
-// EnabledSetter 定义可设置启用状态的接口
-type EnabledSetter interface {
-	SetEnabled(enabled bool)
-}
-
 // ConfigViewModel 配置视图模型
 type ConfigViewModel struct {
 	syncService interfaces.ServerSyncService
@@ -63,20 +41,20 @@ type ConfigViewModel struct {
 
 	// UI 组件
 	window          *walk.MainWindow
-	configTable     TableViewIface
+	configTable     interfaces.TableViewIface
 	configList      *ConfigListModel
-	redirectTable   TableViewIface
+	redirectTable   interfaces.TableViewIface
 	redirectList    *RedirectListModel
-	syncFolderTable TableViewIface
+	syncFolderTable interfaces.TableViewIface
 	syncFolderList  *SyncFolderListModel
 	statusBar       *walk.StatusBarItem
 
 	// 编辑字段
-	nameEdit    LineEditIface
-	versionEdit LineEditIface
-	hostEdit    LineEditIface
-	portEdit    LineEditIface
-	syncDirEdit LineEditIface
+	nameEdit    interfaces.LineEditIface
+	versionEdit interfaces.LineEditIface
+	hostEdit    interfaces.LineEditIface
+	portEdit    interfaces.LineEditIface
+	syncDirEdit interfaces.LineEditIface
 	ignoreEdit  *walk.TextEdit
 
 	// 按钮
@@ -127,17 +105,17 @@ func (vm *ConfigViewModel) Initialize() error {
 
 // SetupUI 设置UI组件
 func (vm *ConfigViewModel) SetupUI(
-	configTable TableViewIface,
-	redirectTable TableViewIface,
+	configTable interfaces.TableViewIface,
+	redirectTable interfaces.TableViewIface,
 	statusBar *walk.StatusBarItem,
-	nameEdit LineEditIface,
-	versionEdit LineEditIface,
-	hostEdit LineEditIface,
-	portEdit LineEditIface,
+	nameEdit interfaces.LineEditIface,
+	versionEdit interfaces.LineEditIface,
+	hostEdit interfaces.LineEditIface,
+	portEdit interfaces.LineEditIface,
 	browseSyncDirButton *walk.PushButton,
-	syncDirEdit LineEditIface,
+	syncDirEdit interfaces.LineEditIface,
 	ignoreEdit *walk.TextEdit,
-	syncFolderTable TableViewIface,
+	syncFolderTable interfaces.TableViewIface,
 	startServerButton *walk.PushButton,
 	saveButton *walk.PushButton,
 	newConfigButton *walk.PushButton,
@@ -213,7 +191,7 @@ func (vm *ConfigViewModel) setControlsEnabled(enabled bool, controls ...interfac
 		if control == nil {
 			continue
 		}
-		if setter, ok := control.(EnabledSetter); ok {
+		if setter, ok := control.(interfaces.EnabledSetter); ok {
 			setter.SetEnabled(enabled)
 			if btn, ok := control.(*walk.PushButton); ok {
 				vm.logger.Debug("设置控件状态", interfaces.Fields{"enabled": enabled, "type": "Button", "text": btn.Text()})
