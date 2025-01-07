@@ -186,6 +186,7 @@ func (t *ClientTab) Setup() error {
 		t.syncPathEdit,
 		t.browseButton,
 		t.syncButton,
+		t.serverInfo,
 		t.syncTable,
 		t.StatusBar,
 	)
