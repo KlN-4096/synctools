@@ -14,13 +14,14 @@ import (
 type ConfigViewModel struct {
 	syncService interfaces.ServerSyncService
 	logger      interfaces.Logger
+	window      *walk.MainWindow
+	status      string
 
 	// UI 状态
 	isEditing     bool
 	serverRunning bool // 服务器运行状态标志
 
 	// UI 组件
-	window          *walk.MainWindow
 	configTable     interfaces.TableViewIface
 	configList      *shared.TableModel
 	redirectTable   interfaces.TableViewIface
@@ -47,10 +48,17 @@ type ConfigViewModel struct {
 }
 
 // NewConfigViewModel 创建新的配置视图模型
-func NewConfigViewModel(syncService interfaces.ServerSyncService, logger interfaces.Logger) *ConfigViewModel {
+func NewConfigViewModel(syncService interfaces.SyncService, logger interfaces.Logger) *ConfigViewModel {
+	// 类型转换检查
+	serverService, ok := syncService.(interfaces.ServerSyncService)
+	if !ok {
+		panic("必须提供服务器同步服务实例")
+	}
+
 	vm := &ConfigViewModel{
-		syncService: syncService,
+		syncService: serverService,
 		logger:      logger,
+		status:      "就绪",
 	}
 
 	// 创建配置列表模型
@@ -209,4 +217,72 @@ func NewConfigViewModel(syncService interfaces.ServerSyncService, logger interfa
 	})
 
 	return vm
+}
+
+// Initialize 初始化视图模型
+func (vm *ConfigViewModel) Initialize(window *walk.MainWindow) error {
+	vm.window = window
+	vm.logger.Info("初始化配置视图模型", interfaces.Fields{
+		"status": vm.status,
+	})
+
+	// 初始化UI状态
+	vm.logger.Info("视图操作", interfaces.Fields{
+		"action": "initialize",
+		"type":   "config",
+	})
+
+	// 获取当前配置
+	cfg := vm.syncService.GetCurrentConfig()
+	if cfg == nil {
+		vm.logger.Info("配置状态", interfaces.Fields{
+			"status": "empty",
+			"reason": "no_default",
+		})
+	}
+
+	// 更新UI状态
+	vm.UpdateUI()
+	return nil
+}
+
+// LogDebug 记录调试日志
+func (vm *ConfigViewModel) LogDebug(message string) {
+	vm.logger.Debug(message, nil)
+}
+
+// LogError 记录错误日志
+func (vm *ConfigViewModel) LogError(message string, err error) {
+	vm.logger.Error(message, interfaces.Fields{
+		"error": err,
+	})
+}
+
+// showError 显示错误消息
+func (vm *ConfigViewModel) showError(title, message string) {
+	if vm.window != nil {
+		walk.MsgBox(vm.window, title, message, walk.MsgBoxIconError)
+	}
+}
+
+// GetLogger 获取日志记录器
+func (vm *ConfigViewModel) GetLogger() interfaces.Logger {
+	return vm.logger
+}
+
+// HandleWindowClosing 处理窗口关闭事件
+func (vm *ConfigViewModel) HandleWindowClosing() {
+	vm.LogDebug("窗口正在关闭")
+
+	if vm.IsServerRunning() {
+		if err := vm.StopServer(); err != nil {
+			vm.LogError("停止服务器失败", err)
+		}
+	}
+
+	if config := vm.GetCurrentConfig(); config != nil {
+		if err := vm.SaveConfig(); err != nil {
+			vm.LogError("保存配置失败", err)
+		}
+	}
 }

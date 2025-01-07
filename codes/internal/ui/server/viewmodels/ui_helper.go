@@ -11,13 +11,17 @@ import (
 
 // setControlsEnabled 设置一组控件的启用状态
 func (vm *ConfigViewModel) setControlsEnabled(enabled bool, controls ...interface{}) {
+	if vm == nil || vm.logger == nil {
+		return
+	}
+
 	for _, control := range controls {
 		if control == nil {
 			continue
 		}
 		if setter, ok := control.(interfaces.EnabledSetter); ok {
 			setter.SetEnabled(enabled)
-			if btn, ok := control.(*walk.PushButton); ok {
+			if btn, ok := control.(*walk.PushButton); ok && btn != nil {
 				vm.logger.Debug("设置控件状态", interfaces.Fields{"enabled": enabled, "type": "Button", "text": btn.Text()})
 			} else {
 				vm.logger.Debug("设置控件状态", interfaces.Fields{"enabled": enabled})
@@ -151,27 +155,6 @@ func (vm *ConfigViewModel) collectConfigFromUI() *interfaces.Config {
 	return newConfig
 }
 
-// Initialize 初始化视图模型
-func (vm *ConfigViewModel) Initialize() error {
-	vm.logger.Info("视图操作", interfaces.Fields{
-		"action": "initialize",
-		"type":   "config",
-	})
-
-	// 获取当前配置
-	cfg := vm.syncService.GetCurrentConfig()
-	if cfg == nil {
-		vm.logger.Info("配置状态", interfaces.Fields{
-			"status": "empty",
-			"reason": "no_default",
-		})
-	}
-
-	// 更新UI
-	vm.UpdateUI()
-	return nil
-}
-
 // SetupUI 设置UI组件
 func (vm *ConfigViewModel) SetupUI(
 	configTable interfaces.TableViewIface,
@@ -256,6 +239,10 @@ func (vm *ConfigViewModel) SetupUI(
 
 // UpdateUI 更新 UI 显示
 func (vm *ConfigViewModel) UpdateUI() {
+	if vm == nil || vm.logger == nil {
+		return
+	}
+
 	vm.logger.Info("视图操作", interfaces.Fields{
 		"action": "update",
 		"type":   "config",
@@ -272,6 +259,8 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 根据服务器运行状态设置编辑控件的启用状态
 	editEnabled := !vm.serverRunning
+
+	// 安全地设置控件状态
 	vm.setControlsEnabled(editEnabled,
 		vm.nameEdit,
 		vm.versionEdit,
@@ -291,7 +280,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 	)
 
 	// 更新配置表格
-	if vm.configTable != nil {
+	if vm.configTable != nil && vm.configList != nil {
 		vm.configList.RefreshCache()
 		vm.configTable.SetModel(nil)
 		vm.configTable.SetModel(vm.configList)
@@ -303,7 +292,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 	}
 
 	// 更新同步文件夹表格
-	if vm.syncFolderTable != nil {
+	if vm.syncFolderTable != nil && vm.syncFolderList != nil {
 		vm.syncFolderList.RefreshCache()
 		vm.syncFolderTable.SetModel(nil)
 		vm.syncFolderTable.SetModel(vm.syncFolderList)
@@ -314,21 +303,24 @@ func (vm *ConfigViewModel) UpdateUI() {
 		})
 	}
 
-	// 更新基本信息
-	vm.logger.Debug("更新基本信息", interfaces.Fields{
-		"name":     cfg.Name,
-		"version":  cfg.Version,
-		"host":     cfg.Host,
-		"port":     cfg.Port,
-		"sync_dir": cfg.SyncDir,
-	})
+	// 安全地更新基本信息
+	if vm.nameEdit != nil && vm.versionEdit != nil && vm.hostEdit != nil &&
+		vm.portEdit != nil && vm.syncDirEdit != nil && vm.ignoreEdit != nil {
+		vm.logger.Debug("更新基本信息", interfaces.Fields{
+			"name":     cfg.Name,
+			"version":  cfg.Version,
+			"host":     cfg.Host,
+			"port":     cfg.Port,
+			"sync_dir": cfg.SyncDir,
+		})
 
-	vm.nameEdit.SetText(cfg.Name)
-	vm.versionEdit.SetText(cfg.Version)
-	vm.hostEdit.SetText(cfg.Host)
-	vm.portEdit.SetText(strconv.Itoa(cfg.Port))
-	vm.syncDirEdit.SetText(cfg.SyncDir)
-	vm.ignoreEdit.SetText(strings.Join(cfg.IgnoreList, "\n"))
+		vm.nameEdit.SetText(cfg.Name)
+		vm.versionEdit.SetText(cfg.Version)
+		vm.hostEdit.SetText(cfg.Host)
+		vm.portEdit.SetText(strconv.Itoa(cfg.Port))
+		vm.syncDirEdit.SetText(cfg.SyncDir)
+		vm.ignoreEdit.SetText(strings.Join(cfg.IgnoreList, "\n"))
+	}
 
 	// 更新按钮状态
 	vm.updateButtonStates()

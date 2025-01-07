@@ -56,81 +56,59 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 获取日志服务
+	// 设置日志记录器
 	logger := c.GetLogger()
-	logger.SetLevel(interfaces.DEBUG)
-	logger.Info("服务状态变更", interfaces.Fields{
-		"status":   "starting",
-		"base_dir": baseDir,
+	logger.Info("服务器启动", interfaces.Fields{
+		"baseDir": baseDir,
 	})
 
-	// 加载配置（如果有）
+	// 加载配置
 	cfg, err := loadOrCreateConfig(c, configFile)
 	if err != nil {
-		logger.Error("配置加载失败", interfaces.Fields{
-			"error": err,
+		logger.Error("加载配置失败", interfaces.Fields{
+			"error": err.Error(),
 		})
 		os.Exit(1)
 	}
 
-	// 初始化所有服务
+	// 初始化服务
 	if err := c.InitializeServices(baseDir, cfg); err != nil {
-		logger.Error("服务初始化失败", interfaces.Fields{
-			"error": err,
+		logger.Error("初始化服务失败", interfaces.Fields{
+			"error": err.Error(),
 		})
 		os.Exit(1)
 	}
 
-	// 创建主视图模型
-	mainViewModel := viewmodels.NewMainViewModel(c.GetSyncService().(interfaces.ServerSyncService), logger)
+	// 获取同步服务
+	syncService := c.GetSyncService()
+	if syncService == nil {
+		logger.Error("获取同步服务失败", nil)
+		os.Exit(1)
+	}
 
-	// 创建退出通道
-	exitChan := make(chan struct{})
+	// 创建视图模型
+	viewModel := viewmodels.NewConfigViewModel(syncService, logger)
 
-	// 创建并运行主窗口（在新的 goroutine 中）
-	go func() {
-		if err := windows.CreateMainWindow(mainViewModel); err != nil {
-			logger.Error("窗口创建失败", interfaces.Fields{
-				"error": err,
-			})
-			os.Exit(1)
-		}
-		// 窗口关闭时发送退出信号
-		close(exitChan)
-	}()
+	// 创建主窗口
+	mainWindow, err := windows.NewMainWindow(viewModel)
+	if err != nil {
+		logger.Error("创建主窗口失败", interfaces.Fields{
+			"error": err.Error(),
+		})
+		os.Exit(1)
+	}
 
-	// 等待中断信号或窗口关闭
+	// 设置信号处理
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		viewModel.HandleWindowClosing()
+		os.Exit(0)
+	}()
 
-	select {
-	case <-sigChan:
-		logger.Info("服务状态变更", interfaces.Fields{
-			"status": "interrupted",
-			"reason": "signal",
-		})
-	case <-exitChan:
-		logger.Info("服务状态变更", interfaces.Fields{
-			"status": "interrupted",
-			"reason": "window_closed",
-		})
-	}
-
-	// 优雅关闭
-	logger.Info("服务状态变更", interfaces.Fields{
-		"status": "stopping",
-	})
-
-	if err := c.Shutdown(); err != nil {
-		logger.Error("服务关闭失败", interfaces.Fields{
-			"error": err,
-		})
-	}
-
-	logger.Info("服务状态变更", interfaces.Fields{
-		"status": "stopped",
-	})
-	os.Exit(0)
+	// 运行主窗口
+	mainWindow.Run()
 }
 
 // loadOrCreateConfig 加载或创建默认配置

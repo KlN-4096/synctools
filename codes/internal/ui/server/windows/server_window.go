@@ -28,75 +28,30 @@ import (
 )
 
 // handleWindowClosing 处理窗口关闭事件
-func handleWindowClosing(viewModel *viewmodels.MainViewModel) {
+func handleWindowClosing(viewModel *viewmodels.ConfigViewModel) {
 	// 安全检查
 	if viewModel == nil {
 		return
 	}
-
-	// 记录关闭事件
-	viewModel.LogDebug("窗口正在关闭")
-
-	// 如果服务器正在运行，尝试停止它
-	if viewModel.ConfigViewModel != nil && viewModel.ConfigViewModel.IsServerRunning() {
-		if err := viewModel.ConfigViewModel.StopServer(); err != nil {
-			// 记录错误但继续关闭过程
-			viewModel.LogError("停止服务器失败", err)
-		}
-	}
-
-	// 保存配置（如果有选中的配置）
-	if viewModel.ConfigViewModel != nil {
-		if config := viewModel.ConfigViewModel.GetCurrentConfig(); config != nil {
-			if err := viewModel.ConfigViewModel.SaveConfig(); err != nil {
-				// 记录错误但继续关闭过程
-				viewModel.LogError("保存配置失败", err)
-			}
-		} else {
-			viewModel.LogDebug("没有选中的配置，跳过保存")
-		}
-	}
-
-	viewModel.LogDebug("应用程序正在退出")
+	viewModel.HandleWindowClosing()
 }
 
-// CreateMainWindow 创建主窗口
-func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
-	// 设置panic处理
-	defer func() {
-		if r := recover(); r != nil {
-			if err, ok := r.(error); ok {
-				viewModel.LogError("程序崩溃", err)
-			} else {
-				viewModel.LogError("程序崩溃", fmt.Errorf("%v", r))
-			}
-			// 打印堆栈信息
-			debug.PrintStack()
-		}
-	}()
-
-	viewModel.LogDebug("开始创建主窗口")
+// NewMainWindow 创建主窗口
+func NewMainWindow(viewModel *viewmodels.ConfigViewModel) (*walk.MainWindow, error) {
+	var mainWindow *walk.MainWindow
+	var configTab *views.ConfigTab
+	var statusBar *walk.StatusBarItem
 
 	// 创建配置标签页
-	viewModel.LogDebug("正在创建配置标签页")
-	configTab, err := views.NewConfigTab(viewModel.ConfigViewModel)
+	configTab, err := views.NewConfigTab(viewModel)
 	if err != nil {
-		viewModel.LogError("创建配置标签页失败", err)
-		return err
+		return nil, fmt.Errorf("创建配置标签页失败: %v", err)
 	}
-	if configTab == nil {
-		viewModel.LogError("配置标签页为空", nil)
-		return fmt.Errorf("配置标签页为空")
-	}
-	viewModel.LogDebug("配置标签页创建成功")
 
-	var mainWindow *walk.MainWindow
-
-	// 设置窗口属性
-	viewModel.LogDebug("正在创建主窗口")
+	// 设置窗口布局
 	if err := (declarative.MainWindow{
 		AssignTo: &mainWindow,
-		Title:    "同步工具",
+		Title:    "同步工具 - 服务端",
 		MinSize:  declarative.Size{Width: 800, Height: 600},
 		Size:     declarative.Size{Width: 1024, Height: 768},
 		Layout:   declarative.VBox{},
@@ -158,8 +113,10 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 			},
 		},
 		Children: []declarative.Widget{
+			// 配置标签页
 			declarative.TabWidget{
 				Pages: []declarative.TabPage{
+					// 配置页面
 					{
 						AssignTo: &configTab.TabPage,
 						Title:    "配置",
@@ -170,46 +127,47 @@ func CreateMainWindow(viewModel *viewmodels.MainViewModel) error {
 		},
 		StatusBarItems: []declarative.StatusBarItem{
 			{
-				AssignTo: &configTab.StatusBar,
+				AssignTo: &statusBar,
 				Text:     "就绪",
 				Width:    200,
 			},
 		},
 	}.Create()); err != nil {
-		viewModel.LogError("创建窗口失败", err)
-		return err
+		return nil, fmt.Errorf("创建主窗口失败: %v", err)
 	}
-	if mainWindow == nil {
-		viewModel.LogError("主窗口为空", nil)
-		return fmt.Errorf("主窗口为空")
+
+	// 设置配置标签页
+	if err := configTab.Setup(); err != nil {
+		return nil, fmt.Errorf("设置配置标签页失败: %v", err)
 	}
-	viewModel.LogDebug("主窗口创建成功")
 
 	// 初始化视图模型
-	viewModel.LogDebug("正在初始化视图模型")
 	if err := viewModel.Initialize(mainWindow); err != nil {
-		viewModel.LogError("初始化视图模型失败", err)
-		return err
+		return nil, fmt.Errorf("初始化视图模型失败: %v", err)
 	}
-	viewModel.LogDebug("视图模型初始化成功")
 
-	// 设置配置标签页的UI
-	viewModel.LogDebug("正在设置配置标签页UI")
-	if err := configTab.Setup(); err != nil {
-		viewModel.LogError("设置配置标签页UI失败", err)
-		return err
-	}
-	viewModel.LogDebug("配置标签页UI设置成功")
-
-	// 设置关闭事件处理
+	// 设置窗口关闭处理函数
 	mainWindow.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		handleWindowClosing(viewModel)
 	})
 
-	// 显示窗口
-	viewModel.LogDebug("正在显示主窗口")
-	mainWindow.Run()
-	return nil
+	// 设置异常处理函数
+	defer func() {
+		if r := recover(); r != nil {
+			viewModel.LogError("发生严重错误", fmt.Errorf("%v\n%s", r, debug.Stack()))
+			walk.MsgBox(mainWindow, "错误", fmt.Sprintf("发生严重错误: %v", r), walk.MsgBoxIconError)
+		}
+	}()
+
+	// 在所有UI组件都初始化完成后，再添加大小改变事件
+	mainWindow.SizeChanged().Attach(func() {
+		// 确保所有组件都已初始化
+		if viewModel != nil && configTab != nil && configTab.TabPage != nil {
+			viewModel.UpdateUI()
+		}
+	})
+
+	return mainWindow, nil
 }
 
 // ShowError 显示错误对话框
