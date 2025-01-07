@@ -218,7 +218,7 @@ func (vm *MainViewModel) UpdateUIState() {
 		vm.syncPathEdit.SetEnabled(!isConnected)
 
 		// 更新保存按钮状态
-		vm.connectButton.SetEnabled(!isConnected)
+		// vm.connectButton.SetEnabled(!isConnected)
 		vm.saveButton.SetEnabled(!isConnected)
 		vm.browseButton.SetEnabled(!isConnected)
 		vm.syncButton.SetEnabled(isConnected)
@@ -245,18 +245,24 @@ func (vm *MainViewModel) UpdateUIState() {
 		}
 
 		// 更新表格
-		if vm.syncTable != nil && vm.syncList != nil {
-			config := vm.GetCurrentConfig()
-			if config != nil {
-				rows := make([]interface{}, len(config.SyncFolders))
-				for i, folder := range config.SyncFolders {
-					rows[i] = &folder
-				}
-				vm.syncList.SetRows(rows)
-			} else {
-				vm.syncList.SetRows(nil)
-			}
+
+		// 更新配置表格
+		if vm.syncTable != nil {
+			vm.syncTable.SetModel(nil)
+			vm.syncTable.SetModel(vm.syncList)
 		}
+		// if vm.syncTable != nil && vm.syncList != nil {
+		// 	config := vm.GetCurrentConfig()
+		// 	if config != nil {
+		// 		rows := make([]interface{}, len(config.SyncFolders))
+		// 		for i, folder := range config.SyncFolders {
+		// 			rows[i] = &folder
+		// 		}
+		// 		vm.syncList.SetRows(rows)
+		// 	} else {
+		// 		vm.syncList.SetRows(nil)
+		// 	}
+		// }
 
 		// 调用自定义UI更新回调
 		if vm.onUIUpdate != nil {
