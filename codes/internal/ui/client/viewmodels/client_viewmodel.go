@@ -107,6 +107,50 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 				return nil
 			},
 		},
+	}, syncService, logger)
+
+	// 设置数据源
+	vm.syncList.SetDataSource(func() []interface{} {
+		config := vm.GetCurrentConfig()
+		if config == nil {
+			return nil
+		}
+		rows := make([]interface{}, len(config.SyncFolders))
+		for i := range config.SyncFolders {
+			rows[i] = &config.SyncFolders[i]
+		}
+		return rows
+	})
+
+	// 设置排序函数
+	vm.syncList.SetCompareSource(func(i, j int) bool {
+		rows := vm.syncList.GetRows()
+		if rows == nil {
+			return false
+		}
+		a, ok1 := rows[i].(*interfaces.SyncFolder)
+		b, ok2 := rows[j].(*interfaces.SyncFolder)
+		if !ok1 || !ok2 {
+			return false
+		}
+
+		col, order := vm.syncList.GetSortInfo()
+		var less bool
+		switch col {
+		case 0: // 路径
+			less = a.Path < b.Path
+		case 1: // 同步模式
+			less = string(a.SyncMode) < string(b.SyncMode)
+		case 2: // 状态
+			less = a.IsEnabled && !b.IsEnabled
+		default:
+			return false
+		}
+
+		if order == walk.SortDescending {
+			return !less
+		}
+		return less
 	})
 
 	// 设置连接丢失回调
@@ -218,7 +262,6 @@ func (vm *MainViewModel) UpdateUIState() {
 		vm.syncPathEdit.SetEnabled(!isConnected)
 
 		// 更新保存按钮状态
-		// vm.connectButton.SetEnabled(!isConnected)
 		vm.saveButton.SetEnabled(!isConnected)
 		vm.browseButton.SetEnabled(!isConnected)
 		vm.syncButton.SetEnabled(isConnected)
@@ -245,24 +288,9 @@ func (vm *MainViewModel) UpdateUIState() {
 		}
 
 		// 更新表格
-
-		// 更新配置表格
 		if vm.syncTable != nil {
-			vm.syncTable.SetModel(nil)
-			vm.syncTable.SetModel(vm.syncList)
+			vm.syncList.RefreshCache()
 		}
-		// if vm.syncTable != nil && vm.syncList != nil {
-		// 	config := vm.GetCurrentConfig()
-		// 	if config != nil {
-		// 		rows := make([]interface{}, len(config.SyncFolders))
-		// 		for i, folder := range config.SyncFolders {
-		// 			rows[i] = &folder
-		// 		}
-		// 		vm.syncList.SetRows(rows)
-		// 	} else {
-		// 		vm.syncList.SetRows(nil)
-		// 	}
-		// }
 
 		// 调用自定义UI更新回调
 		if vm.onUIUpdate != nil {

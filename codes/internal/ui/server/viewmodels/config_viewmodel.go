@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/lxn/walk"
 
 	"synctools/codes/internal/interfaces"
+	"synctools/codes/internal/ui/shared"
 )
 
 // ConfigViewModel 配置视图模型
@@ -42,10 +42,10 @@ type ConfigViewModel struct {
 	// UI 组件
 	window          *walk.MainWindow
 	configTable     interfaces.TableViewIface
-	configList      *ConfigListModel
+	configList      *shared.TableModel
 	redirectTable   interfaces.TableViewIface
 	syncFolderTable interfaces.TableViewIface
-	syncFolderList  *SyncFolderListModel
+	syncFolderList  *shared.TableModel
 	statusBar       *walk.StatusBarItem
 
 	// 编辑字段
@@ -73,9 +73,160 @@ func NewConfigViewModel(syncService interfaces.ServerSyncService, logger interfa
 		logger:      logger,
 	}
 
-	// 创建列表模型
-	vm.configList = NewConfigListModel(syncService, logger)
-	vm.syncFolderList = NewSyncFolderListModel(syncService, logger)
+	// 创建配置列表模型
+	vm.configList = shared.NewTableModel([]shared.TableColumn{
+		{
+			Title: "名称",
+			Width: 150,
+			Value: func(row interface{}) interface{} {
+				if config, ok := row.(*interfaces.Config); ok {
+					return config.Name
+				}
+				return nil
+			},
+		},
+		{
+			Title: "版本",
+			Width: 100,
+			Value: func(row interface{}) interface{} {
+				if config, ok := row.(*interfaces.Config); ok {
+					return config.Version
+				}
+				return nil
+			},
+		},
+		{
+			Title: "同步目录",
+			Width: 200,
+			Value: func(row interface{}) interface{} {
+				if config, ok := row.(*interfaces.Config); ok {
+					return config.SyncDir
+				}
+				return nil
+			},
+		},
+	}, syncService, logger)
+
+	// 设置配置列表数据源
+	vm.configList.SetDataSource(func() []interface{} {
+		configs, err := vm.syncService.ListConfigs()
+		if err != nil {
+			vm.logger.Error("获取配置列表失败", interfaces.Fields{
+				"error": err.Error(),
+			})
+			return nil
+		}
+
+		// 只保留服务器配置
+		serverConfigs := make([]interface{}, 0)
+		for _, config := range configs {
+			if config.Type == interfaces.ConfigTypeServer {
+				serverConfigs = append(serverConfigs, config)
+			}
+		}
+		return serverConfigs
+	})
+
+	// 设置配置列表排序函数
+	vm.configList.SetCompareSource(func(i, j int) bool {
+		rows := vm.configList.GetRows()
+		if rows == nil {
+			return false
+		}
+		a, ok1 := rows[i].(*interfaces.Config)
+		b, ok2 := rows[j].(*interfaces.Config)
+		if !ok1 || !ok2 {
+			return false
+		}
+
+		col, order := vm.configList.GetSortInfo()
+		var less bool
+		switch col {
+		case 0: // 名称
+			less = a.Name < b.Name
+		case 1: // 版本
+			less = a.Version < b.Version
+		case 2: // 同步目录
+			less = a.SyncDir < b.SyncDir
+		default:
+			return false
+		}
+
+		if order == walk.SortDescending {
+			return !less
+		}
+		return less
+	})
+
+	// 创建同步文件夹列表模型
+	vm.syncFolderList = shared.NewTableModel([]shared.TableColumn{
+		{
+			Title: "文件夹名称",
+			Width: 150,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					return folder.Path
+				}
+				return nil
+			},
+		},
+		{
+			Title: "同步模式",
+			Width: 100,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					return string(folder.SyncMode)
+				}
+				return nil
+			},
+		},
+		{
+			Title: "重定向路径",
+			Width: 200,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					config := vm.GetCurrentConfig()
+					if config != nil {
+						for _, redirect := range config.FolderRedirects {
+							if redirect.ServerPath == folder.Path {
+								return redirect.ClientPath
+							}
+						}
+					}
+				}
+				return ""
+			},
+		},
+		{
+			Title: "是否有效",
+			Width: 80,
+			Value: func(row interface{}) interface{} {
+				if folder, ok := row.(*interfaces.SyncFolder); ok {
+					config := vm.GetCurrentConfig()
+					if config != nil {
+						if _, err := os.Stat(filepath.Join(config.SyncDir, folder.Path)); os.IsNotExist(err) {
+							return "×"
+						}
+						return "√"
+					}
+				}
+				return "?"
+			},
+		},
+	}, syncService, logger)
+
+	// 设置同步文件夹列表数据源
+	vm.syncFolderList.SetDataSource(func() []interface{} {
+		config := vm.GetCurrentConfig()
+		if config == nil {
+			return nil
+		}
+		rows := make([]interface{}, len(config.SyncFolders))
+		for i := range config.SyncFolders {
+			rows[i] = &config.SyncFolders[i]
+		}
+		return rows
+	})
 
 	return vm
 }
@@ -238,10 +389,9 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 更新配置表格
 	if vm.configTable != nil {
-		vm.configList.refreshCache()
+		vm.configList.RefreshCache()
 		vm.configTable.SetModel(nil)
 		vm.configTable.SetModel(vm.configList)
-		vm.configList.PublishRowsReset()
 	} else {
 		vm.logger.Warn("UI状态", interfaces.Fields{
 			"component": "config_table",
@@ -251,10 +401,9 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 更新同步文件夹表格
 	if vm.syncFolderTable != nil {
-		vm.syncFolderList.refreshCache()
+		vm.syncFolderList.RefreshCache()
 		vm.syncFolderTable.SetModel(nil)
 		vm.syncFolderTable.SetModel(vm.syncFolderList)
-		vm.syncFolderList.PublishRowsReset()
 	} else {
 		vm.logger.Warn("UI状态", interfaces.Fields{
 			"component": "sync_folder_table",
@@ -536,248 +685,6 @@ func (vm *ConfigViewModel) BrowseSyncDir() error {
 	return nil
 }
 
-// ConfigListModel 配置列表模型
-type ConfigListModel struct {
-	walk.TableModelBase
-	syncService   interfaces.SyncService
-	logger        interfaces.Logger
-	sortColumn    int
-	sortOrder     walk.SortOrder
-	filter        string
-	cachedConfigs []*interfaces.Config
-}
-
-// NewConfigListModel 创建新的配置列表模型
-func NewConfigListModel(syncService interfaces.SyncService, logger interfaces.Logger) *ConfigListModel {
-	model := &ConfigListModel{
-		syncService: syncService,
-		logger:      logger,
-		sortColumn:  -1,
-	}
-	// 初始加载配置
-	model.refreshCache()
-	return model
-}
-
-func (m *ConfigListModel) refreshCache() {
-	m.logger.Debug("开始刷新配置缓存", nil)
-	configs, err := m.syncService.ListConfigs()
-	if err != nil {
-		m.cachedConfigs = nil
-		m.logger.Error("刷新配置缓存失败", interfaces.Fields{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	m.logger.Debug("获取配置列表", interfaces.Fields{
-		"total_count": len(configs),
-	})
-
-	// 只保留服务器配置
-	serverConfigs := make([]*interfaces.Config, 0)
-	for _, config := range configs {
-		if config.Type == interfaces.ConfigTypeServer {
-			serverConfigs = append(serverConfigs, config)
-		} else {
-		}
-	}
-	m.cachedConfigs = serverConfigs
-}
-
-// RowCount 返回行数
-func (m *ConfigListModel) RowCount() int {
-	count := len(m.cachedConfigs)
-	m.logger.Debug("获取行数", interfaces.Fields{
-		"count": count,
-	})
-	return count
-}
-
-// ColumnCount 返回列数
-func (m *ConfigListModel) ColumnCount() int {
-	m.logger.Debug("获取列数", interfaces.Fields{
-		"count": 3,
-	})
-	return 3 // 名称、版本、同步目录
-}
-
-// ColumnTitle 返回列标题
-func (m *ConfigListModel) ColumnTitle(col int) string {
-	var title string
-	switch col {
-	case 0:
-		title = "名称"
-	case 1:
-		title = "版本"
-	case 2:
-		title = "同步目录"
-	}
-	m.logger.Debug("获取列标题", interfaces.Fields{
-		"col":   col,
-		"title": title,
-	})
-	return title
-}
-
-// Value 获取单元格值
-func (m *ConfigListModel) Value(row, col int) interface{} {
-	if row < 0 || row >= len(m.cachedConfigs) {
-		m.logger.Debug("Value: 无效的行索引", interfaces.Fields{
-			"row":       row,
-			"total_row": len(m.cachedConfigs),
-		})
-		return nil
-	}
-
-	config := m.cachedConfigs[row]
-	var value interface{}
-	switch col {
-	case 0:
-		value = config.Name
-	case 1:
-		value = config.Version
-	case 2:
-		value = config.SyncDir
-	default:
-		m.logger.Debug("Value: 无效的列索引", interfaces.Fields{
-			"col": col,
-		})
-		return nil
-	}
-	return value
-}
-
-// Sort 排序
-func (m *ConfigListModel) Sort(col int, order walk.SortOrder) error {
-	m.sortColumn = col
-	m.sortOrder = order
-
-	sort.Slice(m.cachedConfigs, func(i, j int) bool {
-		var less bool
-		switch col {
-		case 0:
-			less = m.cachedConfigs[i].Name < m.cachedConfigs[j].Name
-		case 1:
-			less = m.cachedConfigs[i].Version < m.cachedConfigs[j].Version
-		case 2:
-			less = m.cachedConfigs[i].SyncDir < m.cachedConfigs[j].SyncDir
-		}
-
-		if order == walk.SortDescending {
-			return !less
-		}
-		return less
-	})
-
-	m.PublishRowsReset()
-	return nil
-}
-
-// PublishRowsReset 重置行并刷新缓存
-func (m *ConfigListModel) PublishRowsReset() {
-	m.logger.Debug("开始刷新配置列表", interfaces.Fields{
-		"before_rows": len(m.cachedConfigs),
-	})
-	m.refreshCache()
-	m.TableModelBase.PublishRowsReset()
-	m.logger.Debug("配置列表刷新完成", interfaces.Fields{
-		"after_rows": len(m.cachedConfigs),
-		"configs":    m.cachedConfigs,
-	})
-}
-
-// SyncFolderListModel 同步文件夹列表模型
-type SyncFolderListModel struct {
-	walk.TableModelBase
-	syncService   interfaces.SyncService
-	logger        interfaces.Logger
-	currentConfig *interfaces.Config
-}
-
-// NewSyncFolderListModel 创建新的同步文件夹列表模型
-func NewSyncFolderListModel(syncService interfaces.SyncService, logger interfaces.Logger) *SyncFolderListModel {
-	return &SyncFolderListModel{
-		syncService: syncService,
-		logger:      logger,
-	}
-}
-
-// refreshCache 刷新缓存
-func (m *SyncFolderListModel) refreshCache() {
-	m.currentConfig = m.syncService.GetCurrentConfig()
-}
-
-// RowCount 返回行数
-func (m *SyncFolderListModel) RowCount() int {
-	if m.currentConfig == nil {
-		m.refreshCache()
-	}
-	if m.currentConfig == nil {
-		return 0
-	}
-	return len(m.currentConfig.SyncFolders)
-}
-
-// ColumnCount 返回列数
-func (m *SyncFolderListModel) ColumnCount() int {
-	return 4 // 文件夹名称、同步模式、重定向路径、是否有效
-}
-
-// ColumnTitle 返回列标题
-func (m *SyncFolderListModel) ColumnTitle(col int) string {
-	switch col {
-	case 0:
-		return "文件夹名称"
-	case 1:
-		return "同步模式"
-	case 2:
-		return "重定向路径"
-	case 3:
-		return "是否有效"
-	}
-	return ""
-}
-
-// Value 获取单元格值
-func (m *SyncFolderListModel) Value(row, col int) interface{} {
-	if m.currentConfig == nil {
-		m.refreshCache()
-	}
-	if m.currentConfig == nil || row < 0 || row >= len(m.currentConfig.SyncFolders) {
-		return nil
-	}
-
-	folder := m.currentConfig.SyncFolders[row]
-	switch col {
-	case 0:
-		return folder.Path
-	case 1:
-		return folder.SyncMode
-	case 2:
-		// 查找对应的重定向配置
-		for _, redirect := range m.currentConfig.FolderRedirects {
-			if redirect.ServerPath == folder.Path {
-				return redirect.ClientPath
-			}
-		}
-		return ""
-	case 3:
-		// 检查文件夹是否存在
-		if _, err := os.Stat(filepath.Join(m.currentConfig.SyncDir, folder.Path)); os.IsNotExist(err) {
-			return "×"
-		}
-		return "√"
-	}
-	return nil
-}
-
-// PublishRowsReset 重置行并刷新缓存
-func (m *SyncFolderListModel) PublishRowsReset() {
-	m.refreshCache()
-	m.TableModelBase.PublishRowsReset()
-}
-
 // GetCurrentConfig 获取当前配置
 func (vm *ConfigViewModel) GetCurrentConfig() *interfaces.Config {
 	return vm.syncService.GetCurrentConfig()
@@ -919,8 +826,7 @@ func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 	}
 
 	// 刷新配置列表
-	vm.configList.refreshCache()
-	vm.configList.PublishRowsReset()
+	vm.configList.RefreshCache()
 	vm.UpdateUI()
 
 	return nil
@@ -932,8 +838,7 @@ func (vm *ConfigViewModel) DeleteConfig(uuid string) error {
 		return err
 	}
 	// 刷新配置列表
-	vm.configList.refreshCache()
-	vm.configList.PublishRowsReset()
+	vm.configList.RefreshCache()
 	vm.UpdateUI()
 	return nil
 }
