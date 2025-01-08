@@ -62,105 +62,6 @@ func (c *NetworkClient) Connect(addr, port string) error {
 	c.connected = true
 	c.lastActive = time.Now()
 
-	// 发送初始化消息
-	config := c.syncService.GetCurrentConfig()
-
-	// 获取所有同步文件夹的MD5列表
-	md5Map := make(map[string]map[string]string)
-	for _, folder := range config.SyncFolders {
-		localFiles, err := c.syncService.GetLocalFilesWithMD5(folder.Path)
-		if err != nil {
-			c.logger.Error("获取本地文件MD5失败", interfaces.Fields{
-				"folder": folder.Path,
-				"error":  err,
-			})
-			continue
-		}
-		md5Map[folder.Path] = localFiles
-	}
-
-	initData := struct {
-		UUID   string                       `json:"uuid"`
-		MD5Map map[string]map[string]string `json:"md5_map"`
-	}{
-		UUID:   config.UUID,
-		MD5Map: md5Map,
-	}
-
-	if err := c.msgSender.SendMessage(conn, "init", config.UUID, initData); err != nil {
-		c.Disconnect()
-		return fmt.Errorf("发送初始化消息失败: %v", err)
-	}
-
-	// 等待初始化响应
-	msg, err := c.msgSender.ReceiveMessage(conn)
-	if err != nil {
-		c.Disconnect()
-		return fmt.Errorf("接收初始化响应失败: %v", err)
-	}
-
-	if msg.Type != "init_response" {
-		c.Disconnect()
-		return fmt.Errorf("收到意外的响应类型: %s", msg.Type)
-	}
-
-	var response struct {
-		Success bool                         `json:"success"`
-		Message string                       `json:"message"`
-		Config  *interfaces.Config           `json:"config"`
-		MD5Map  map[string]map[string]string `json:"md5_map"`
-	}
-
-	if err := json.Unmarshal(msg.Payload, &response); err != nil {
-		c.Disconnect()
-		return fmt.Errorf("解析响应失败: %v", err)
-	}
-
-	if !response.Success {
-		c.Disconnect()
-		return fmt.Errorf("服务器拒绝连接: %s", response.Message)
-	}
-
-	// 保存服务器配置
-	if err := c.syncService.SaveServerConfig(response.Config); err != nil {
-		c.logger.Error("保存服务器配置失败", interfaces.Fields{
-			"error": err,
-		})
-	}
-
-	// 比对MD5但不自动同步
-	for folder, serverFiles := range response.MD5Map {
-		localFiles, err := c.syncService.GetLocalFilesWithMD5(folder)
-		if err != nil {
-			c.logger.Error("获取本地文件MD5失败", interfaces.Fields{
-				"folder": folder,
-				"error":  err,
-			})
-			continue
-		}
-
-		// 使用CompareMD5方法比较文件
-		filesToSync, filesToDelete, ignoredFiles, err := c.syncService.CompareMD5(localFiles, serverFiles)
-		if err != nil {
-			c.logger.Error("比较文件MD5失败", interfaces.Fields{
-				"folder": folder,
-				"error":  err,
-			})
-			continue
-		}
-
-		c.logger.Info("文件比较结果", interfaces.Fields{
-			"folder":        folder,
-			"need_sync":     len(filesToSync),
-			"need_delete":   len(filesToDelete),
-			"ignored_files": ignoredFiles,
-		})
-	}
-
-	c.logger.Debug("连接初始化成功", interfaces.Fields{
-		"config": response.Config,
-	})
-
 	// 启动无操作检测
 	go c.monitorInactivity()
 	return nil
@@ -283,4 +184,30 @@ func isTimeout(err error) bool {
 		return netErr.Timeout()
 	}
 	return false
+}
+
+// SendInitMessage 发送初始化消息并接收响应
+func (c *NetworkClient) SendInitMessage(initData interface{}) (*interfaces.Config, map[string]map[string]string, error) {
+	// 发送初始化消息
+	if err := c.SendData("init", initData); err != nil {
+		return nil, nil, fmt.Errorf("发送初始化消息失败: %v", err)
+	}
+
+	// 接收服务器响应
+	var response struct {
+		Success bool                         `json:"success"`
+		Message string                       `json:"message"`
+		Config  *interfaces.Config           `json:"config"`
+		MD5Map  map[string]map[string]string `json:"md5_map"`
+	}
+
+	if err := c.ReceiveData(&response); err != nil {
+		return nil, nil, fmt.Errorf("接收初始化响应失败: %v", err)
+	}
+
+	if !response.Success {
+		return nil, nil, fmt.Errorf("服务器拒绝连接: %s", response.Message)
+	}
+
+	return response.Config, response.MD5Map, nil
 }

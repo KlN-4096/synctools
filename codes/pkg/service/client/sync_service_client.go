@@ -27,6 +27,11 @@ type ClientSyncService struct {
 	networkClient *client.NetworkClient
 	syncBase      *base.ClientSyncBase
 	onConnLost    func() // 添加回调字段
+
+	// MD5比较结果
+	filesToSync   []string                       // 需要同步的文件列表
+	filesToDelete map[string]map[string]struct{} // 需要删除的文件映射
+	ignoredFiles  int                            // 被忽略的文件数量
 }
 
 // NewClientSyncService 创建客户端同步服务
@@ -34,6 +39,7 @@ func NewClientSyncService(config *interfaces.Config, logger interfaces.Logger, s
 	baseService := base.NewBaseSyncService(config, logger, storage)
 	srv := &ClientSyncService{
 		BaseSyncService: baseService,
+		filesToDelete:   make(map[string]map[string]struct{}),
 	}
 	srv.networkClient = client.NewNetworkClient(logger, srv)
 	srv.syncBase = base.NewClientSyncBase(baseService, srv.networkClient)
@@ -46,6 +52,17 @@ func (s *ClientSyncService) Connect(addr, port string) error {
 	if err := s.networkClient.Connect(addr, port); err != nil {
 		return fmt.Errorf("连接服务器失败: %v", err)
 	}
+
+	// 执行MD5比较
+	filesToSync, filesToDelete, ignoredFiles, err := s.PrepareMD5Compare()
+	if err != nil {
+		s.networkClient.Disconnect()
+		return err
+	}
+
+	s.filesToSync = filesToSync
+	s.filesToDelete = filesToDelete
+	s.ignoredFiles = ignoredFiles
 
 	// 标记服务开始运行
 	s.Start()
@@ -91,7 +108,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	s.SetStatus("同步中")
 
 	// 如果没有需要同步的文件且没有需要删除的文件,直接返回
-	if len(filesToSync) == 0 && len(filesToDelete) == 0 {
+	if len(s.filesToSync) == 0 && len(s.filesToDelete) == 0 {
 		s.SetStatus("无需同步")
 		s.Disconnect()
 		return nil
@@ -100,7 +117,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	var totalDownloadCount, totalDeleteCount, totalFailedCount int
 
 	// 处理需要同步的文件
-	for _, syncPath := range filesToSync {
+	for _, syncPath := range s.filesToSync {
 		folder := filepath.Dir(syncPath)
 		serverPath := filepath.Base(syncPath)
 
@@ -161,7 +178,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	}
 
 	// 同步完成后处理需要删除的文件
-	for folder, files := range filesToDelete {
+	for folder, files := range s.filesToDelete {
 		// 获取文件夹的同步模式
 		var mode interfaces.SyncMode
 		// 统一使用斜杠作为分隔符进行比较
@@ -206,7 +223,7 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 	s.Logger.Info("同步完成", interfaces.Fields{
 		"downloaded": totalDownloadCount,
 		"deleted":    totalDeleteCount,
-		"skipped":    ignoredFiles,
+		"skipped":    s.ignoredFiles,
 		"failed":     totalFailedCount,
 	})
 
@@ -305,4 +322,86 @@ func (s *ClientSyncService) CompareMD5(
 	})
 
 	return filesToSync, filesToDelete, ignoredFiles, nil
+}
+
+// PrepareMD5Compare 准备并执行MD5比较
+func (s *ClientSyncService) PrepareMD5Compare() ([]string, map[string]map[string]struct{}, int, error) {
+	// 获取当前配置
+	config := s.GetCurrentConfig()
+
+	// 获取所有同步文件夹的MD5列表
+	md5Map := make(map[string]map[string]string)
+	for _, folder := range config.SyncFolders {
+		localFiles, err := s.GetLocalFilesWithMD5(folder.Path)
+		if err != nil {
+			s.Logger.Error("获取本地文件MD5失败", interfaces.Fields{
+				"folder": folder.Path,
+				"error":  err,
+			})
+			continue
+		}
+		md5Map[folder.Path] = localFiles
+	}
+
+	// 构建初始化消息
+	initData := struct {
+		UUID   string                       `json:"uuid"`
+		MD5Map map[string]map[string]string `json:"md5_map"`
+	}{
+		UUID:   config.UUID,
+		MD5Map: md5Map,
+	}
+
+	// 发送初始化消息并接收响应
+	serverConfig, serverMD5Map, err := s.networkClient.SendInitMessage(initData)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	// 保存服务器配置
+	if err := s.SaveServerConfig(serverConfig); err != nil {
+		s.Logger.Error("保存服务器配置失败", interfaces.Fields{
+			"error": err,
+		})
+	}
+
+	// 比对MD5并收集结果
+	var totalFilesToSync []string
+	totalFilesToDelete := make(map[string]map[string]struct{})
+	var totalIgnoredFiles int
+
+	for folder, serverFiles := range serverMD5Map {
+		localFiles, err := s.GetLocalFilesWithMD5(folder)
+		if err != nil {
+			s.Logger.Error("获取本地文件MD5失败", interfaces.Fields{
+				"folder": folder,
+				"error":  err,
+			})
+			continue
+		}
+
+		// 使用CompareMD5方法比较文件
+		filesToSync, filesToDelete, ignoredFiles, err := s.CompareMD5(localFiles, serverFiles)
+		if err != nil {
+			s.Logger.Error("比较文件MD5失败", interfaces.Fields{
+				"folder": folder,
+				"error":  err,
+			})
+			continue
+		}
+
+		// 收集结果
+		totalFilesToSync = append(totalFilesToSync, filesToSync...)
+		totalFilesToDelete[folder] = filesToDelete
+		totalIgnoredFiles += ignoredFiles
+
+		s.Logger.Info("文件比较结果", interfaces.Fields{
+			"folder":        folder,
+			"need_sync":     len(filesToSync),
+			"need_delete":   len(filesToDelete),
+			"ignored_files": ignoredFiles,
+		})
+	}
+
+	return totalFilesToSync, totalFilesToDelete, totalIgnoredFiles, nil
 }
