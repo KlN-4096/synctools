@@ -197,22 +197,24 @@ func (m *TableModel) SetRows(rows []interface{}) {
 // RefreshCache 刷新缓存
 func (m *TableModel) RefreshCache() {
 	if m.logger != nil {
-		m.logger.Debug("开始刷新缓存", interfaces.Fields{
-			"before_count": len(m.cache),
-		})
+		m.logger.Debug("开始刷新缓存", interfaces.Fields{})
 	}
 
+	// 完全重置数据
 	if m.dataSource != nil {
-		m.SetRows(m.dataSource())
+		m.rows = m.dataSource()
+		m.cache = make([]interface{}, len(m.rows))
+		copy(m.cache, m.rows)
 	} else {
-		m.rows = make([]interface{}, len(m.cache))
-		copy(m.rows, m.cache)
-		m.PublishRowsReset()
+		m.rows = nil
+		m.cache = nil
 	}
+
+	m.PublishRowsReset()
 
 	if m.logger != nil {
 		m.logger.Debug("缓存刷新完成", interfaces.Fields{
-			"after_count": len(m.rows),
+			"count": len(m.rows),
 		})
 	}
 }
@@ -311,4 +313,14 @@ func (m *TableModel) GetRows() []interface{} {
 // GetCache 获取缓存的所有行数据
 func (m *TableModel) GetCache() []interface{} {
 	return m.cache
+}
+
+// ForceRefresh 强制刷新表格显示
+func (m *TableModel) ForceRefresh() {
+	// 先刷新数据
+	m.RefreshCache()
+	// 强制重绘
+	m.PublishRowsChanged(0, m.RowCount())
+	// 再次通知更新
+	m.PublishRowsReset()
 }

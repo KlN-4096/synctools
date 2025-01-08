@@ -281,7 +281,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 更新配置表格
 	if vm.configTable != nil && vm.configList != nil {
-		vm.configList.RefreshCache()
+		vm.configList.ForceRefresh()
 		vm.configTable.SetModel(nil)
 		vm.configTable.SetModel(vm.configList)
 	} else {
@@ -293,7 +293,7 @@ func (vm *ConfigViewModel) UpdateUI() {
 
 	// 更新同步文件夹表格
 	if vm.syncFolderTable != nil && vm.syncFolderList != nil {
-		vm.syncFolderList.RefreshCache()
+		vm.syncFolderList.ForceRefresh()
 		vm.syncFolderTable.SetModel(nil)
 		vm.syncFolderTable.SetModel(vm.syncFolderList)
 	} else {

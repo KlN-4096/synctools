@@ -109,10 +109,8 @@ func (vm *MainViewModel) UpdateUIState() {
 
 		// 更新表格
 		if vm.syncTable != nil {
-			// 先刷新数据源缓存
-			vm.syncList.RefreshCache()
-			// 通知UI更新
-			vm.syncList.PublishRowsReset()
+			// 强制刷新
+			vm.syncList.ForceRefresh()
 		}
 
 		// 调用自定义UI更新回调

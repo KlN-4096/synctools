@@ -238,6 +238,7 @@ func (t *ClientTab) onConnectOrDisconnect() {
 			walk.MsgBox(t.Form(), "错误", "连接服务器失败: "+err.Error(), walk.MsgBoxIconError)
 		}
 	}
+	t.viewModel.UpdateUIState()
 }
 
 //

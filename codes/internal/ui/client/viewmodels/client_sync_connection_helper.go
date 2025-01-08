@@ -33,8 +33,7 @@ func (vm *MainViewModel) Connect() error {
 	vm.window.Synchronize(func() {
 		// 刷新表格数据
 		if vm.syncTable != nil {
-			vm.syncList.RefreshCache()
-			vm.syncList.PublishRowsReset()
+			vm.syncList.ForceRefresh()
 		}
 		// 更新整体UI状态
 		vm.UpdateUIState()

@@ -120,7 +120,7 @@ func (vm *ConfigViewModel) CreateConfig(name, version string) error {
 	}
 
 	// 刷新配置列表
-	vm.configList.RefreshCache()
+	vm.configList.ForceRefresh()
 	vm.UpdateUI()
 
 	return nil
@@ -332,7 +332,7 @@ func (vm *ConfigViewModel) DeleteConfig(uuid string) error {
 		return err
 	}
 	// 刷新配置列表
-	vm.configList.RefreshCache()
+	vm.configList.ForceRefresh()
 	vm.UpdateUI()
 	return nil
 }
