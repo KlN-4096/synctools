@@ -127,20 +127,6 @@ func (s *ClientSyncBase) DownloadFile(req *interfaces.SyncRequest, destPath stri
 	return nil
 }
 
-// GetSyncFolders 获取同步文件夹列表
-func (s *ClientSyncBase) GetSyncFolders() []string {
-	config := s.GetCurrentConfig()
-	if config == nil || len(config.SyncFolders) == 0 {
-		return []string{""} // 如果没有配置，返回空字符串表示根目录
-	}
-
-	folders := make([]string, len(config.SyncFolders))
-	for i, folder := range config.SyncFolders {
-		folders[i] = folder.Path
-	}
-	return folders
-}
-
 // IsSingleFile 检查是否为单个文件
 func (s *ClientSyncBase) IsSingleFile(path string) bool {
 	// 获取当前配置
@@ -154,13 +140,6 @@ func (s *ClientSyncBase) IsSingleFile(path string) bool {
 }
 
 // 其他辅助方法...
-
-// getServerFilesWithMD5WithFolder 获取服务器文件夹的MD5信息
-func (s *ClientSyncBase) getServerFilesWithMD5WithFolder(folder string) (map[string]string, error) {
-	// 由于初始化时已经获取了服务器的MD5列表，这里直接返回空映射
-	// 实际的MD5比对会在初始化响应处理时进行
-	return make(map[string]string), nil
-}
 
 func (s *ClientSyncBase) unpackFile(packFile, destPath string) error {
 	s.Logger.Info("开始解压文件", interfaces.Fields{
