@@ -96,7 +96,7 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 			Width: 200,
 			Value: func(row interface{}) interface{} {
 				if folder, ok := row.(*interfaces.SyncFolder); ok {
-					config := vm.GetCurrentConfig()
+					config, _ := vm.syncService.LoadServerConfig()
 					if config != nil {
 						for _, redirect := range config.FolderRedirects {
 							if redirect.ServerPath == folder.Path {

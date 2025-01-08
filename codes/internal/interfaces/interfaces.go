@@ -167,6 +167,9 @@ type ServerSyncService interface {
 
 	// 同步操作
 	HandleSyncRequest(request interface{}) error
+
+	// MD5操作
+	GetLocalFilesWithMD5(dir string) (map[string]string, error)
 }
 
 // ClientSyncService 客户端同步服务接口
@@ -185,6 +188,9 @@ type ClientSyncService interface {
 	// 服务器配置操作
 	SaveServerConfig(config *Config) error
 	LoadServerConfig() (*Config, error)
+
+	// MD5操作
+	GetLocalFilesWithMD5(dir string) (map[string]string, error)
 }
 
 // TableViewIface 定义 TableView 接口

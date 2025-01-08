@@ -16,8 +16,6 @@ package base
 
 import (
 	"archive/zip"
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -79,7 +77,7 @@ func (s *ClientSyncBase) PrepareSyncFiles(sourcePath string) (map[string]map[str
 		}
 
 		// 获取本地文件列表和MD5
-		localFiles, err := s.getLocalFilesWithMD5(localFolderPath)
+		localFiles, err := s.GetLocalFilesWithMD5(localFolderPath)
 		if err != nil {
 			s.Logger.Error("获取本地文件列表失败", interfaces.Fields{
 				"folder": folder,
@@ -281,146 +279,11 @@ func (s *ClientSyncBase) IsSingleFile(path string) bool {
 
 // 其他辅助方法...
 
-func (s *ClientSyncBase) getLocalFilesWithMD5(dir string) (map[string]string, error) {
-	// 检查是否是打包模式
-	for _, folder := range s.Config.SyncFolders {
-		if strings.HasSuffix(dir, folder.Path) && folder.SyncMode == interfaces.PackSync {
-			// 打包模式返回空映射
-			return make(map[string]string), nil
-		}
-	}
-
-	// 检查路径是文件还是目录
-	fileInfo, err := os.Stat(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// 如果路径不存在，返回空映射而不是错误
-			// 这样可以触发后续的同步操作
-			s.Logger.Debug("本地路径不存在，返回空映射", interfaces.Fields{
-				"path": dir,
-			})
-			return make(map[string]string), nil
-		}
-		// 其他错误则返回
-		return nil, fmt.Errorf("获取路径信息失败: %v", err)
-	}
-
-	// 如果是单个文件
-	if !fileInfo.IsDir() {
-		md5hash, err := s.calculateFileMD5(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// 如果文件不存在，返回空映射
-				return make(map[string]string), nil
-			}
-			return nil, err
-		}
-		return map[string]string{
-			filepath.Base(dir): md5hash,
-		}, nil
-	}
-
-	// 如果是目录
-	files := make(map[string]string)
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				// 如果文件不存在，跳过该文件
-				return nil
-			}
-			return err
-		}
-		if !info.IsDir() {
-			// 获取相对路径
-			relPath, err := filepath.Rel(dir, path)
-			if err != nil {
-				return err
-			}
-
-			// 检查是否需要重定向
-			config := s.GetCurrentConfig()
-			if config != nil && len(config.FolderRedirects) > 0 {
-				for _, redirect := range config.FolderRedirects {
-					// 如果本地路径包含重定向的客户端路径
-					if strings.Contains(filepath.ToSlash(relPath), redirect.ClientPath) {
-						// 将客户端路径替换为服务器路径
-						relPath = strings.Replace(filepath.ToSlash(relPath), redirect.ClientPath, redirect.ServerPath, 1)
-						break
-					}
-				}
-			}
-
-			md5hash, err := s.calculateFileMD5(path)
-			if err != nil {
-				if os.IsNotExist(err) {
-					// 如果文件不存在，跳过该文件
-					return nil
-				}
-				return err
-			}
-
-			files[relPath] = md5hash
-		}
-		return nil
-	})
-
-	if err != nil {
-		if os.IsNotExist(err) {
-			// 如果目录不存在，返回空映射
-			return make(map[string]string), nil
-		}
-		return nil, err
-	}
-
-	return files, nil
-}
-
-func (s *ClientSyncBase) calculateFileMD5(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
+// getServerFilesWithMD5WithFolder 获取服务器文件夹的MD5信息
 func (s *ClientSyncBase) getServerFilesWithMD5WithFolder(folder string) (map[string]string, error) {
-	req := &interfaces.SyncRequest{
-		Mode:      interfaces.MirrorSync,
-		Direction: interfaces.DirectionPull,
-		Path:      folder,
-	}
-
-	if err := s.networkClient.SendData("md5_request", req); err != nil {
-		return nil, fmt.Errorf("发送获取MD5请求失败: %v", err)
-	}
-
-	var resp struct {
-		Success bool              `json:"success"`
-		MD5Map  map[string]string `json:"md5_map"` // path -> md5
-		Message string            `json:"message"`
-	}
-
-	if err := s.networkClient.ReceiveData(&resp); err != nil {
-		return nil, fmt.Errorf("接收MD5列表失败: %v", err)
-	}
-
-	if !resp.Success {
-		return nil, fmt.Errorf("获取服务器MD5列表失败: %s", resp.Message)
-	}
-
-	s.Logger.Debug("获取服务器MD5列表成功", interfaces.Fields{
-		"folder": folder,
-		"count":  len(resp.MD5Map),
-	})
-
-	return resp.MD5Map, nil
+	// 由于初始化时已经获取了服务器的MD5列表，这里直接返回空映射
+	// 实际的MD5比对会在初始化响应处理时进行
+	return make(map[string]string), nil
 }
 
 func (s *ClientSyncBase) unpackFile(packFile, destPath string) error {

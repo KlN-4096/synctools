@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"time"
 
 	"synctools/codes/internal/interfaces"
@@ -64,7 +65,30 @@ func (c *NetworkClient) Connect(addr, port string) error {
 
 	// 发送初始化消息
 	config := c.syncService.GetCurrentConfig()
-	if err := c.msgSender.SendMessage(conn, "init", config.UUID, nil); err != nil {
+
+	// 获取所有同步文件夹的MD5列表
+	md5Map := make(map[string]map[string]string)
+	for _, folder := range config.SyncFolders {
+		localFiles, err := c.syncService.GetLocalFilesWithMD5(folder.Path)
+		if err != nil {
+			c.logger.Error("获取本地文件MD5失败", interfaces.Fields{
+				"folder": folder.Path,
+				"error":  err,
+			})
+			continue
+		}
+		md5Map[folder.Path] = localFiles
+	}
+
+	initData := struct {
+		UUID   string                       `json:"uuid"`
+		MD5Map map[string]map[string]string `json:"md5_map"`
+	}{
+		UUID:   config.UUID,
+		MD5Map: md5Map,
+	}
+
+	if err := c.msgSender.SendMessage(conn, "init", config.UUID, initData); err != nil {
 		c.Disconnect()
 		return fmt.Errorf("发送初始化消息失败: %v", err)
 	}
@@ -82,9 +106,10 @@ func (c *NetworkClient) Connect(addr, port string) error {
 	}
 
 	var response struct {
-		Success bool               `json:"success"`
-		Message string             `json:"message"`
-		Config  *interfaces.Config `json:"config"`
+		Success bool                         `json:"success"`
+		Message string                       `json:"message"`
+		Config  *interfaces.Config           `json:"config"`
+		MD5Map  map[string]map[string]string `json:"md5_map"`
 	}
 
 	if err := json.Unmarshal(msg.Payload, &response); err != nil {
@@ -102,6 +127,33 @@ func (c *NetworkClient) Connect(addr, port string) error {
 		c.logger.Error("保存服务器配置失败", interfaces.Fields{
 			"error": err,
 		})
+	}
+
+	// 比对MD5并自动同步
+	for folder, serverFiles := range response.MD5Map {
+		localFiles, err := c.syncService.GetLocalFilesWithMD5(folder)
+		if err != nil {
+			c.logger.Error("获取本地文件MD5失败", interfaces.Fields{
+				"folder": folder,
+				"error":  err,
+			})
+			continue
+		}
+
+		// 找出需要同步的文件
+		for path, serverMD5 := range serverFiles {
+			localMD5, exists := localFiles[path]
+			if !exists || localMD5 != serverMD5 {
+				// 触发文件同步
+				if err := c.syncService.SyncFiles(filepath.Join(folder, path)); err != nil {
+					c.logger.Error("同步文件失败", interfaces.Fields{
+						"folder": folder,
+						"file":   path,
+						"error":  err,
+					})
+				}
+			}
+		}
 	}
 
 	c.logger.Debug("连接初始化成功", interfaces.Fields{

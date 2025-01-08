@@ -1,9 +1,12 @@
 package base
 
 import (
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -269,4 +272,106 @@ func (s *BaseSyncService) ReportProgress(progress *interfaces.Progress) {
 	if s.progressCallback != nil {
 		s.progressCallback(progress)
 	}
+}
+
+// GetLocalFilesWithMD5 获取本地文件的MD5信息
+func (s *BaseSyncService) GetLocalFilesWithMD5(dir string) (map[string]string, error) {
+	// 检查路径是文件还是目录
+	fileInfo, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 如果路径不存在，返回空映射而不是错误
+			// 这样可以触发后续的同步操作
+			s.Logger.Debug("本地路径不存在，返回空映射", interfaces.Fields{
+				"path": dir,
+			})
+			return make(map[string]string), nil
+		}
+		// 其他错误则返回
+		return nil, fmt.Errorf("获取路径信息失败: %v", err)
+	}
+
+	// 如果是单个文件
+	if !fileInfo.IsDir() {
+		md5hash, err := s.calculateFileMD5(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// 如果文件不存在，返回空映射
+				return make(map[string]string), nil
+			}
+			return nil, err
+		}
+		return map[string]string{
+			filepath.Base(dir): md5hash,
+		}, nil
+	}
+
+	// 如果是目录
+	files := make(map[string]string)
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				// 如果文件不存在，跳过该文件
+				return nil
+			}
+			return err
+		}
+		if !info.IsDir() {
+			// 获取相对路径
+			relPath, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+
+			// 检查是否需要重定向
+			config := s.GetCurrentConfig()
+			if config != nil && len(config.FolderRedirects) > 0 {
+				for _, redirect := range config.FolderRedirects {
+					// 如果本地路径包含重定向的客户端路径
+					if strings.Contains(filepath.ToSlash(relPath), redirect.ClientPath) {
+						// 将客户端路径替换为服务器路径
+						relPath = strings.Replace(filepath.ToSlash(relPath), redirect.ClientPath, redirect.ServerPath, 1)
+						break
+					}
+				}
+			}
+
+			md5hash, err := s.calculateFileMD5(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					// 如果文件不存在，跳过该文件
+					return nil
+				}
+				return err
+			}
+
+			files[relPath] = md5hash
+		}
+		return nil
+	})
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 如果目录不存在，返回空映射
+			return make(map[string]string), nil
+		}
+		return nil, err
+	}
+
+	return files, nil
+}
+
+func (s *BaseSyncService) calculateFileMD5(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }

@@ -193,16 +193,46 @@ func (s *Server) HandleClient(conn net.Conn) {
 
 		switch msg.Type {
 		case "init":
-			client.UUID = msg.UUID
+			var initRequest struct {
+				UUID   string                       `json:"uuid"`
+				MD5Map map[string]map[string]string `json:"md5_map"`
+			}
+			if err := json.Unmarshal(msg.Payload, &initRequest); err != nil {
+				s.logger.Error("解析初始化请求失败", interfaces.Fields{
+					"error": err,
+					"uuid":  msg.UUID,
+				})
+				return
+			}
+
+			client.UUID = initRequest.UUID
+
+			// 获取所有同步文件夹的MD5列表
+			serverMD5Map := make(map[string]map[string]string)
+			for _, folder := range s.config.SyncFolders {
+				files, err := s.syncService.GetLocalFilesWithMD5(folder.Path)
+				if err != nil {
+					s.logger.Error("获取服务端文件MD5失败", interfaces.Fields{
+						"folder": folder.Path,
+						"error":  err,
+					})
+					continue
+				}
+				serverMD5Map[folder.Path] = files
+			}
+
 			response := struct {
-				Success bool               `json:"success"`
-				Message string             `json:"message"`
-				Config  *interfaces.Config `json:"config"`
+				Success bool                         `json:"success"`
+				Message string                       `json:"message"`
+				Config  *interfaces.Config           `json:"config"`
+				MD5Map  map[string]map[string]string `json:"md5_map"`
 			}{
 				Success: true,
 				Message: "初始化成功",
 				Config:  s.config,
+				MD5Map:  serverMD5Map,
 			}
+
 			if err := client.msgSender.SendMessage(conn, "init_response", msg.UUID, response); err != nil {
 				s.logger.Error("发送初始化响应失败", interfaces.Fields{
 					"error": err,
@@ -261,160 +291,6 @@ func (s *Server) HandleClient(conn net.Conn) {
 				"success": true,
 				"message": "同步成功",
 			})
-
-		case "md5_request":
-			go func() {
-				var syncRequest interfaces.SyncRequest
-				if err := json.Unmarshal(msg.Payload, &syncRequest); err != nil {
-					s.logger.Error("解析同步请求失败", interfaces.Fields{
-						"error": err,
-						"uuid":  msg.UUID,
-					})
-					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-						"success": false,
-						"message": fmt.Sprintf("解析同步请求失败: %v", err),
-					})
-					return
-				}
-
-				// 获取同步目录
-				syncDir := filepath.Join(s.config.SyncDir, syncRequest.Path)
-				s.logger.Debug("处理MD5请求", interfaces.Fields{
-					"folder":      syncRequest.Path,
-					"server_path": syncDir,
-				})
-
-				// 检查目录是否存在
-				if fileInfo, err := os.Stat(syncDir); err != nil {
-					if os.IsNotExist(err) {
-						s.logger.Debug("目录不存在", interfaces.Fields{
-							"path": syncDir,
-						})
-						// 返回空的MD5列表
-						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-							"success": true,
-							"md5_map": make(map[string]string),
-						})
-						return
-					}
-				} else if !fileInfo.IsDir() {
-					// 如果是单个文件，直接计算其MD5
-					file, err := os.Open(syncDir)
-					if err != nil {
-						s.logger.Error("打开文件失败", interfaces.Fields{
-							"path":  syncDir,
-							"error": err,
-						})
-						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-							"success": false,
-							"message": fmt.Sprintf("打开文件失败: %v", err),
-						})
-						return
-					}
-					defer file.Close()
-
-					hash := md5.New()
-					if _, err := io.Copy(hash, file); err != nil {
-						s.logger.Error("计算文件MD5失败", interfaces.Fields{
-							"path":  syncDir,
-							"error": err,
-						})
-						client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-							"success": false,
-							"message": fmt.Sprintf("计算文件MD5失败: %v", err),
-						})
-						return
-					}
-					md5sum := hex.EncodeToString(hash.Sum(nil))
-
-					// 使用文件名作为键
-					fileName := filepath.Base(syncRequest.Path)
-					md5Map := map[string]string{
-						fileName: md5sum,
-					}
-
-					s.logger.Info("返回文件MD5", interfaces.Fields{
-						"file": fileName,
-						"md5":  md5sum,
-					})
-
-					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-						"success": true,
-						"md5_map": md5Map,
-					})
-					return
-				}
-
-				// 获取文件列表和MD5
-				md5Map := make(map[string]string)
-				err := filepath.Walk(syncDir, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						if os.IsNotExist(err) {
-							return nil
-						}
-						return err
-					}
-
-					// 获取相对路径
-					relPath, err := filepath.Rel(syncDir, path)
-					if err != nil {
-						return err
-					}
-
-					// 如果是目录，记录它但继续遍历
-					if info.IsDir() {
-						s.logger.Debug("发现目录", interfaces.Fields{
-							"folder": syncRequest.Path,
-							"dir":    relPath,
-						})
-						return nil
-					}
-
-					// 计算文件MD5
-					file, err := os.Open(path)
-					if err != nil {
-						return err
-					}
-					defer file.Close()
-
-					hash := md5.New()
-					if _, err := io.Copy(hash, file); err != nil {
-						return err
-					}
-					md5sum := hex.EncodeToString(hash.Sum(nil))
-					md5Map[relPath] = md5sum
-
-					s.logger.Debug("计算文件MD5", interfaces.Fields{
-						"folder": syncRequest.Path,
-						"file":   relPath,
-						"md5":    md5sum,
-					})
-					return nil
-				})
-
-				if err != nil {
-					s.logger.Error("获取文件MD5失败", interfaces.Fields{
-						"folder": syncRequest.Path,
-						"error":  err,
-					})
-					client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-						"success": false,
-						"message": fmt.Sprintf("获取文件MD5失败: %v", err),
-					})
-					return
-				}
-
-				s.logger.Info("返回文件MD5列表", interfaces.Fields{
-					"folder": syncRequest.Path,
-					"count":  len(md5Map),
-					"files":  md5Map,
-				})
-
-				client.msgSender.SendMessage(conn, "data", msg.UUID, map[string]interface{}{
-					"success": true,
-					"md5_map": md5Map,
-				})
-			}()
 
 		case "file_request":
 			go func() {

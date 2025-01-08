@@ -254,3 +254,8 @@ func (s *ClientSyncService) LoadServerConfig() (*interfaces.Config, error) {
 
 	return &config, nil
 }
+
+// GetLocalFilesWithMD5 获取本地文件的MD5信息
+func (s *ClientSyncService) GetLocalFilesWithMD5(dir string) (map[string]string, error) {
+	return s.syncBase.GetLocalFilesWithMD5(dir)
+}

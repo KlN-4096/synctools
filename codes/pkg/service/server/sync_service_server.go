@@ -107,3 +107,8 @@ func (s *ServerSyncService) HandleSyncRequest(request interface{}) error {
 	}
 	return s.syncBase.HandleSyncRequest(req)
 }
+
+// GetLocalFilesWithMD5 获取本地文件的MD5信息
+func (s *ServerSyncService) GetLocalFilesWithMD5(dir string) (map[string]string, error) {
+	return s.BaseSyncService.GetLocalFilesWithMD5(dir)
+}
