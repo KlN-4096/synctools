@@ -181,6 +181,10 @@ type ClientSyncService interface {
 
 	// 同步操作
 	SyncFiles(path string) error
+
+	// 服务器配置操作
+	SaveServerConfig(config *Config) error
+	LoadServerConfig() (*Config, error)
 }
 
 // TableViewIface 定义 TableView 接口

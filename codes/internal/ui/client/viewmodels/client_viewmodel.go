@@ -112,7 +112,7 @@ func NewMainViewModel(syncService interfaces.ClientSyncService, logger interface
 
 	// 设置数据源
 	vm.syncList.SetDataSource(func() []interface{} {
-		config := vm.GetCurrentConfig()
+		config, _ := vm.syncService.LoadServerConfig()
 		if config == nil {
 			return nil
 		}

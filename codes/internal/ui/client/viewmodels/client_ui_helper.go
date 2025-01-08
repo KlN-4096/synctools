@@ -90,11 +90,12 @@ func (vm *MainViewModel) UpdateUIState() {
 		// 更新服务器信息
 		if vm.serverInfo != nil {
 			if isConnected {
-				config := vm.GetCurrentConfig()
-				if config != nil {
-					vm.serverInfo.SetText(fmt.Sprintf("服务器信息: %s (v%s)", config.Name, config.Version))
+				// 尝试加载服务器配置
+				serverConfig, err := vm.syncService.LoadServerConfig()
+				if err == nil && serverConfig != nil {
+					vm.serverInfo.SetText(fmt.Sprintf("服务器信息: %s (v%s)", serverConfig.Name, serverConfig.Version))
 				} else {
-					vm.serverInfo.SetText("已连接")
+					vm.serverInfo.SetText("服务器配置未知")
 				}
 			} else {
 				vm.serverInfo.SetText("未连接到服务器")

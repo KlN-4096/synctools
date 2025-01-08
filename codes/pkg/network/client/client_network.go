@@ -18,14 +18,14 @@ type NetworkClient struct {
 	serverPort  string
 	connected   bool
 	onConnLost  func()
-	syncService interfaces.SyncService
+	syncService interfaces.ClientSyncService
 	msgSender   *message.MessageSender
 	lastActive  time.Time // 添加最后活动时间
 	isSyncing   bool      // 添加同步状态标志
 }
 
 // NewNetworkClient 创建新的网络客户端
-func NewNetworkClient(logger interfaces.Logger, syncService interfaces.SyncService) *NetworkClient {
+func NewNetworkClient(logger interfaces.Logger, syncService interfaces.ClientSyncService) *NetworkClient {
 	return &NetworkClient{
 		logger:      logger,
 		connected:   false,
@@ -97,8 +97,8 @@ func (c *NetworkClient) Connect(addr, port string) error {
 		return fmt.Errorf("服务器拒绝连接: %s", response.Message)
 	}
 
-	// 更新本地配置
-	if err := c.syncService.SaveConfig(response.Config); err != nil {
+	// 保存服务器配置
+	if err := c.syncService.SaveServerConfig(response.Config); err != nil {
 		c.logger.Error("保存服务器配置失败", interfaces.Fields{
 			"error": err,
 		})

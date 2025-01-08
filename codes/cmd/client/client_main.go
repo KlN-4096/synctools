@@ -81,13 +81,6 @@ func main() {
 		c.GetLogger(),
 	)
 
-	// 初始化视图模型
-	if err := mainViewModel.Initialize(nil); err != nil {
-		logger.Fatal("初始化视图模型失败", interfaces.Fields{
-			"error": err,
-		})
-	}
-
 	// 创建并运行主窗口
 	if err := windows.CreateMainWindow(mainViewModel, c.GetLogger()); err != nil {
 		logger.Fatal("创建主窗口失败", interfaces.Fields{

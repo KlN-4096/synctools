@@ -225,3 +225,36 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 
 	return nil
 }
+
+// SaveServerConfig 保存服务器配置到临时目录
+func (s *ClientSyncService) SaveServerConfig(config *interfaces.Config) error {
+	if config == nil {
+		return fmt.Errorf("配置不能为空")
+	}
+
+	// 确保configs/temp目录存在
+	configDir := "configs/temp"
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("创建配置目录失败: %v", err)
+	}
+
+	// 保存到临时目录
+	configPath := filepath.Join(configDir, "server_config.json")
+	if err := s.Storage.Save(configPath, config); err != nil {
+		return fmt.Errorf("保存服务器配置失败: %v", err)
+	}
+
+	return nil
+}
+
+// LoadServerConfig 从临时目录加载服务器配置
+func (s *ClientSyncService) LoadServerConfig() (*interfaces.Config, error) {
+	configPath := filepath.Join("configs/temp", "server_config.json")
+
+	var config interfaces.Config
+	if err := s.Storage.Load(configPath, &config); err != nil {
+		return nil, fmt.Errorf("加载服务器配置失败: %v", err)
+	}
+
+	return &config, nil
+}

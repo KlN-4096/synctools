@@ -9,11 +9,6 @@ import (
 
 // Connect 连接服务器
 func (vm *MainViewModel) Connect() error {
-	if vm.IsConnected() {
-		vm.logger.Debug("已经连接到服务器", interfaces.Fields{})
-		return nil
-	}
-
 	// 保存配置
 	if err := vm.SaveConfig(); err != nil {
 		vm.logger.Error("连接前保存配置失败", interfaces.Fields{
