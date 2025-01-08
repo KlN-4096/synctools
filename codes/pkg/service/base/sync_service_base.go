@@ -375,3 +375,49 @@ func (s *BaseSyncService) calculateFileMD5(path string) (string, error) {
 
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
+
+// CompareMD5 比较本地和服务器文件的MD5，返回需要同步的文件信息
+func (s *BaseSyncService) CompareMD5(
+	localFiles map[string]string,
+	serverFiles map[string]string,
+) ([]string, map[string]struct{}, int, error) {
+	var filesToSync []string
+	filesToDelete := make(map[string]struct{})
+	var ignoredFiles int
+
+	// 检查本地多余的文件
+	for localPath := range localFiles {
+		if _, exists := serverFiles[localPath]; !exists && !s.IsIgnored(localPath) {
+			s.Logger.Debug("发现本地多余文件", interfaces.Fields{
+				"file": localPath,
+			})
+			filesToDelete[localPath] = struct{}{}
+		}
+	}
+
+	// 检查需要同步的服务器文件
+	for serverPath, serverMD5 := range serverFiles {
+		// 检查文件是否需要忽略
+		if s.IsIgnored(serverPath) {
+			s.Logger.Debug("忽略文件", interfaces.Fields{
+				"file": serverPath,
+				"md5":  serverMD5,
+			})
+			ignoredFiles++
+			continue
+		}
+
+		localMD5, exists := localFiles[serverPath]
+		if !exists || localMD5 != serverMD5 {
+			filesToSync = append(filesToSync, serverPath)
+		}
+	}
+
+	s.Logger.Info("文件对比完成", interfaces.Fields{
+		"need_sync":     len(filesToSync),
+		"ignored_files": ignoredFiles,
+		"to_delete":     len(filesToDelete),
+	})
+
+	return filesToSync, filesToDelete, ignoredFiles, nil
+}

@@ -90,12 +90,6 @@ func (s *ClientSyncService) SyncFiles(sourcePath string) error {
 
 	s.SetStatus("同步中")
 
-	// 执行同步准备
-	_, _, filesToSync, filesToDelete, ignoredFiles, err := s.syncBase.PrepareSyncFiles(sourcePath)
-	if err != nil {
-		return fmt.Errorf("同步准备失败: %v", err)
-	}
-
 	// 如果没有需要同步的文件且没有需要删除的文件,直接返回
 	if len(filesToSync) == 0 && len(filesToDelete) == 0 {
 		s.SetStatus("无需同步")
@@ -258,4 +252,57 @@ func (s *ClientSyncService) LoadServerConfig() (*interfaces.Config, error) {
 // GetLocalFilesWithMD5 获取本地文件的MD5信息
 func (s *ClientSyncService) GetLocalFilesWithMD5(dir string) (map[string]string, error) {
 	return s.syncBase.GetLocalFilesWithMD5(dir)
+}
+
+// CompareMD5 比较本地和服务器文件的MD5，返回需要同步的文件信息
+func (s *ClientSyncService) CompareMD5(
+	localFiles map[string]string,
+	serverFiles map[string]string,
+) ([]string, map[string]struct{}, int, error) {
+	var filesToSync []string
+	filesToDelete := make(map[string]struct{})
+	var ignoredFiles int
+
+	// 检查本地多余的文件
+	for localPath := range localFiles {
+		// 获取重定向后的路径
+		redirectedPath := s.syncBase.GetRedirectedPathByConfig(localPath, false)
+		if _, exists := serverFiles[redirectedPath]; !exists && !s.syncBase.IsIgnoredFile(redirectedPath) {
+			s.Logger.Debug("发现本地多余文件", interfaces.Fields{
+				"file":           localPath,
+				"redirectedPath": redirectedPath,
+			})
+			filesToDelete[localPath] = struct{}{}
+		}
+	}
+
+	// 检查需要同步的服务器文件
+	for serverPath, serverMD5 := range serverFiles {
+		// 获取重定向后的路径
+		redirectedPath := s.syncBase.GetRedirectedPathByConfig(serverPath, true)
+
+		// 检查文件是否需要忽略
+		if s.syncBase.IsIgnoredFile(redirectedPath) {
+			s.Logger.Debug("忽略文件", interfaces.Fields{
+				"file":           serverPath,
+				"redirectedPath": redirectedPath,
+				"md5":            serverMD5,
+			})
+			ignoredFiles++
+			continue
+		}
+
+		localMD5, exists := localFiles[redirectedPath]
+		if !exists || localMD5 != serverMD5 {
+			filesToSync = append(filesToSync, serverPath)
+		}
+	}
+
+	s.Logger.Info("文件对比完成", interfaces.Fields{
+		"need_sync":     len(filesToSync),
+		"ignored_files": ignoredFiles,
+		"to_delete":     len(filesToDelete),
+	})
+
+	return filesToSync, filesToDelete, ignoredFiles, nil
 }

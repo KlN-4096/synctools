@@ -191,6 +191,7 @@ type ClientSyncService interface {
 
 	// MD5操作
 	GetLocalFilesWithMD5(dir string) (map[string]string, error)
+	CompareMD5(localFiles map[string]string, serverFiles map[string]string) ([]string, map[string]struct{}, int, error)
 }
 
 // TableViewIface 定义 TableView 接口

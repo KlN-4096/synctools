@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"path/filepath"
 	"time"
 
 	"synctools/codes/internal/interfaces"
@@ -129,7 +128,7 @@ func (c *NetworkClient) Connect(addr, port string) error {
 		})
 	}
 
-	// 比对MD5并自动同步
+	// 比对MD5但不自动同步
 	for folder, serverFiles := range response.MD5Map {
 		localFiles, err := c.syncService.GetLocalFilesWithMD5(folder)
 		if err != nil {
@@ -140,20 +139,22 @@ func (c *NetworkClient) Connect(addr, port string) error {
 			continue
 		}
 
-		// 找出需要同步的文件
-		for path, serverMD5 := range serverFiles {
-			localMD5, exists := localFiles[path]
-			if !exists || localMD5 != serverMD5 {
-				// 触发文件同步
-				if err := c.syncService.SyncFiles(filepath.Join(folder, path)); err != nil {
-					c.logger.Error("同步文件失败", interfaces.Fields{
-						"folder": folder,
-						"file":   path,
-						"error":  err,
-					})
-				}
-			}
+		// 使用CompareMD5方法比较文件
+		filesToSync, filesToDelete, ignoredFiles, err := c.syncService.CompareMD5(localFiles, serverFiles)
+		if err != nil {
+			c.logger.Error("比较文件MD5失败", interfaces.Fields{
+				"folder": folder,
+				"error":  err,
+			})
+			continue
 		}
+
+		c.logger.Info("文件比较结果", interfaces.Fields{
+			"folder":        folder,
+			"need_sync":     len(filesToSync),
+			"need_delete":   len(filesToDelete),
+			"ignored_files": ignoredFiles,
+		})
 	}
 
 	c.logger.Debug("连接初始化成功", interfaces.Fields{
